@@ -14,7 +14,7 @@ test('Settings saves a waiting edit at once when it is closed or the section cha
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
     // A busy machine (the whole file in one run) can make a section slow to show, so each step waits for what it needs instead of a fixed pause.
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     const saver = async () => (await (await fetch(`${base}/api/state`)).json()).config.saver;
     const saverIs = async want => { for (let i = 0; i < 100 && await saver() !== want; i++) await page.waitForTimeout(100); return saver(); };
@@ -26,7 +26,7 @@ test('Settings saves a waiting edit at once when it is closed or the section cha
       throw new Error(`Settings did not open ${id}`);
     };
     const saverBox = page.locator('.settings-pop [name="saver"]');
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); });
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     await go('agents'); await saverBox.waitFor({ timeout: 30000 });
     await saverBox.evaluate(box => box.click());
@@ -48,7 +48,7 @@ test('Settings stays open while typing and closes on Escape', async () => {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
     await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.waitForTimeout(2500);
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     await page.locator('.settings-pop [name="name"]').click();
     await page.keyboard.type('abc'); await page.waitForTimeout(300);
     assert.equal(await page.locator('.settings-pop').count(), 1, 'typing keeps Settings open');
@@ -72,7 +72,7 @@ test('removing a test sign-in or a connection is saved', async () => {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
     await page.goto(`${base}/`); await page.waitForTimeout(2500);
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     const github = page.waitForResponse(response => response.url().includes('/api/github'));
     await page.evaluate(() => document.querySelector('[data-st-section="projects"]').click()); await github; await page.waitForTimeout(300);
     assert.equal((await config()).testAccounts.length, 1);
@@ -104,7 +104,7 @@ test('a slow first save cannot overwrite a newer edit', async () => {
     await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     await page.locator('.settings-pop [name="name"]').fill('First Name'); // autosaves, then waits on the held /autostart
     for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
     assert.ok(held, 'test setup: the first save is waiting on /autostart');
@@ -135,7 +135,7 @@ test('an edit reverted while the first save waits ends as the reverted value', a
     await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     const original = (await config()).name;
     const field = page.locator('.settings-pop [name="name"]');
     await field.fill('Changed Name');
@@ -163,7 +163,7 @@ test('an edit stays visible and stored after leaving and returning while its sav
     await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     await page.locator('.settings-pop [name="name"]').fill('Pending Name');
     for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
     assert.ok(held, 'test setup: the first save is waiting on /autostart');
@@ -200,7 +200,7 @@ test('a removed task app stays removed after leaving and returning while the sav
     await page.route('**/api/config', async route => { if (route.request().method() === 'PUT') { held = true; await gate; } await route.continue(); });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     page.on('dialog', dialog => dialog.accept());
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     await page.evaluate(() => document.querySelector('[data-st-section="connectors"]').click()); await page.waitForTimeout(800);
     assert.equal(await page.locator('.settings-pop [data-tr-remove]').count(), 2);
     await page.locator('.settings-pop [data-tr-remove]').first().evaluate(button => button.click()); await page.waitForTimeout(500);
@@ -236,7 +236,7 @@ test('the Market page opens from the sidebar, lists what agents can use, and Set
     assert.ok(await page.locator('.page.mk .mk-row').count() >= 1, 'rows once loaded (Rex Desk itself at least)');
     assert.equal(await page.locator('.page.mk .mk-bar + .mk-seg button').count(), 6, 'All, MCP, API, Skills, Commands, Hooks');
     assert.ok(await page.locator('.page.mk .mk-row .mk-tag').count() >= 1, 'every row says what it is');
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     assert.equal(await page.locator('[data-st-section="tools"]').count(), 0, 'no Tools and skills section in Settings');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
@@ -258,7 +258,7 @@ test('a Jev and voice switch change keeps the allowed actions and survives a slo
     let release = () => {};
     const gate = new Promise(done => { release = done; });
     await page.route('**/api/speak/voices', async route => { await gate; await route.continue(); });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); }); await page.waitForTimeout(600);
     await page.evaluate(() => document.querySelector('[data-st-section="jev"]').click()); await page.waitForTimeout(800);
     await page.locator('.settings-pop [name="control.agents"]').evaluate(box => box.click());
     release(); await page.waitForTimeout(1500);
@@ -271,7 +271,7 @@ test('a Jev and voice switch change keeps the allowed actions and survives a slo
 
 // Opens Settings on the Jev and voice tab and waits for its voice engine picker.
 async function openJev(page) {
-  await page.evaluate(() => document.querySelector('.rail-settings').click());
+  await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); });
   await page.locator('.settings-pop').waitFor({ timeout: 30000 });
   await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]').click());
   await page.locator('.settings-pop [data-st-tts="engine"]').waitFor({ state: 'attached', timeout: 30000 });
@@ -293,7 +293,7 @@ test('a voice save answering during a pending Jev switch change keeps the switch
   try {
     const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await openJev(page); await page.waitForTimeout(1500);
     let release = () => {}, held = false;
@@ -318,7 +318,7 @@ test('a slow voice engine load cannot overwrite a newer voice save in the cache'
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     // Open once so the cache holds the voice lists, then hold back the next load with its old answer.
     await openJev(page); await page.waitForTimeout(1500);
@@ -360,7 +360,7 @@ test('a slow voice engine load from a closed Settings window cannot overwrite a 
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     // The first window's load is held back with its old answer; later loads go through.
     let release = () => {}, held = false;
@@ -396,7 +396,7 @@ test('a late voice list answer from a closed Settings window cannot bring back t
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     // The first window's voice list is held back; later lists go through.
     let release = () => {}, held = false;
@@ -430,7 +430,7 @@ test('a voice save still out when Settings is reopened wins over the reopened wi
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await openJev(page); await page.waitForTimeout(1500);
     // The save is held before it reaches the server, so the reopened window loads the old engine.
@@ -459,7 +459,7 @@ test('voice lists cached by an earlier build are kept after an engine refresh', 
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await openJev(page); await page.waitForTimeout(1500);
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
@@ -503,9 +503,9 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     mode = 'ok'; await call('/api/sync', { sourceId: saved.source.id });
     mode = 'refuse';
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.pf-trigger').waitFor({ timeout: 120000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); });
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="connectors"]').click());
     await page.locator('.settings-pop [data-cn-add]').waitFor({ timeout: 30000 });
@@ -545,7 +545,7 @@ test('a voice engine load started during a save cannot bring the old engine back
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.pf-trigger').waitFor({ timeout: 120000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await openJev(page); await page.waitForTimeout(1500);
     let releaseSave = () => {}, releaseLoad = () => {}, saveHeld = false, loadHeld = false, saved = false;
@@ -580,7 +580,7 @@ test('a failed newer voice save does not hide an earlier save that worked', asyn
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.pf-trigger').waitFor({ timeout: 120000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await openJev(page); await page.waitForTimeout(1500);
     let release = () => {}, held = false, posts = 0;
@@ -617,9 +617,9 @@ test('a replacement OpenRouter key typed during the first save is kept and saved
       if (first) { first = false; await new Promise(resolve => { release = resolve; }); }
       return route.continue();
     });
-    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); });
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]')?.click());
@@ -646,9 +646,9 @@ test('a new OpenRouter key saved by another Jev setting change still brings the 
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
     const sent = [];
     await page.route('**/api/config', route => { if (route.request().method() === 'PUT') sent.push(JSON.parse(route.request().postData() || '{}').jev?.apiKey || ''); return route.continue(); });
-    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.pf-trigger').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
-    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.evaluate(() => { document.querySelector('[data-action="profile-toggle"]')?.click(); document.querySelector('[data-action="settings-open"]')?.click(); });
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]')?.click());

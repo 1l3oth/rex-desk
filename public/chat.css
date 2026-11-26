@@ -911,7 +911,6 @@ button.cn-main{cursor:pointer}
 .st-days input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
 .st-prompt{flex-shrink:0;max-height:260px;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:12px;white-space:pre-wrap}
 .st-x{position:absolute;top:12px;right:14px;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;padding:4px 8px;border-radius:8px}.st-x:hover{background:var(--raised);color:var(--ink)}
-.rail-settings{display:inline-flex;align-items:center;gap:6px}
 @media (max-width:760px){.dialog-back.settings{padding:0}.settings-pop{width:100vw;height:100dvh;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.st-nav{flex-direction:row;overflow-x:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.st-nav h1{display:none}.st-nav button{flex:none}.st-nav button small{display:none}.st-panel{padding:18px 16px}.st-row{grid-template-columns:1fr}}
 
 /* ---- file changes: +added −removed, and the lines in green and red ---- */
