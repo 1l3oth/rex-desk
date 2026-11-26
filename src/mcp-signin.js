@@ -230,15 +230,21 @@ export class McpSignIn {
     let answer, fail; const code = new Promise((resolve, reject) => { answer = resolve; fail = reject; });
     // Handled from the start: a failure before anyone waits on it is never left unhandled.
     code.catch(() => {});
+    // The browser's callback response is held open and answered only once the token exchange and save finish, so the tab
+    // says "Signed in" only when the sign-in really is saved, and a plain failure page when it is not.
+    let reply = null;
+    const sayTo = (response, status, text) => { if (response && !response.writableEnded) response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', connection: 'close' }).end(page(text)); };
+    const finish = (status, text) => sayTo(reply, status, text);
     const listener = http.createServer((request, response) => {
-      const say = (status, text) => response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', connection: 'close' }).end(page(text));
+      const say = (status, text) => sayTo(response, status, text);
       // A request whose address cannot be read is answered and ignored; the sign-in keeps waiting for the real one.
       let asked; try { asked = new URL(request.url, 'http://127.0.0.1'); } catch { return say(400, 'This is not the sign-in Rex Desk is waiting for. Start it again from Rex Desk.'); }
       if (asked.pathname !== '/callback') return say(404, 'Nothing here.');
       const issuer = asked.searchParams.get('iss');
       if (asked.searchParams.get('state') !== state || (issuer && issuer !== found.metadata.issuer)) return say(400, 'This is not the sign-in Rex Desk is waiting for. Start it again from Rex Desk.');
       if (!asked.searchParams.get('code')) { say(400, 'The sign-in did not finish. You can close this tab and try again from Rex Desk.'); fail(Object.assign(new Error('refused'), { errorCode: asked.searchParams.get('error') || '' })); return; }
-      say(200, 'Signed in. You can close this tab and go back to Rex Desk.');
+      // Hold this tab open: the exchange and save happen below, and only then is it told the outcome.
+      reply = response;
       answer(asked.searchParams.get('code'));
     });
     listener.on('clientError', (error, socket) => { if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n'); else socket.destroy(); });
@@ -257,10 +263,12 @@ export class McpSignIn {
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
         const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
-        if (this.waiting.get(url) !== attempt) return;
-        this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, resource: found.resource, client }, tokens));
-        this.waiting.delete(url); this.changed(url);
+        // Saved first, then the tab is told it worked: "Signed in" shows only after the sign-in is really saved.
+        if (this.waiting.get(url) === attempt) { this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, resource: found.resource, client }, tokens)); this.waiting.delete(url); this.changed(url); }
+        finish(200, 'Signed in. You can close this tab and go back to Rex Desk.');
       }).catch(error => {
+        // The sign-in did not complete: the tab gets a plain failure page, never a false "Signed in".
+        finish(200, 'Rex Desk could not finish the sign-in. Close this tab and try it again from Rex Desk.');
         if (this.waiting.get(url) !== attempt) return;
         // The reason stays on the row until the next try, in Rex Desk's own words.
         this.waiting.set(url, { error: signInError(error), link: '', cancel: () => {}, failed: true }); this.changed(url);
