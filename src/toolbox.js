@@ -266,6 +266,9 @@ export class Toolbox {
       }
       return { kind: 'skill', ...result, check };
     }
+    // Every install path (a pasted command, a bare URL, a JSON block) is checked before a single server is written, so a
+    // key too short to tell from ordinary words never reaches Claude Code's config and the pasted text is kept to be fixed.
+    for (const args of plan.calls) if (shortKey(installConfig(args))) throw new Error(KEY_TOO_SHORT);
     for (const args of plan.calls) await this.cli(args);
     const servers = this.servers(), check = [];
     for (const name of plan.names) {
@@ -480,6 +483,13 @@ function gitClone(address, target) {
 
 // "npx -y @scope/server --flag" into its parts, keeping quoted parts together.
 export const splitCommand = text => [...String(text).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
+// The server config an "mcp add" / "mcp add-json" call would write, so a key in it can be checked before it is written: the
+// JSON block itself, or the address and command-line flags of a plain add (headers, -e KEY=value, a key in the address).
+export function installConfig(args) {
+  if (args[1] === 'add-json') { try { return JSON.parse(args[args.length - 1]); } catch { return {}; } }
+  const url = args.find(part => /^https?:\/\//.test(part));
+  return { ...(url ? { url } : {}), args };
+}
 function runClaude(args) {
   const claude = resolveCommand('claude');
   return new Promise((resolve, reject) => execFile(claude.command, [...claude.args, ...args], { windowsHide: true, timeout: 60000 }, (error, stdout, stderr) => error ? reject(new Error(String(stderr || stdout || error.message).trim().split('\n')[0])) : resolve(stdout)));

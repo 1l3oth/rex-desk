@@ -149,7 +149,7 @@ export async function marketAction(ctx, action, target) {
     const box = document.querySelector('[name="mk-install"]'), text = box?.value.trim() || '';
     if (!text) { box?.focus(); return; }
     Object.assign(ui, { marketText: text, marketBusy: true, marketResult: null }); renderAll();
-    try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); ui.marketBox = result; ui.marketResult = result.check || []; ui.marketText = ''; ui.market = await api('/market'); }
+    try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); ui.marketBox = result; ui.marketResult = result.check || []; if ((result.check || []).every(item => item.ok)) ui.marketText = ''; ui.market = await api('/market'); }
     catch (error) { ui.marketResult = [{ ok: false, name: t('Install'), error: error.message }]; }
     finally { ui.marketBusy = false; renderAll(); }
     return;

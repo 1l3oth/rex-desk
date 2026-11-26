@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { McpSignIn, nodeFetch } from '../src/mcp-signin.js';
+import { Toolbox } from '../src/toolbox.js';
 
 function memoryStore() {
   const records = new Map();
@@ -43,4 +44,22 @@ test('review 81b72441 (1): nodeFetch connects to the pinned address while keepin
     assert.deepEqual(await response.json(), { ok: true });
     assert.equal(response.headers.get('x-host'), `auth.example.test:${port}`, 'the Host header keeps the real host name, not the pinned IP');
   } finally { server.close(); }
+});
+
+// L30 review 81b72441 (2): every install path (a pasted command, a bare URL, a JSON block) is checked before a server is
+// written, so a short key never reaches Claude Code's config and the pasted text can be kept and fixed.
+test('review 81b72441 (2): a short key in a pasted bare URL or command is refused before anything is written', async () => {
+  const box = new Toolbox({ home: '.', mcpConfig: () => ({}), bundled: '' });
+  const written = []; box.cli = async args => { written.push(args); };
+  await assert.rejects(() => box.install('https://h.test/mcp?token=abc'), /at least 8/, 'a bare URL with a short key');
+  await assert.rejects(() => box.install('npx -y @scope/foo-mcp --token abc'), /at least 8/, 'a command with a short key flag');
+  await assert.rejects(() => box.install('{"mcpServers":{"s":{"url":"https://h.test/mcp","headers":{"Authorization":"Bearer abc"}}}}'), /at least 8/, 'a JSON block with a short header key');
+  assert.deepEqual(written, [], 'nothing is written while a key is too short, so the pasted text is not lost');
+});
+
+test('review 81b72441 (2): a full key in a bare URL passes the check and is written', async () => {
+  const box = new Toolbox({ home: '.', mcpConfig: () => ({}), bundled: '' });
+  const written = []; box.cli = async args => { written.push(args); };
+  await box.install('https://h.test/mcp?token=abcdefgh');
+  assert.equal(written.length, 1, 'a full key is written');
 });
