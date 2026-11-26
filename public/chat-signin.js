@@ -9,6 +9,9 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const root = document.getElementById('signin');
 const TABS = [['signin', t('Sign in')], ['create', t('New account')], ['cloud', t('Bring back from backup')]];
 const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false, switching: false, provider: '', authUrl: '' };
+// What a phone's sign-out could not finish (chat-webpush.js signOutPhone), said once on the sign-in page.
+let phoneNote = '';
+try { const left = sessionStorage.getItem('rex-signout-note'); if (left) { sessionStorage.removeItem('rex-signout-note'); phoneNote = `<p class="si-note warn" role="status">${esc(left)}</p>`; } } catch { /* private mode */ }
 const ICON = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3m-4 4 3 3m-5-1 2 2"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
@@ -82,7 +85,7 @@ function drawAccount() {
     body = `${who}<h2 class="si-title">${step.title}</h2><p class="si-note">${step.note}</p>
       <form id="si-form" data-mode="${mode}">${step.fields}<button class="btn primary si-submit" type="submit">${step.submit}</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   }
-  root.innerHTML = `<section class="si-card" aria-labelledby="si-brand"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-brand">${t`Rex Desk`}</h1></div><div class="si-lang">${languagePicker(t('Language'))}</div>
+  root.innerHTML = `<section class="si-card" aria-labelledby="si-brand"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-brand">${t`Rex Desk`}</h1></div><div class="si-lang">${languagePicker(t('Language'))}</div>${phoneNote}
     ${body}</section>`;
   root.querySelector('input[type=password], select')?.focus();
   mountScene();
@@ -104,7 +107,7 @@ function drawLocal() {
     // The Rex Desk account's browser sign-in finds the backup, so no database address or key is ever typed.
     cloud: `<p class="si-note">${t`Open your account from its cloud backup (Settings, Backup and updates): after a reinstall, after this computer's data was cleared, or on a new computer. Your agents, chats, pictures and settings come back.`}</p>${state.account === 'found' ? `<p class="si-note"><b>${t`Found the backup of your Rex Desk account.`}</b> ${t`Now enter the email and password you used for it.`}</p><input type="hidden" name="account" value="1">` : `<button type="button" class="btn primary si-submit" data-account ${state.account ? 'disabled' : ''}>${state.account ? t('Waiting for you to sign in in the browser…') : t('Sign in with Rex Desk to find my backup')}</button>`}${email(state.email)}${secret(t('Password'))}${stay}<button class="btn primary si-submit" type="submit">${t`Open my account`}</button>`,
   };
-  root.innerHTML = `<section class="si-card" aria-labelledby="si-title"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-title">${t`Rex Desk`}</h1></div><div class="si-lang">${languagePicker(t('Language'))}</div>
+  root.innerHTML = `<section class="si-card" aria-labelledby="si-title"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-title">${t`Rex Desk`}</h1></div><div class="si-lang">${languagePicker(t('Language'))}</div>${phoneNote}
     ${auth.occupied ? `<p class="si-note warn">${t`${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that desk and stops its working agents.`}</p>` : ''}
     <div class="si-tabs" role="tablist">${TABS.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-tab="${key}">${label}</button>`).join('')}</div>
     <form id="si-form" data-mode="${tab}">${forms[tab]}<p class="si-error" role="alert">${esc(state.error)}</p></form></section>`;

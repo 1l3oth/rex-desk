@@ -101,8 +101,8 @@ test('nothing is asked on load; the tap asks, saves the phone, sends a test, and
   const states = []; ctx.redraw = () => states.push(webPushState.busy || webPushState.name);
   await turnOnWebPush(ctx, b.w);
   assert.deepEqual(b.calls, [['ask'], ['subscribe', true, 65]]);
-  assert.deepEqual(log, ['/notices/webpush', '/notices/webpush/phone', '/notices/webpush/test']);
-  assert.deepEqual(states, ['allow', 'save', 'test', 'on'], 'shows each step, On only at the end');
+  assert.deepEqual(log, ['/notices/webpush', '/notices/webpush/phone', '/notices/webpush/test', '/notices/webpush/phones'], 'then the phones list is asked again');
+  assert.deepEqual(states.filter((name, at) => name !== states[at - 1]), ['allow', 'save', 'test', 'on'], 'shows each step, On only at the end (the list redraws after)');
   assert.equal(b.saved.get('rex-webpush-phone'), 'phone-1');
   const html = webPushHtml(esc, '', b.w);
   assert.match(html, /On for this phone/); assert.match(html, /Send a test/); assert.match(html, /Test sent/);

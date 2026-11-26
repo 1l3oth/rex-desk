@@ -3,6 +3,7 @@ import { seeThroughHere, solidSlider } from './see-through.js';
 import { t, languagePicker } from './i18n.js';
 import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
+import { signOutPhone } from '/chat-webpush.js';
 import { voicesFor, chosenVoice, setSpeechEngine } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { skeletonHtml } from '/chat-skeleton.js';
@@ -496,7 +497,7 @@ export function openSettings(ctx, section = 'general', extra = {}) {
       }
       const open = target.closest('[data-st-open]'); if (open) { flushSave(); back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { flushSave(); back.remove(); ctx.open(go.dataset.stGo); return; }
-      if (target.closest('[data-st-signout]')) { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
+      if (target.closest('[data-st-signout]')) { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await signOutPhone(api); await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
       const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-account]')) {
         // One click: the Rex Desk sign-in opens in the browser; the account service then makes the person's database and this computer connects to it.
@@ -514,7 +515,8 @@ export function openSettings(ctx, section = 'general', extra = {}) {
       }
       if (target.closest('[data-st-account-out]')) {
         if (!await askConfirm(t('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.'))) return;
-        await api('/database/account-signout', { method: 'POST' }); toast(t('Signed out of your Rex Desk account on this computer.')); await refresh(); draw(); return;
+        const phone = await signOutPhone(api);
+        await api('/database/account-signout', { method: 'POST' }); toast(phone.left || t('Signed out of your Rex Desk account on this computer.'), Boolean(phone.left)); await refresh(); draw(); return;
       }
       if (target.closest('[data-st-plan-signin]')) {
         try { const { url } = await api('/net/sign-in', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener'); toast(t('Finish signing in in the browser. Your plan shows here by itself.')); const until = Date.now() + 5 * 60000; const look = async () => { const data = await api('/billing').catch(() => null); if (data?.signedIn) { state.extra.billing = data; draw(); return; } if (Date.now() < until) setTimeout(look, 3000); }; setTimeout(look, 3000); }

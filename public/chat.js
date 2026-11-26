@@ -21,6 +21,7 @@ import { netStage, loadNet, wireNet } from '/chat-net.js';
 import { expStage, wireExp, expTab, EXP_ICON } from '/chat-exp.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
+import { signOutPhone } from '/chat-webpush.js';
 import { inboxStage, wireInbox } from '/chat-inbox.js';
 import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
 import { maybeStartTour, startTour } from '/chat-tour.js';
@@ -88,7 +89,7 @@ async function api(path, { method = 'GET', data, retry = false, timeout = 0 } = 
   if (response.status === 401 && body.signIn) {
     const auth = retry ? null : await fetch('/api/auth', { headers: { 'x-rex-desk': '1' } }).then(reply => reply.json()).catch(() => null);
     if (auth?.current) return api(path, { method, data, retry: true });
-    location.href = '/signin'; throw new Error(t('Sign in to Rex Desk.'));
+    await signOutPhone(null).catch(() => {}); location.href = '/signin'; throw new Error(t('Sign in to Rex Desk.'));
   }
   if (!response.ok) throw new Error(body.error ? t(body.error) : t`Request failed (${response.status})`);
   return body;
@@ -876,7 +877,7 @@ document.addEventListener('click', async event => {
     else if (action === 'theme-set') { const mode = target.dataset.themeSet; window.rexTheme?.set(mode); target.parentElement?.querySelectorAll('.pf-seg').forEach(seg => { const on = seg.dataset.themeSet === mode; seg.classList.toggle('on', on); seg.setAttribute('aria-checked', String(on)); }); }
     else if (action === 'upgrade-open') openSettings(ctx, 'backup');
     else if (action === 'profile-tour') startTour(ctx);
-    else if (action === 'profile-logout') { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; }
+    else if (action === 'profile-logout') { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await signOutPhone(api); await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; }
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast(t('Agent resumed.')); await refresh(); }

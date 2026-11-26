@@ -1,7 +1,7 @@
 import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { avatarHtml } from './chat-rooms.js';
-import { webPushHtml, checkWebPush, turnOnWebPush, testWebPush, webPushState } from './chat-webpush.js';
+import { webPushHtml, checkWebPush, turnOnWebPush, testWebPush, webPushState, phonesHtml, loadPhones, removePhone, webPushList } from './chat-webpush.js';
 // Notifications: everything agents said or asked while you were elsewhere, newest first, with unread counts on each chat.
 // A new one pops up at the bottom right with a sound (both can be turned off), and you can open it or answer it from there.
 // The settings decide what counts, how it reaches you, and when Rex Desk stays quiet.
@@ -108,8 +108,10 @@ export function noticeSettingsHtml(ctx) {
   // Phone notifications are turned on from the phone itself (chat-webpush.js); ntfy stays under Other ways.
   const wpCtx = { api: ctx.api, redraw: () => window.__rexNoticeSettingsRedraw?.() };
   if (!webPushState.checked) void checkWebPush(wpCtx);
+  if (!webPushList.asked) void loadPhones(wpCtx);
   const phone = `<section class="card nt-card nt-phone"><h3>${t`Phone`}</h3>
       ${webPushHtml(esc, prefs.webPushError || '')}
+      ${phonesHtml(esc)}
       ${['', 'off', 'on', 'error', 'computer'].includes(webPushState.name) ? toggle('push.always', push.always, t('Also while I am at this computer'), t('Off: the phone gets it only when Rex Desk is not the window in front.')) : ''}
       <details class="nt-adv nt-other"><summary>${t`Other ways: the ntfy app`}</summary>
       ${toggle('push.on', push.on, t('Push to my phone'), t('Through the free ntfy app. Arrives even when Rex Desk is closed on the phone.'))}
@@ -163,6 +165,15 @@ export async function noticesAction(ctx, action, target) {
     const wpCtx = { api, redraw: () => window.__rexNoticeSettingsRedraw?.() };
     if (action === 'nt-wp-on') await turnOnWebPush(wpCtx); else if (action === 'nt-wp-test') await testWebPush(wpCtx); else { webPushState.checked = false; webPushState.note = ''; await checkWebPush(wpCtx); }
     return;
+  }
+  if (action === 'nt-wp-list' || action === 'nt-wp-remove') {
+    const wpCtx = { api, redraw: () => window.__rexNoticeSettingsRedraw?.() };
+    if (action === 'nt-wp-list') { webPushList.error = ''; await loadPhones(wpCtx); return; }
+    const mine = target.dataset.id === localStorage.getItem('rex-webpush-phone');
+    const ask = mine ? `${t('Remove this phone?')}\n\n${t('This phone stops getting Rex Desk notices. You can turn them on again here.')}`
+      : `${t`Remove ${target.dataset.name || t('Phone')}?`}\n\n${t('It stops getting Rex Desk notices from every computer. To get them again, turn them on from that phone.')}`;
+    if (!await askConfirm(ask, { ok: t('Remove') })) return;
+    await removePhone(wpCtx, target.dataset.id); return;
   }
   if (action === 'nt-push-test') { try { await api('/notices/push-test', { method: 'POST', data: {} }); ctx.toast(t('Test push sent. Check your phone.')); } catch (error) { ctx.toast(error.message, true); } await refresh(); return; }
   if (action === 'nt-copy-topic') { await navigator.clipboard.writeText(prefs.push?.topic || ''); ctx.toast(t('Topic copied.')); return; }

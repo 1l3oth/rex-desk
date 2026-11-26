@@ -1,4 +1,4 @@
-import { t } from './i18n.js';
+import { t, locale } from './i18n.js';
 // Phone notifications without ntfy (web push). Turned on from the phone itself: one button, the phone asks to allow, and a
 // test notice comes back. The phone's own browser keeps the subscription; the desk saves it with the Rex Desk account, so
 // every computer of the account can send to it. Permission is asked only right after the tap, never on load.
@@ -40,6 +40,13 @@ export async function checkWebPush(ctx, w = globalThis) {
   if (state.name === 'off' && e.permission === 'granted') {
     try { const reg = await w.navigator.serviceWorker.getRegistration(); const sub = await reg?.pushManager.getSubscription(); if (sub && w.localStorage.getItem(PHONE_KEY)) state.name = 'on'; } catch { /* stays off */ }
   }
+  // Removed from a computer, or pushed out by an 11th phone: the account no longer has it, so it is off here too.
+  if (state.name === 'on') {
+    await loadPhones(ctx);
+    if (Array.isArray(list.phones) && !list.phones.some(phone => phone.id === w.localStorage.getItem(PHONE_KEY))) {
+      w.localStorage.removeItem(PHONE_KEY); state.name = 'off'; state.note = t('This phone was removed from your phones, so it gets no notices. Press Turn on to get them again.');
+    }
+  }
   if (state.name === 'off' && !state.key && info.error) { state.name = 'error'; state.note = info.error; }
   ctx.redraw?.();
 }
@@ -66,6 +73,7 @@ export async function turnOnWebPush(ctx, w = globalThis) {
     step('test');
     await ctx.api('/notices/webpush/test', { method: 'POST', data: { phone: phone.id } });
     state.name = 'on'; step('', t('Test sent. It should arrive in a few seconds.'));
+    void loadPhones(ctx);
   } catch (error) { state.name = 'error'; step('', error.message || t('Turning on did not work. Try again.')); }
 }
 
@@ -99,4 +107,85 @@ export function webPushHtml(esc, deskError = '', w = globalThis) {
   const note = state.note ? `<p class="small ${s === 'error' ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(state.note)}</p>` : '';
   const desk = deskError && s !== 'signed-out' ? `<p class="small warn-text nt-wp-note">${esc(deskError)}</p>` : '';
   return `<div class="nt-wp" data-wp-state="${s}"><div class="nt-wp-row"><span class="nt-lbl"><b>${lines[0]}</b>${lines[1] ? `<small>${lines[1]}</small>` : ''}</span>${action}</div>${steps}${note}${desk}</div>`;
+}
+
+// ---------- the account's phones: which ones get notices, and Remove ----------
+// Shown on every device signed in to the account, so a lost or old phone can be cut off from any computer.
+const list = { phones: null, asked: false, signedIn: true, loading: false, error: '', removing: '', note: '', noteBad: false };
+export const webPushList = list;
+
+let loading = null;
+export function loadPhones(ctx) { list.asked = true; loading ??= readPhones(ctx).finally(() => { loading = null; }); return loading; }
+async function readPhones(ctx) {
+  list.loading = true; ctx.redraw?.();
+  try {
+    const out = await ctx.api('/notices/webpush/phones');
+    list.signedIn = out?.signedIn !== false; list.phones = Array.isArray(out?.phones) ? out.phones : null;
+    list.error = list.phones || !list.signedIn ? '' : (out?.error || t('Rex Desk could not load your phones.'));
+  } catch (error) { list.phones = null; list.error = error.message || t('Rex Desk could not load your phones.'); }
+  list.loading = false; ctx.redraw?.();
+}
+
+const thisPhone = w => { try { return w.localStorage?.getItem(PHONE_KEY) || ''; } catch { return ''; } };
+async function subscriptionOf(w) { const reg = await w.navigator?.serviceWorker?.getRegistration?.(); return (await reg?.pushManager?.getSubscription()) || null; }
+async function dropSubscription(w) {
+  try { const sub = await subscriptionOf(w); if (!sub) return true; return (await sub.unsubscribe()) !== false; } catch { return false; }
+}
+
+// Remove, after the person said yes. The list shows the account's real answer, never a success that did not happen.
+export async function removePhone(ctx, id, w = globalThis) {
+  list.removing = id; list.note = ''; ctx.redraw?.();
+  try {
+    await ctx.api(`/notices/webpush/phones/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (id === thisPhone(w)) { w.localStorage.removeItem(PHONE_KEY); await dropSubscription(w); state.name = 'off'; state.note = t('Turned off for this phone. Press Turn on to get notices again.'); }
+    list.removing = ''; list.note = t('Removed. That phone gets no more notices.'); list.noteBad = false;
+    await loadPhones(ctx);
+  } catch (error) { list.removing = ''; list.note = error.message || t('The phone was not removed. Try again.'); list.noteBad = true; ctx.redraw?.(); }
+}
+
+const within = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+// Every sign-out on a phone comes here first: the phone's entry is taken off the account and the phone itself stops
+// listening, so the next person holding it reads no agent messages. Offline or failing, the phone still stops listening
+// and the sign-out goes on; the answer says plainly what is left. api is null when the desk already signed this phone out.
+export async function signOutPhone(api, w = globalThis) {
+  const id = thisPhone(w);
+  let sub = null; try { sub = await subscriptionOf(w); } catch { /* none */ }
+  if (!id && !sub) return { left: '', removed: true, stopped: true };
+  let removed = !id;
+  if (id && api) { try { await within(api(`/notices/webpush/phones/${encodeURIComponent(id)}`, { method: 'DELETE' }), 6000); removed = true; } catch { removed = false; } }
+  const stopped = await dropSubscription(w);
+  try { w.localStorage.removeItem(PHONE_KEY); } catch { /* private mode */ }
+  Object.assign(state, { name: '', note: '', checked: false, busy: '' }); list.phones = null;
+  const left = stopped && removed ? ''
+    : stopped ? t('This phone no longer gets Rex Desk notices. It may still be listed under your phones until the next notice clears it, or remove it in Settings, Notifications on a computer.')
+      : t('This phone may still get Rex Desk notices. Remove it in Settings, Notifications on a computer, or turn off notifications for Rex Desk in the phone settings.');
+  if (left) { try { w.sessionStorage?.setItem('rex-signout-note', left); } catch { /* private mode */ } }
+  return { left, removed, stopped };
+}
+
+const added = iso => {
+  const at = new Date(iso); if (!iso || Number.isNaN(at.getTime())) return '';
+  try { return new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'short', year: 'numeric' }).format(at); } catch { return at.toISOString().slice(0, 10); }
+};
+
+// The list under the Turn on row: name, when it was added, "This phone" on the one in hand, and Remove.
+export function phonesHtml(esc, w = globalThis) {
+  const s = state.name;
+  if (s === 'signed-out') return '';
+  if (!list.signedIn) return `<div class="nt-wp-list"><p class="small muted nt-wp-empty">${t`Sign in to Rex Desk to see the phones that get notices.`}</p></div>`;
+  const head = `<p class="nt-wp-head">${t`Phones that get notices`}</p>`;
+  const note = list.note ? `<p class="small ${list.noteBad ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(list.note)}</p>` : '';
+  if (!list.phones) {
+    const body = list.error && !list.loading
+      ? `<div class="nt-wp-row"><span class="nt-lbl"><small class="warn-text">${t`Could not load your phones: ${esc(list.error)}`}</small></span><button type="button" class="btn small" data-action="nt-wp-list">${t`Try again`}</button></div>`
+      : `<p class="small muted nt-wp-empty" role="status">${t`Looking up your phones…`}</p>`;
+    return `<div class="nt-wp-list">${head}${body}${note}</div>`;
+  }
+  if (!list.phones.length) return `<div class="nt-wp-list">${head}<p class="small muted nt-wp-empty">${t`No phone gets notices yet. Turn them on from Rex Desk on the phone.`}</p>${note}</div>`;
+  const mine = thisPhone(w);
+  const rows = list.phones.map(phone => {
+    const busy = list.removing === phone.id, when = added(phone.created);
+    return `<li class="nt-wp-phone" data-phone="${esc(phone.id)}"><span class="nt-lbl"><b>${esc(phone.name)}${phone.id === mine ? ` <span class="nt-wp-me">${t`This phone`}</span>` : ''}</b>${when ? `<small>${t`Added ${esc(when)}`}</small>` : ''}</span><button type="button" class="btn small quiet danger" data-action="nt-wp-remove" data-id="${esc(phone.id)}" data-name="${esc(phone.name)}" ${list.removing ? 'disabled' : ''}>${busy ? t('Removing…') : t('Remove')}</button></li>`;
+  }).join('');
+  return `<div class="nt-wp-list">${head}<ul class="nt-wp-phones">${rows}</ul>${note}</div>`;
 }

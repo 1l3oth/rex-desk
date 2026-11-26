@@ -58,12 +58,12 @@ export class WebPush {
   constructor({ token = () => '', base = ACCOUNT_API, fetcher = fetch, now = Date.now } = {}) {
     Object.assign(this, { token, base, fetcher, now }); this.phones = null; this.phonesAt = 0; this.status = ''; this.busy = null;
   }
-  async call(method, pathname, body) {
+  async call(method, pathname, body, offline = 'Rex Desk could not reach its account service, so the phone notification did not go out.') {
     const token = this.token(); if (!token) throw Object.assign(new Error(SIGN_IN_FIRST), { code: 'signed_out' });
     let response;
     try {
       response = await this.fetcher(`${typeof this.base === 'function' ? this.base() : this.base}${pathname}`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
-    } catch { throw Object.assign(new Error('Rex Desk could not reach its account service, so the phone notification did not go out.'), { code: 'offline' }); }
+    } catch { throw Object.assign(new Error(offline), { code: 'offline' }); }
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) throw Object.assign(new Error(SIGN_IN_FIRST), { code: 'signed_out' });
     if (!response.ok) throw Object.assign(new Error(data.error?.message || `The account service answered ${response.status}.`), { code: data.error?.code || String(response.status) });
@@ -86,8 +86,27 @@ export class WebPush {
     const sub = subscription || {}, phone = await this.call('POST', '/v1/push/phones', { endpoint: sub.endpoint, keys: sub.keys, name });
     this.forget(); this.status = ''; return phone;
   }
-  // Sends one notice to every phone of the account. Never throws and never retries: the result and status say what happened.
-  async send({ source, kind = 'reply', title = 'Rex Desk', body = '', target = null, preview = true, only = '' }) {
+  // The account's phones for the list in Notifications settings: always asked fresh (and kept for the next notice), never
+  // with their keys.
+  async phonesList() {
+    this.forget();
+    const phones = await this.call('GET', '/v1/push/phones', null, 'Rex Desk could not reach its account service to list your phones.');
+    this.phones = (phones.phones || []).filter(phone => phone?.id && phone.keys); this.phonesAt = this.now();
+    return this.phones.map(({ id, name, created }) => ({ id, name: String(name || 'Phone'), created: String(created || '') }));
+  }
+  // A phone taken off the account: it gets nothing more from any computer (the account service refuses a notice for it).
+  // One already gone counts as removed. The kept list is dropped either way, so the next notice asks again.
+  async removePhone(id) {
+    try { await this.call('DELETE', `/v1/push/phones/${encodeURIComponent(id)}`, null, 'Rex Desk could not reach its account service, so the phone was not removed. Try again when online.'); }
+    catch (error) { if (error.code !== 'phone_not_found') throw error; }
+    finally { this.forget(); }
+    return { removed: id };
+  }
+  // Sends one notice to every phone of the account. Never throws and never retries a failed delivery: the result and
+  // status say what happened. A phone removed from another computer makes the account service refuse the whole notice,
+  // so then the list is asked again and the notice goes once more to the phones still there.
+  async send(input, again = false) {
+    const { source, kind = 'reply', title = 'Rex Desk', body = '', target = null, preview = true, only = '' } = input;
     if (!this.token()) { this.status = SIGN_IN_FIRST; return { sent: 0, reason: 'signed_out' }; }
     try {
       const phones = (await this.list()).filter(phone => !only || phone.id === only);
@@ -104,7 +123,7 @@ export class WebPush {
       this.status = result.repeat || sent || !failed ? '' : 'The phone notification did not reach any phone. Rex Desk will try with the next one.';
       return { sent, gone: result.gone?.length || 0, failed, repeat: Boolean(result.repeat) };
     } catch (error) {
-      if (error.code === 'phone_not_found') this.forget();
+      if (error.code === 'phone_not_found') { this.forget(); if (!again && !only) return this.send(input, true); }
       this.status = error.code === 'too_many' ? 'Too many phone notifications in a minute; some were held back.' : error.message;
       return { sent: 0, reason: error.code || 'failed' };
     }

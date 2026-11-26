@@ -1519,6 +1519,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         try { return json(response, 200, await desk.notifier.webPush.savePhone({ subscription: input.subscription, name: String(input.name || 'Phone').slice(0, 60) })); }
         catch (error) { return json(response, 400, { error: error.message }); }
       }
+      // The account's phones, for the list in Notifications settings, and Remove (also used by a phone signing out).
+      if (url.pathname === '/api/notices/webpush/phones' && request.method === 'GET') {
+        const push = desk.notifier.webPush; if (!push?.token()) return json(response, 200, { signedIn: false, phones: [] });
+        try { return json(response, 200, { signedIn: true, phones: await push.phonesList() }); } catch (error) { return json(response, 200, { signedIn: error.code !== 'signed_out', phones: null, error: error.message }); }
+      }
+      const webPushPhone = url.pathname.match(/^\/api\/notices\/webpush\/phones\/([^/]+)$/);
+      if (webPushPhone && request.method === 'DELETE') {
+        try { return json(response, 200, await desk.notifier.webPush.removePhone(decodeURIComponent(webPushPhone[1]))); } catch (error) { return json(response, 400, { error: error.message }); }
+      }
       if (url.pathname === '/api/notices/webpush/test' && request.method === 'POST') {
         const input = await body(request), result = await desk.notifier.testWebPush(String(input.phone || ''));
         return result.sent ? json(response, 200, result) : json(response, 400, { error: desk.notifier.webPush.status || (result.reason === 'phone_not_found' ? 'This phone is no longer turned on. Turn it on again.' : 'The test did not reach this phone. Try again.') });

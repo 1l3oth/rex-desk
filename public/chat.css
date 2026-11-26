@@ -1223,6 +1223,11 @@ button.cn-main{cursor:pointer}
 .nt-steps{margin:0;padding-left:20px;font-size:13px;display:flex;flex-direction:column;gap:3px}
 /* Phone notifications (web push): one quiet row, text on the left and its one button on the right, like iPhone settings. */
 .nt-wp{display:flex;flex-direction:column;gap:8px}.nt-wp-row{display:flex;align-items:center;gap:12px}.nt-wp-row .nt-lbl{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;font-size:13.5px;color:var(--ink)}.nt-wp-row .nt-lbl small{font-size:12px;color:var(--muted);line-height:1.4}.nt-wp-row .btn{flex:none}.nt-wp-note{margin:0}.nt-wp-steps{color:var(--ink)}
+/* The account's phones: a plain list with hairlines, name and date on the left, Remove on the right. */
+.nt-wp-list{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:10px}.nt-wp-head{margin:0;font-size:12px;font-weight:600;color:var(--muted)}.nt-wp-empty{margin:2px 0}
+.nt-wp-phones{list-style:none;margin:0;padding:0}.nt-wp-phone{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)}.nt-wp-phone:last-child{border-bottom:0}
+.nt-wp-phone .nt-lbl,.nt-wp-list .nt-lbl{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;font-size:13.5px;color:var(--ink)}.nt-wp-phone .nt-lbl b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nt-wp-phone .nt-lbl small{font-size:12px;color:var(--muted)}.nt-wp-phone .btn{flex:none}
+.nt-wp-me{font-size:11.5px;font-weight:500;color:var(--muted);margin-left:4px}
 .nt-other>summary{cursor:pointer;font-size:13px;color:var(--muted);padding:2px 0}.nt-other[open]{display:flex;flex-direction:column;gap:12px}
 .nt-qr{display:grid;place-items:center;padding:10px;border-radius:12px;background:#fff;width:180px;height:180px;margin:0 auto}.nt-qr svg{width:160px;height:160px}
 .nt-topic{display:flex;align-items:center;gap:8px}.nt-topic code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;padding:6px 8px;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
