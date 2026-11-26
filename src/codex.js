@@ -1,6 +1,13 @@
 ﻿import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { resolveCommand, stopTree } from './processes.js';
+
+// This Rex Desk, for the stdio proxy Codex runs to reach the desk tools.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const AI_PROVIDERS = ['claude', 'codex', 'gemini', 'openrouter'];
 export function aiProvider(value = 'claude') {
@@ -16,6 +23,23 @@ export function codexEnvironment(env = process.env) {
   const clean = { ...env };
   for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN']) delete clean[key];
   return clean;
+}
+
+// Codex reads MCP servers from its own config.toml and deep-merges any passed for the session by name.
+// Rex Desk's Setup writes a stdio entry (codex mcp add rex_desk -- node stdio.js), so the session entry
+// must be stdio too: a url entry merged onto the stdio one makes an invalid command+url table that Codex
+// rejects with "url is not supported for stdio". If a profile already carries its own url-type rex_desk,
+// a command entry clashes the same way, so that one is left alone (its proxy reads REX_DESK_TOKEN from the
+// run env). No token is ever written to the config, a log or a command line.
+export function codexRexDeskIsUrl(home = path.join(os.homedir(), '.codex')) {
+  try {
+    const section = readFileSync(path.join(home, 'config.toml'), 'utf8').match(/\[mcp_servers\.rex_desk\]([\s\S]*?)(?=\n\s*\[|$)/);
+    return Boolean(section) && /^\s*url\s*=/m.test(section[1]);
+  } catch { return false; }
+}
+export function codexDeskServer({ home = path.join(os.homedir(), '.codex'), mcpUrl, token = '', node = process.execPath, root = packageRoot } = {}) {
+  if (!mcpUrl || codexRexDeskIsUrl(home)) return null;
+  return { command: node, args: [path.join(root, 'src', 'stdio.js')], env: { REX_DESK_URL: mcpUrl, REX_DESK_TOKEN: token }, required: true };
 }
 
 // One app-server per caller keeps account, MCP credentials, and pending approvals isolated.
@@ -182,7 +206,8 @@ export class CodexRunner {
     if (this.signal?.aborted) throw new Error('Codex was stopped.');
     const env = { ...codexEnvironment(this.agentEnv), REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     const servers = {};
-    if (this.mcpUrl) servers.rex_desk = { url: this.mcpUrl, bearer_token_env_var: 'REX_DESK_TOKEN', required: true };
+    const deskServer = codexDeskServer({ home: this.agentEnv?.CODEX_HOME || undefined, mcpUrl: this.mcpUrl, token: this.token });
+    if (deskServer) servers.rex_desk = deskServer;
     for (const [name, server] of Object.entries(this.extraMcp || {})) {
       if (server.url) {
         const headers = {};
