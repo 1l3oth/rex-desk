@@ -2,7 +2,8 @@
 // protected-resource and authorization-server metadata, registers itself as a public client (dynamic client registration),
 // opens the browser with PKCE (S256) and the resource parameter, and catches the answer on a one-time local port. The tokens
 // stay encrypted on this computer (never in the cloud copy), are refreshed before they run out, and go only to the exact
-// address they were made for, as an Authorization header on the connections Rex Desk makes for agents. No CLI file is touched.
+// address they were made for, as an Authorization header on the connections Rex Desk itself makes. No agent gets them, and
+// no CLI file is touched.
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { discoverOAuthServerInfo, extractWWWAuthenticateParams, registerClient, startAuthorization, exchangeAuthorization, refreshAuthorization, selectResourceURL } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -13,6 +14,31 @@ const EARLY_MS = 10 * 60000, TICK_MS = 60000, WAIT_MS = 5 * 60000;
 const OVER = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client']);
 export const SIGN_IN_HELP = 'Needs sign-in. Ask the person to press Sign in for it in Rex Desk, Settings, Connectors. Rex Desk does the whole sign-in: never tell them to use a terminal, /mcp or a config file.';
 
+// What the person reads when a sign-in fails: always Rex Desk's own words. What the server wrote can hold sensitive values
+// (tokens, codes, addresses with keys), so only its OAuth error code picks the message (RFC 6749, RFC 7591).
+const FAILED = 'The sign-in failed. Try again.';
+const BY_CODE = {
+  access_denied: 'The sign-in was refused. Try again and allow Rex Desk.',
+  invalid_grant: 'The sign-in was no longer valid. Try again.',
+  invalid_client: 'The server did not accept Rex Desk as an app. Try again.',
+  unauthorized_client: 'The server does not let Rex Desk sign in this way.',
+  invalid_client_metadata: 'The server did not let Rex Desk register to sign in.',
+  invalid_redirect_uri: 'The server did not accept the address Rex Desk uses to finish the sign-in.',
+  invalid_scope: 'The server refused the access Rex Desk asked for.',
+  invalid_request: 'The server did not accept the sign-in request.',
+  invalid_target: 'The server did not accept the sign-in request.',
+  unsupported_grant_type: 'The server does not offer this kind of sign-in.',
+  unsupported_response_type: 'The server does not offer this kind of sign-in.',
+  server_error: 'The sign-in server had a problem. Try again later.',
+  temporarily_unavailable: 'The sign-in server is busy. Try again later.',
+};
+// A message Rex Desk wrote itself, so it may be shown as it is.
+class Plain extends Error {}
+export const signInError = error => {
+  if (error instanceof Plain) return error.message;
+  const code = String(error?.errorCode || error?.constructor?.errorCode || '');
+  return Object.hasOwn(BY_CODE, code) ? BY_CODE[code] : FAILED;
+};
 export const addressOf = config => {
   if (!config?.url) return '';
   try { const url = new URL(String(config.url)); url.hash = ''; return url.href; } catch { return ''; }
@@ -21,7 +47,7 @@ const idOf = url => createHash('sha256').update(url).digest('hex').slice(0, 24);
 const local = url => ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 function safeAddress(value, what) {
   const url = new URL(String(value));
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local(url))) throw new Error(`The ${what} is not a secure address, so Rex Desk does not sign in there.`);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local(url))) throw new Plain(`The ${what} is not a secure address, so Rex Desk does not sign in there.`);
   return url;
 }
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
@@ -40,6 +66,8 @@ export class McpSignIn {
     const now = this.store.get(KIND, record.id); if (!now || now.status === 'expired') return;
     this.store.put(KIND, record.id, { ...now, status: 'expired', at: new Date().toISOString() }); this.changed(now.url);
   }
+  // Every secret held for a server's address, so it can be taken out of whatever that server sends back.
+  secrets(config) { const record = this.record(addressOf(config)), held = record && this.secret(record); return held ? [held.accessToken, held.refreshToken, held.client?.client_secret].filter(Boolean) : []; }
   // What the pages show: no token, ever.
   state(url) {
     const record = this.record(url);
@@ -57,20 +85,20 @@ export class McpSignIn {
     } catch { /* discovery below reports a server that cannot be reached */ }
     const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: this.fetcher });
     const metadata = info.authorizationServerMetadata;
-    if (!metadata) throw new Error('This server does not say how to sign in to it.');
+    if (!metadata) throw new Plain('This server does not say how to sign in to it.');
     for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) safeAddress(metadata[key], what);
-    if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Error('This server does not offer the safe sign-in (PKCE) that MCP requires.');
-    if (!metadata.registration_endpoint) throw new Error('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
+    if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
+    if (!metadata.registration_endpoint) throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
     safeAddress(metadata.registration_endpoint, 'registration address');
     const resource = await selectResourceURL(url, {}, info.resourceMetadata);
     return { server: info.authorizationServerUrl, metadata, resource: resource ? String(info.resourceMetadata.resource) : url, scope: challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined };
   }
   // Starts a sign-in and gives back the page to open. done resolves when the browser came back and the tokens are saved.
   async start(name, address) {
-    const url = addressOf({ url: address }); if (!url) throw new Error('This server has no web address to sign in to.');
-    safeAddress(url, 'server address');
-    this.cancel(url);
-    const found = await this.discover(url);
+    const url = addressOf({ url: address }); if (!url) throw new Plain('This server has no web address to sign in to.');
+    const couldNot = error => new Error(error instanceof Plain ? error.message : `Rex Desk could not start the sign-in. ${signInError(error)}`);
+    let found;
+    try { safeAddress(url, 'server address'); this.cancel(url); found = await this.discover(url); } catch (error) { throw couldNot(error); }
     const state = randomBytes(24).toString('base64url');
     let answer, fail; const code = new Promise((resolve, reject) => { answer = resolve; fail = reject; });
     const listener = http.createServer((request, response) => {
@@ -79,19 +107,19 @@ export class McpSignIn {
       if (asked.pathname !== '/callback') return say(404, 'Nothing here.');
       const issuer = asked.searchParams.get('iss');
       if (asked.searchParams.get('state') !== state || (issuer && issuer !== found.metadata.issuer)) return say(400, 'This is not the sign-in Rex Desk is waiting for. Start it again from Rex Desk.');
-      if (!asked.searchParams.get('code')) { say(400, 'The sign-in did not finish. You can close this tab and try again from Rex Desk.'); fail(new Error('The sign-in was refused or did not finish. Try again.')); return; }
+      if (!asked.searchParams.get('code')) { say(400, 'The sign-in did not finish. You can close this tab and try again from Rex Desk.'); fail(Object.assign(new Error('refused'), { errorCode: asked.searchParams.get('error') || '' })); return; }
       say(200, 'Signed in. You can close this tab and go back to Rex Desk.');
       answer(asked.searchParams.get('code'));
     });
     await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
     const redirectUri = `http://127.0.0.1:${listener.address().port}/callback`;
-    const timer = setTimeout(() => fail(new Error('The sign-in took too long. Try again.')), WAIT_MS); timer.unref?.();
+    const timer = setTimeout(() => fail(new Plain('The sign-in took too long. Try again.')), WAIT_MS); timer.unref?.();
     const close = () => { clearTimeout(timer); listener.close(); };
     try {
       const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.fetcher,
         clientMetadata: { client_name: 'Rex Desk', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
       const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, resource: found.resource });
-      const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Error('The sign-in was cancelled.')) };
+      const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Plain('The sign-in was cancelled.')) };
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
         const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.fetcher });
@@ -100,11 +128,11 @@ export class McpSignIn {
         this.waiting.delete(url); this.changed(url);
       }).catch(error => {
         if (this.waiting.get(url) !== attempt) return;
-        // The reason stays on the row until the next try; nothing the server sent with a token is in it.
-        this.waiting.set(url, { error: String(error?.message || 'The sign-in failed.').slice(0, 200), link: '', cancel: () => {}, failed: true }); this.changed(url);
+        // The reason stays on the row until the next try, in Rex Desk's own words.
+        this.waiting.set(url, { error: signInError(error), link: '', cancel: () => {}, failed: true }); this.changed(url);
       }).finally(close);
       return { url: attempt.link, done: attempt.done };
-    } catch (error) { close(); throw new Error(`Rex Desk could not start the sign-in: ${String(error?.message || error).slice(0, 200)}`); }
+    } catch (error) { close(); throw couldNot(error); }
   }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
   signOut(url) { this.cancel(url); const record = this.record(url); if (record) { this.store.delete(KIND, record.id); this.changed(url); } }
@@ -150,7 +178,6 @@ export class McpSignIn {
     const headers = Object.fromEntries(Object.entries(config.headers || {}).filter(([key]) => key.toLowerCase() !== 'authorization'));
     return { ...config, type: config.type || 'http', headers: { ...headers, Authorization: `Bearer ${secret.accessToken}` } };
   }
-  async authorizeAll(servers) { return Object.fromEntries(await Promise.all(Object.entries(servers).map(async ([name, config]) => [name, await this.authorize(config)]))); }
   // Refused even with a renewed token: this sign-in is over, so the person is asked to sign in again.
   rejected(config) { const record = this.record(addressOf(config)); if (record) this.expire(record); }
   // The server refused the token: try a fresh one. True when it is worth trying the server again.

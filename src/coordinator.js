@@ -5,6 +5,7 @@ import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { McpSignIn, addressOf } from './mcp-signin.js';
+import { bridged } from './mcp-bridge.js';
 import { catalogItem } from './connector-catalog.js';
 import { Team } from './team.js';
 import { Schedules } from './schedules.js';
@@ -382,10 +383,20 @@ export class Desk {
     for (const [name, config] of Object.entries(servers)) if (addressOf(config) === url) { this.toolbox.lists.delete(name); this.toolbox.failed.delete(name); void this.toolbox.close(name); }
     this.onMcpSignIn?.();
   }
-  // With the toolbox off, agents open the person's servers themselves: the ones signed in here get the sign-in as a header.
-  async signedMcp(sourcePath) {
-    const servers = existingMcpConnections(sourcePath);
-    return this.mcpSignIn.authorizeAll(Object.fromEntries(Object.entries(servers).filter(([name, config]) => name !== 'rex_desk' && this.mcpSignIn.record(addressOf(config))?.status === 'connected')));
+  // The signed-in servers an agent opens itself: the Orbit account always, and with the toolbox off the ones signed in
+  // here. Their configs stay inside Rex Desk; the agent gets Rex Desk's own address for each (mcp-bridge.js).
+  signedServers(run) {
+    const orbit = this.orbitAccountMcp();
+    if (this.store.config().toolGateway !== false) return orbit;
+    const servers = existingMcpConnections(this.store.config().repositories.find(item => item.id === run.repositoryId)?.path);
+    return { ...orbit, ...Object.fromEntries(Object.entries(servers).filter(([name, config]) => name !== 'rex_desk' && this.mcpSignIn.record(addressOf(config))?.status === 'connected')) };
+  }
+  // The server a run's token may reach through Rex Desk, or null: never for a locked run, or one switched off for the agent.
+  bridgeTarget(runId, name) {
+    const run = runId && this.store.get('run', runId);
+    if (!run || run.locked || toolsOff(this.store, runAgentId(run)).has(`mcp:${name}`)) return null;
+    const servers = this.signedServers(run);
+    return Object.hasOwn(servers, name) ? servers[name] : null;
   }
   // The remote servers on this computer that Rex Desk can sign in to, and how each stands.
   mcpSignIns() {
@@ -939,7 +950,7 @@ export class Desk {
           if (!hands.length) return this.requeue(runId, text);
           for (const ticket of hands.flatMap(item => item.tickets || [])) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'waiting' });
           this.requeue(runId, hands.flatMap(item => item.entries || []));
-        }, extraMcp: { ...this.orbitAccountMcp(), ...(this.store.config().toolGateway === false ? await this.signedMcp(this.store.config().repositories.find(item => item.id === run.repositoryId)?.path) : {}) }, gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
+        }, extraMcp: bridged(this.mcpUrl, token, Object.keys(this.signedServers(run))), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
           if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }

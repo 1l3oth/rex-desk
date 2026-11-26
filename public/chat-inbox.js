@@ -47,7 +47,12 @@ function detail(ctx, helpers, entry) {
     const target = entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button type="button" class="btn primary" data-ny-open-chat ${target} data-tg="${esc(entry.tg.id)}">${t`Open chat`}</button></div></div>`;
   }
-  if (entry.mcp) return `<div class="ny-detail">${head}${question}<p class="muted">${t`Agents cannot use ${entry.mcp.label || entry.mcp.name} until you sign in again. Rex Desk opens your browser and does the rest. Do this on the computer that runs Rex Desk.`}</p><div class="ny-dact"><button class="btn primary" data-mcp-again="${esc(entry.mcp.name)}">${t`Sign in again`}</button></div></div>`;
+  if (entry.mcp) {
+    // A phone or another computer cannot finish the sign-in, so it gets the words and no button.
+    const name = entry.mcp.label || entry.mcp.name, away = entry.mcp.elsewhere;
+    const how = away ? `${t`Agents cannot use ${name} until you sign in again.`} ${t`Finish sign-in on the computer running Rex Desk.`}` : t`Agents cannot use ${name} until you sign in again. Rex Desk opens your browser and does the rest. Do this on the computer that runs Rex Desk.`;
+    return `<div class="ny-detail">${head}${question}<p class="muted">${how}</p>${away ? '' : `<div class="ny-dact"><button class="btn primary" data-mcp-again="${esc(entry.mcp.name)}">${t`Sign in again`}</button></div>`}</div>`;
+  }
   if (entry.bug) {
     const bug = entry.bug;
     return `<div class="ny-detail">${head}${question}<p class="muted">${esc([bug.severityLabel || bug.kind, bug.groupTitle, bug.reporterName].filter(Boolean).join(' · '))}</p><p class="muted">${t`Hidden until you approve it. Approving makes a task for the App Agent.`}</p><div class="ny-dact"><button class="btn quiet danger" data-bug-reject="${esc(bug.id)}">${t`Reject`}</button><button class="btn primary" data-bug-approve="${esc(bug.id)}">${t`Approve`}</button></div></div>`;

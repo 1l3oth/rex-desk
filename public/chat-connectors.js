@@ -32,6 +32,8 @@ const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTim
 function signInParts({ esc }, item) {
   const name = esc(item.name);
   const bad = text => `<span class="tb-status bad"><i aria-hidden="true"></i>${text}</span>`;
+  // On a phone or another computer: the sign-in can only be finished where Rex Desk runs.
+  if (item.elsewhere && item.state !== 'connected') return { sub: `${item.state === 'expired' ? bad(t`Sign-in expired`) : ''}<span>${t`Finish sign-in on the computer running Rex Desk.`}</span>`, button: '' };
   if (item.waiting && item.link) return { sub: `<span>${t`Finish signing in in your browser.`} <a href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${t`Open the sign-in page`}</a></span>`, button: `<button type="button" class="btn small quiet" data-mcp-cancel="${name}">${t`Cancel`}</button>` };
   const again = item.state === 'expired';
   if (item.state === 'connected') return { sub: `<span>${t`Signed in. Rex Desk keeps the sign-in fresh.`}</span>`, button: `<button type="button" class="btn small quiet" data-mcp-sign-out="${name}">${t`Sign out`}</button>` };

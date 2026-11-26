@@ -112,16 +112,53 @@ export class Toolbox {
     this.clients.set(name, { client, config, timer });
     return client;
   }
+  // One use of a server with the person's sign-in: a refused token is renewed once, and if that is refused too the person is
+  // asked to sign in again. Whatever comes back, answer or error, leaves without the sign-in in it. key: the open
+  // connection's name, when it is not the server's own.
+  async signed(name, config, work, key = name) {
+    const used = [];
+    const call = async () => { const client = await this.client(key, config); used.push(this.clients.get(key)?.config); return work(client); };
+    const over = () => { this.failed.set(name, { at: Date.now(), error: SIGN_IN_HELP, signIn: true }); return new Error(`${name}: ${SIGN_IN_HELP}`); };
+    try {
+      const answer = await call().catch(async error => {
+        if (!wantsSignIn(error) || !signsIn(this.signIn, config)) throw error;
+        await this.close(key);
+        if (!await this.signIn?.refused(config)) throw over();
+        return call().catch(async second => {
+          if (!wantsSignIn(second)) throw second;
+          await this.close(key); this.signIn.rejected(config);
+          throw over();
+        });
+      });
+      return this.scrub(answer, config, used);
+    } catch (error) {
+      // Only a message that held the sign-in is replaced (some errors, like a timeout's, cannot be rewritten).
+      const message = String(error?.message || ''), clean = this.scrub(message, config, used);
+      throw clean === message ? error : Object.assign(new Error(clean), { code: error.code });
+    }
+  }
+  // Takes the sign-in out of anything a server sent back (some repeat the request's headers in their answers).
+  scrub(value, config, used = []) {
+    const headers = [config, ...used].flatMap(item => Object.entries(item?.headers || {}).filter(([key]) => key.toLowerCase() === 'authorization').map(([, text]) => String(text)));
+    const secrets = [...headers.map(text => text.replace(/^Bearer\s+/i, '')), ...(this.signIn?.secrets?.(config) || [])].filter(text => text.length >= 6);
+    if (!secrets.length || value === undefined) return value;
+    const clean = text => secrets.reduce((out, secret) => out.split(secret).join('[hidden]'), text);
+    if (typeof value === 'string') return clean(value);
+    const text = JSON.stringify(value), out = clean(text);
+    return out === text ? value : JSON.parse(out);
+  }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
   async toolsOf(name, config, again = true) {
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
+    let used;
     try {
       const client = await this.client(name, config), tools = [];
+      used = this.clients.get(name)?.config;
       let cursor;
       do { const page = await client.listTools(cursor ? { cursor } : {}); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor && tools.length < 1000);
-      const list = tools.map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
+      const list = this.scrub(tools, config, [used]).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
     } catch (error) {
@@ -129,7 +166,7 @@ export class Toolbox {
       const refused = wantsSignIn(error) && signsIn(this.signIn, config);
       if (refused && again && await this.signIn?.refused(config)) return this.toolsOf(name, config, false);
       if (refused && !again) this.signIn?.rejected?.(config);
-      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(error.message), ...(refused ? { signIn: true } : {}) });
+      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(this.scrub(String(error.message || ''), config, [used])), ...(refused ? { signIn: true } : {}) });
       return known?.tools || [];
     }
   }
@@ -325,19 +362,7 @@ export class Toolbox {
       const text = readFileSync(target.skill.file, 'utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
       return { skill: target.skill.name, folder: target.skill.folder, instructions: clip(text, 40000), note: `Follow these instructions now. Files they mention are in ${target.skill.folder}; read them with your own tools when needed.` };
     }
-    const call = async () => (await this.client(target.server, target.config)).callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS });
-    const result = await call().catch(async error => {
-      if (!wantsSignIn(error) || !signsIn(this.signIn, target.config)) throw error;
-      await this.close(target.server);
-      if (await this.signIn?.refused(target.config)) return call().catch(async second => {
-        if (!wantsSignIn(second)) throw second;
-        await this.close(target.server); this.signIn.rejected(target.config);
-        this.failed.set(target.server, { at: Date.now(), error: SIGN_IN_HELP, signIn: true });
-        throw new Error(`${target.server}: ${SIGN_IN_HELP}`);
-      });
-      this.failed.set(target.server, { at: Date.now(), error: SIGN_IN_HELP, signIn: true });
-      throw new Error(`${target.server}: ${SIGN_IN_HELP}`);
-    });
+    const result = await this.signed(target.server, target.config, client => client.callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS }));
     const text = (result.content || []).map(part => part.type === 'text' ? part.text : part.type === 'resource' ? part.resource?.text || `[resource ${part.resource?.uri || ''}]` : `[${part.type}${part.mimeType ? ` ${part.mimeType}` : ''}]`).join('\n');
     return { tool: `${target.server}/${target.tool.name}`, ...(result.isError ? { failed: true } : {}), result: clip(text || (result.structuredContent ? JSON.stringify(result.structuredContent) : ''), 30000) };
   }
