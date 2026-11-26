@@ -52,15 +52,17 @@ const opened = (kind, secure, app) => app ? t('Open Rex Desk from your home scre
 // with a button that follows it (go: the step it jumps to; shortcut: Android's Create shortcut path).
 // iPhone (Safari, iOS 26 and later): the compact bar hides Share behind More; the bottom and top bars show Share directly.
 // Open as Web App shows only for some pages, so it is named as "if you see it", and not drawn on plain http.
-// Android (Chrome): Add to home screen (or Install app, or Install and create shortcut), then Install (an app that opens in its
-// own window) or Create shortcut (opens in Chrome; the only choice on plain http).
+// Android (Chrome): Install and create shortcut (Add to home screen on older Chrome) opens a choice: Install (an app that opens
+// in its own window) or Create shortcut (opens in Chrome; the only choice on plain http), then Add. Install app goes straight
+// to the Install confirmation. Checked against Chrome Help 9658361 and 15085120, and Apple's iPhone guide iphea86e5236.
+// iPhone: if Add to Home Screen is hidden, Edit Actions at the bottom of the Share list adds it.
 const STEPS = {
   ios: secure => [
     { say: t('Tap More (•••) at the bottom of Safari. If you see Share in the bar at the bottom or top instead, tap Share, then tap I tapped Share below.'), alt: { label: t('I tapped Share'), go: 2 }, scene: `<div class="ig-scene ig-ios-more">${page}<div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span><span class="ig-tap">${ICONS.more}</span></div></div>` },
     { say: t('Tap Share.'), scene: `<div class="ig-scene ig-ios-menu">${page}<div class="ig-menu ig-menu-low"><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.share}<span>${t('Share')}</span></div></div><div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span>${ICONS.more}</div></div>` },
-    { say: t('Scroll down and tap Add to Home Screen.'), scene: `<div class="ig-scene ig-ios-sheet">${page}<div class="ig-sheet"><div class="ig-row">${ICONS.copy}<span>${t('Copy')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Add to Reading List')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.plus}<span>${t('Add to Home Screen')}</span></div></div></div>` },
+    { say: t('Scroll down and tap Add to Home Screen. If it is not there, tap Edit Actions at the bottom of the list, then tap the add button next to Add to Home Screen.'), scene: `<div class="ig-scene ig-ios-sheet">${page}<div class="ig-sheet"><div class="ig-row">${ICONS.copy}<span>${t('Copy')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Add to Reading List')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.plus}<span>${t('Add to Home Screen')}</span></div></div></div>` },
     secure
-      ? { say: t('If you see Open as Web App, leave it on. Then tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}<div class="ig-toggle"><span>${t('Open as Web App')}</span><i class="on"></i></div></div>` }
+      ? { say: t('If you see Open as Web App, turn it on. Then tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}<div class="ig-toggle"><span>${t('Open as Web App')}</span><i class="on"></i></div></div>` }
       : { say: t('Tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}</div>` },
     { say: opened('ios', secure, secure), scene: home() },
   ],
@@ -69,31 +71,38 @@ const STEPS = {
     const add = { say: t('Tap Create shortcut. It opens Rex Desk in Chrome.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b><div class="ig-choice ig-tap ig-pick">${ICONS.plus}<span>${t('Create shortcut')}</span></div></div></div>` };
     return [
       { say: t('Tap the menu (⋮) at the top right of Chrome.'), scene: `<div class="ig-scene ig-and-menu"><div class="ig-bar ig-top"><span class="ig-url">${here()}</span><span class="ig-tap">${ICONS.dots}</span></div>${page}</div>` },
-      { say: app ? t('Tap Add to home screen. If the menu shows Install app or Install and create shortcut instead, tap that, then tap I tapped Install below.') : t('Tap Add to home screen.'), ...(app ? { alt: { label: t('I tapped Install'), go: 3 } } : {}),
-        scene: `<div class="ig-scene ig-and-list"><div class="ig-bar ig-top"><span class="ig-url">${here()}</span>${ICONS.dots}</div>${page}<div class="ig-menu"><div class="ig-row">${ICONS.tabs}<span>${t('New tab')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.install}<span>${t('Add to home screen')}</span></div></div></div>` },
+      { say: app ? t('Tap Install and create shortcut. Older Chrome calls it Add to home screen. If the menu shows Install app instead, tap that, then tap I tapped Install below.') : t('Tap Install and create shortcut. Older Chrome calls it Add to home screen.'), ...(app ? { alt: { label: t('I tapped Install'), go: 3 } } : {}),
+        scene: `<div class="ig-scene ig-and-list"><div class="ig-bar ig-top"><span class="ig-url">${here()}</span>${ICONS.dots}</div>${page}<div class="ig-menu"><div class="ig-row">${ICONS.tabs}<span>${t('New tab')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.install}<span>${t('Install and create shortcut')}</span></div></div></div>` },
       app
         ? { say: t('Tap Install. It adds Rex Desk as an app that opens in its own window. If there is no Install, tap Create shortcut instead.'), alt: { label: t('I tapped Create shortcut'), shortcut: true, go: 3 }, scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b><div class="ig-choice ig-tap ig-pick">${ICONS.install}<span>${t('Install')}</span></div><div class="ig-choice">${ICONS.plus}<span>${t('Create shortcut')}</span></div></div></div>` }
         : add,
       app
         ? { say: t('Tap Install again to confirm.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Install app?')}</b>${card()}<div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Install')}</span></div></div></div>` }
-        : { say: t('Tap Add.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b>${card()}<div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Add')}</span></div></div></div>` },
+        : { say: t('You can rename it first. Then tap Add.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b>${card()}<div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Add')}</span></div></div></div>` },
       { say: opened('android', secure, app), scene: home() },
     ];
   },
 };
 
+// Focus goes back where it was before the guide opened.
+let returnFocus = null;
 export function closeGuide() {
   const root = document.querySelector('.ig'); if (!root) return;
   root.classList.add('ig-out'); setTimeout(() => root.remove(), 220);
+  const back = returnFocus; returnFocus = null;
+  if (back?.isConnected && root.contains(document.activeElement)) back.focus?.({ preventScroll: true });
 }
 
 export function showInstallGuide({ kind = phoneKind() || 'ios', secure = secureHere() } = {}) {
   document.querySelector('.ig')?.remove();
+  const before = document.activeElement; if (before && before !== document.body) returnFocus = before;
   try { localStorage.setItem(SEEN, '1'); } catch { /* private window */ }
   const state = { kind, step: 0, shortcut: false };
   const root = document.createElement('div'); root.className = 'ig'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', t('Install Rex Desk'));
   document.body.append(root);
-  const draw = () => {
+  // Every redraw replaces the buttons, so focus moves to the same control again when it is still there (Back stays on Back,
+  // a tab on its tab), else to Next or Done: a keyboard user never lands outside the dialog.
+  const draw = (keep = '') => {
     const steps = STEPS[state.kind](secure, state.shortcut); const step = steps[state.step]; const last = state.step === steps.length - 1;
     const quick = state.kind === 'android' && secure && offer;
     root.innerHTML = `<div class="ig-box">
@@ -106,6 +115,7 @@ export function showInstallGuide({ kind = phoneKind() || 'ios', secure = secureH
         <div class="ig-btns">${state.step ? `<button class="btn small" data-ig="back">${t('Back')}</button>` : ''}<button class="btn small primary" data-ig="${last ? 'close' : 'next'}">${last ? t('Done') : t('Next')}</button></div></div>
     </div>`;
     place();
+    if (keep) (root.querySelector(keep) || root.querySelector('[data-ig="next"], .ig-btns [data-ig="close"]'))?.focus({ preventScroll: true });
   };
   // The finger starts low and travels to whatever this step taps, so it follows the drawing on any screen size.
   const place = () => requestAnimationFrame(() => {
@@ -122,13 +132,25 @@ export function showInstallGuide({ kind = phoneKind() || 'ios', secure = secureH
     if (event.target === root) return closeGuide();
     const act = event.target.closest('[data-ig]')?.dataset.ig; if (!act) return;
     if (act === 'close') closeGuide();
-    else if (act === 'next') { state.step++; draw(); }
-    else if (act === 'go') { const alt = STEPS[state.kind](secure, state.shortcut)[state.step].alt; if (alt.shortcut) state.shortcut = true; state.step = alt.go; draw(); }
-    else if (act === 'back') { state.step = Math.max(0, state.step - 1); if (state.step < 3) state.shortcut = false; draw(); }
-    else if (act === 'kind') { state.kind = event.target.closest('[data-kind]').dataset.kind; state.step = 0; state.shortcut = false; draw(); }
-    else if (act === 'install' && offer) { const asked = offer; offer = null; await asked.prompt(); const { outcome } = await asked.userChoice; if (outcome === 'accepted') closeGuide(); else draw(); }
+    else if (act === 'next') { state.step++; draw('[data-ig="next"]'); }
+    else if (act === 'go') { const alt = STEPS[state.kind](secure, state.shortcut)[state.step].alt; if (alt.shortcut) state.shortcut = true; state.step = alt.go; draw('[data-ig="next"]'); }
+    else if (act === 'back') { state.step = Math.max(0, state.step - 1); if (state.step < 3) state.shortcut = false; draw('[data-ig="back"]'); }
+    else if (act === 'kind') { state.kind = event.target.closest('[data-kind]').dataset.kind; state.step = 0; state.shortcut = false; draw(`[data-ig="kind"][data-kind="${state.kind}"]`); }
+    else if (act === 'install' && offer) { const asked = offer; offer = null; await asked.prompt(); const { outcome } = await asked.userChoice; if (outcome === 'accepted') closeGuide(); else draw('[data-ig="next"]'); }
   });
-  root.addEventListener('keydown', event => { if (event.key === 'Escape') closeGuide(); });
+  // Escape closes; Tab and Shift+Tab go round the dialog's own buttons and never leave it while it is open.
+  root.addEventListener('keydown', event => {
+    if (event.key === 'Escape') return closeGuide();
+    if (event.key !== 'Tab') return;
+    const items = [...root.querySelectorAll('button')].filter(item => !item.disabled && item.offsetParent !== null); if (!items.length) return;
+    const at = items.indexOf(document.activeElement), to = event.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : (at === -1 || at === items.length - 1 ? 0 : at + 1);
+    event.preventDefault(); items[to].focus({ preventScroll: true });
+  });
+  // Focus that wanders outside (a click on the page behind) comes back to the dialog.
+  document.addEventListener('focusin', function keep(event) {
+    if (!root.isConnected || root.classList.contains('ig-out')) return document.removeEventListener('focusin', keep);
+    if (!root.contains(event.target)) root.querySelector('[data-ig="next"], .ig-btns [data-ig="close"]')?.focus({ preventScroll: true });
+  });
   draw();
   root.querySelector('[data-ig="next"]')?.focus({ preventScroll: true });
   return root;
