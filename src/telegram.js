@@ -34,6 +34,8 @@ export function splitReply(text, size = 3800, maxParts = 4) {
 }
 // What desk_telegram answers for an agent's own bot.
 export const OWN_BOT = "Nothing was sent: this is a chat of an agent's own Telegram bot, and desk_telegram only uses the personal bot. If you are answering a message from your bot, just reply: your final answer is sent back to that chat by itself. To send your bot's owner another message, use desk_text_person.";
+// What Telegram gets when an answer sent from there cannot be used. Why stays in the app.
+export const ANSWER_FAILED = 'I could not use that answer. Please answer it in Rex Desk.';
 // What Telegram gets when a turn fails. The error itself stays in the app: it can hold account, request or file details.
 export const TURN_FAILED = "I couldn't answer just now. Please send your message again in a little while.";
 // What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
@@ -402,7 +404,7 @@ export class TelegramBridge {
       if (value === undefined) return ack();
       answer = { action: 'accept', content: { [field]: value } };
     } else return ack();
-    try { this.desk.answer(interactionId, answer); await ack('Sent'); } catch (error) { await ack(error.message); }
+    try { this.desk.answer(interactionId, answer); await ack('Sent'); } catch (error) { this.answerError(error); await ack(ANSWER_FAILED); }
     return this.clearButtons(query, token);
   }
 
@@ -415,8 +417,9 @@ export class TelegramBridge {
     const interaction = this.store.get('interaction', interactionId);
     if (!interaction || interaction.state !== 'pending') return this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: 'That question was already answered.', reply_to_message_id: replyToId }).catch(() => {});
     try { this.desk.answer(interactionId, { action: 'accept', content: { [field || 'answer']: text } }); }
-    catch (error) { return this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(`Could not use that answer: ${error.message}`), reply_to_message_id: replyToId }).catch(() => {}); }
+    catch (error) { this.answerError(error); return this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: ANSWER_FAILED, reply_to_message_id: replyToId }).catch(() => {}); }
   }
+  answerError(error) { this.store.event?.('', 'telegram-error', { message: `answer: ${error.message}` }, true); }
 
   // Start the agent's turn with the message marked as from Telegram, its reply going back to the chat it came from. Each
   // message gets its own id in its mark ([Telegram #id]) and a record of where it came from (tgqueued), made before the
