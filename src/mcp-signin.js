@@ -60,6 +60,7 @@ export const MOVED_SIGN_IN = 'The sign-in server tried to send Rex Desk to anoth
 // found at sign-in, over https, never following a redirect, and never waiting long.
 function pinnedTo(address, what, { fetcher, loopback, ms = ASK_MS }) {
   const home = safeAddress(address, what, loopback); home.hash = '';
+  if (carriesCredential(home)) throw new Plain(`The ${what} has a key or password in it, so Rex Desk does not sign in there.`);
   return async (target, init = {}) => {
     const to = new URL(String(target)); to.hash = '';
     if (to.href !== home.href) throw new Plain(MOVED_SIGN_IN);
@@ -107,11 +108,14 @@ export class McpSignIn {
     const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: timed(this.fetcher, this.ms) });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
-    for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) safeAddress(metadata[key], what, this.loopback);
+    // Every address the server named is checked like the one the person added: secure, and with no key or password in it.
+    this.endpoint(info.authorizationServerUrl, 'sign-in server');
+    for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) this.endpoint(metadata[key], what);
     if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
     if (!metadata.registration_endpoint) throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
-    safeAddress(metadata.registration_endpoint, 'registration address', this.loopback);
+    this.endpoint(metadata.registration_endpoint, 'registration address');
     const resource = await selectResourceURL(url, {}, info.resourceMetadata);
+    if (resource) this.endpoint(info.resourceMetadata.resource, 'server address');
     return { server: info.authorizationServerUrl, metadata, resource: resource ? String(info.resourceMetadata.resource) : url, scope: challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined };
   }
   // Starts a sign-in and gives back the page to open. done resolves when the browser came back and the tokens are saved.
@@ -128,8 +132,9 @@ export class McpSignIn {
     // Handled from the start: a failure before anyone waits on it is never left unhandled.
     code.catch(() => {});
     const listener = http.createServer((request, response) => {
-      const asked = new URL(request.url, 'http://127.0.0.1');
       const say = (status, text) => response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', connection: 'close' }).end(page(text));
+      // A request whose address cannot be read is answered and ignored; the sign-in keeps waiting for the real one.
+      let asked; try { asked = new URL(request.url, 'http://127.0.0.1'); } catch { return say(400, 'This is not the sign-in Rex Desk is waiting for. Start it again from Rex Desk.'); }
       if (asked.pathname !== '/callback') return say(404, 'Nothing here.');
       const issuer = asked.searchParams.get('iss');
       if (asked.searchParams.get('state') !== state || (issuer && issuer !== found.metadata.issuer)) return say(400, 'This is not the sign-in Rex Desk is waiting for. Start it again from Rex Desk.');
@@ -137,6 +142,7 @@ export class McpSignIn {
       say(200, 'Signed in. You can close this tab and go back to Rex Desk.');
       answer(asked.searchParams.get('code'));
     });
+    listener.on('clientError', (error, socket) => { if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n'); else socket.destroy(); });
     await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
     const redirectUri = `http://127.0.0.1:${listener.address().port}/callback`;
     let timer = null; const close = () => { clearTimeout(timer); listener.close(); };
@@ -145,6 +151,9 @@ export class McpSignIn {
       const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address'),
         clientMetadata: { client_name: 'Rex Desk', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
       const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, resource: found.resource });
+      // The page handed to the screen is the checked sign-in page with Rex Desk's own sign-in values added, nothing else.
+      const opened = new URL(authorizationUrl), home = this.endpoint(found.metadata.authorization_endpoint, 'sign-in page');
+      if (opened.origin !== home.origin || opened.pathname !== home.pathname) throw new Plain('The sign-in page this server named does not match, so Rex Desk stopped.');
       const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Plain('The sign-in was cancelled.')) };
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
@@ -161,6 +170,8 @@ export class McpSignIn {
       return { url: attempt.link, done: attempt.done };
     } catch (error) { close(); throw couldNot(error); }
   }
+  // A discovered address: secure, and with no credential of its own, so nothing the server named carries one onward.
+  endpoint(value, what) { const url = safeAddress(value, what, this.loopback); if (carriesCredential(url)) throw new Plain(`The ${what} this server named has a key or password in it, so Rex Desk does not sign in there.`); return url; }
   pinned(address, what) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms: this.ms }); }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
   signOut(url) { this.cancel(url); const record = this.record(url); if (record) { this.store.delete(KIND, record.id); this.changed(url); } }

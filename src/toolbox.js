@@ -22,6 +22,10 @@ export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'St
 const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|invalid_token|missing_bearer/i.test(String(error?.message || ''));
 // An address with a typed key of its own is the person's to fix; every other refused address needs a sign-in.
 const signsIn = (signIn, config) => { const url = addressOf(config); return Boolean(url && !carriesCredential(new URL(url)) && (signIn?.record(url) || !Object.keys(config.headers || {}).length)); };
+// What the person reads for a server that wants a sign-in (agents get SIGN_IN_HELP instead).
+// A server's address as the screen shows it: no user, password, query or fragment, which may hold a key.
+const shownAddress = value => { try { const url = new URL(String(value)); return `${url.origin}${url.pathname}`; } catch { return ''; } };
+export const SIGN_IN_SHOWN = 'Needs sign-in. Press Sign in for it in Settings, Connectors.';
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
 const words = text => String(text || '').toLowerCase().normalize('NFKD').split(/[^a-z0-9ក-៿가-힯]+/).filter(word => word.length > 1);
@@ -142,6 +146,8 @@ export class Toolbox {
     for (const secret of this.signIn?.secrets?.(configs[0]) || []) if (secret) secrets.add(String(secret));
     return secrets;
   }
+  // A server's problem in the person's words: one that wants a sign-in says where to press Sign in.
+  shownError(name) { const failed = this.failed.get(name); return failed?.signIn ? SIGN_IN_SHOWN : failed?.error || ''; }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
   async toolsOf(name, config, again = true) {
@@ -184,7 +190,7 @@ export class Toolbox {
     const hooks = this.listHooks();
     return {
       computer: this.computer?.() || '',
-      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : config.url, tools: tools.length, error: this.failed.get(name)?.error || '', removable: !user || Boolean(user[name]) })),
+      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : shownAddress(config.url), tools: tools.length, error: this.shownError(name), removable: !user || Boolean(user[name]) })),
       skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome), ...(skill.error ? { error: skill.error } : {}) })),
       commands, hooks,
     };
@@ -254,7 +260,7 @@ export class Toolbox {
     for (const name of plan.names) {
       this.lists.delete(name); this.failed.delete(name); await this.close(name);
       if (!servers[name]) { check.push({ name, ok: false, error: 'Claude Code took it, but Rex Desk does not see it yet. Restart Rex Desk and look again.' }); continue; }
-      const tools = await this.toolsOf(name, servers[name]), error = this.failed.get(name)?.error || '';
+      const tools = await this.toolsOf(name, servers[name]), error = this.shownError(name);
       check.push({ name, ok: !error && tools.length > 0, tools: tools.length, ...(error ? { error } : tools.length ? {} : { error: 'It started but offers no tools.' }) });
     }
     return { kind: 'server', added: plan.names.join(', '), check };

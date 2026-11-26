@@ -35,7 +35,6 @@ export class Unsafe extends Error { constructor() { super(UNSAFE); this.own = tr
 // Fields the MCP protocol reads (types, names, addresses, cursors): their values are never changed, only checked.
 const STRUCTURE = new Set(['type', 'mimeType', 'role', 'uri', 'uriTemplate', 'name', 'method', 'jsonrpc', 'id', 'nextCursor', 'cursor', 'progressToken', 'protocolVersion']);
 const WITHHELD = '[Rex Desk held this file back: it could show your sign-in.]';
-const BASE64 = /[A-Za-z0-9+/_-]{8,}={0,2}/g;
 
 // Takes secrets out of a decoded MCP answer and keeps its structure: free text has them replaced, a protocol field, field
 // name or number that holds one makes the whole answer Unsafe, and base64 data (images, audio, files) that decodes to one
@@ -44,13 +43,17 @@ export function redactor(secrets) {
   const raw = [...new Set([...secrets].filter(Boolean).map(String))];
   const forms = [...new Set(raw.flatMap(secret => {
     const escaped = JSON.stringify(secret).slice(1, -1);
-    return [secret, escaped, escaped.replaceAll('/', '\\/'), encodeURIComponent(secret.toWellFormed())];
+    const hex = Buffer.from(secret).toString('hex');
+    return [secret, escaped, escaped.replaceAll('/', '\\/'), encodeURIComponent(secret.toWellFormed()), hex, hex.toUpperCase()];
   }))].sort((left, right) => right.length - left.length);
   if (!forms.length) return value => value;
   // One pass, longest first, so a short secret never cuts up a longer one or the word put in its place.
   const source = forms.map(form => form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const pattern = new RegExp(source, 'g'), shows = value => new RegExp(source).test(value);
   const bytes = raw.map(secret => Buffer.from(secret));
+  // Base64 of the shortest secret, without padding, is the shortest run worth decoding: a short secret is never missed.
+  const shortest = Math.max(2, Math.min(...bytes.map(item => Math.ceil(item.length * 4 / 3))));
+  const BASE64 = new RegExp(`[A-Za-z0-9+/_-]{${shortest},}={0,2}`, 'g');
   // Base64 (either alphabet) that decodes to bytes holding a secret, read from every starting offset.
   const decodes = chunk => {
     for (let offset = 0; offset < 4 && offset < chunk.length; offset++) {
@@ -76,13 +79,17 @@ export function redactor(secrets) {
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [text(key), loose(item)]))
     : value;
   const binary = value => typeof value === 'string' && (shows(value) || decodes(value.replace(/\s+/g, '')));
+  // A protocol field (an address, a name, a cursor) is passed on as it is, so it may not hold a secret in any form: written
+  // out, escaped, percent-encoded, hex, or base64 anywhere in it (also after percent-decoding, as in a data: or file address).
+  const encoded = value => { BASE64.lastIndex = 0; return [...value.matchAll(BASE64)].some(([chunk]) => decodes(chunk)); };
+  const hides = value => { let open = value; try { open = decodeURIComponent(value); } catch { /* not percent-encoded */ } return shows(value) || shows(open) || encoded(value) || encoded(open); };
   // The MCP answer itself.
   const walk = (value, key = '') => {
-    if (typeof value === 'string') { if (!STRUCTURE.has(key)) return text(value); if (shows(value)) throw new Unsafe(); return value; }
+    if (typeof value === 'string') { if (!STRUCTURE.has(key)) return text(value); if (hides(value)) throw new Unsafe(); return value; }
     if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') { if (forms.includes(String(value))) throw new Unsafe(); return value; }
     if (Array.isArray(value)) return value.map(item => walk(item, key));
     if (!value || typeof value !== 'object') return value;
-    for (const name of Object.keys(value)) if (shows(name)) throw new Unsafe();
+    for (const name of Object.keys(value)) if (hides(name)) throw new Unsafe();
     // Image or audio content, and a resource's blob: withheld whole, in a form the protocol still accepts.
     if ((value.type === 'image' || value.type === 'audio') && binary(value.data)) return { type: 'text', text: WITHHELD };
     if (typeof value.blob === 'string' && binary(value.blob)) { const { blob, mimeType, ...rest } = value; return walk({ ...rest, mimeType: 'text/plain', text: WITHHELD }, key); }
