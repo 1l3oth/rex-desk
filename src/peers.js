@@ -778,11 +778,12 @@ export class Peers {
   }
   // A note's rewind hint (the oldest row it uploaded). A look going on after its page limit keeps its exact place (cursor);
   // only a hint below that place rewinds it, and then the look starts at the hint (rows from there on were not all read yet).
-  // A hint at or past the place changes nothing: the look reaches it anyway. During a look the hint waits in lateHint.
+  // A hint at or past the place changes nothing: the look reaches it anyway (the row at the place itself was read). During a
+  // look the hint waits in lateHint, and is applied the same way once the look is over, whatever it answered (see start).
   hint(part, at) {
+    if ((this.reading || {})[part]) { const late = this.lateHint ||= {}; late[part] = older(late[part], at); return; }
     const due = this.due ||= {}, cursor = this.cursor ||= {};
-    if ((this.reading || {})[part]) { const late = this.lateHint ||= {}; late[part] = older(late[part], at); due[part] = older(due[part], at); return; }
-    if (cursor[part]) { if (at <= cursor[part]) { delete cursor[part]; due[part] = at; } else due[part] ||= at; return; }
+    if (cursor[part]) { if (at < cursor[part]) { delete cursor[part]; due[part] = at; } else due[part] ||= at; return; }
     due[part] = older(due[part], at);
   }
   // Another computer that is on but sends no notes (its line is down, or it runs a version without them): it is still looked
@@ -797,7 +798,7 @@ export class Peers {
     this.pendingCommands(); this.watchChats(); this.refreshSecure();
     // Each step gets at most this long. A cloud call that never answers (a dropped connection, a laptop waking from sleep)
     // used to hold the loop for good: nothing new arrived from the other computers until Rex Desk was restarted.
-    const bounded = (step, ms = STEP_MS) => Promise.race([Promise.resolve().then(step).catch(() => {}), new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); })]);
+    const bounded = (step, ms = this.stepMs ?? STEP_MS) => Promise.race([Promise.resolve().then(step).catch(() => {}), new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); })]);
     const tick = async () => {
       for (const peer of this.settings().peers) {
         if (this.timers.get(peer.id) > Date.now()) continue;
@@ -822,11 +823,12 @@ export class Peers {
           try { result = await bounded(async () => { const answer = await pull(options); return answer === false ? null : answer && typeof answer === 'object' ? answer : { done: true }; }); }
           finally { reading[part] = false; doing(''); }
           const later = late[part]; delete late[part];
-          if (!result) return;
-          if (result.done) { delete cursor[part]; if (later) due[part] = later; else if (due[part] === from) delete due[part]; return; }
-          // Stopped at its page limit: the exact place is kept apart from the hints, and the look goes on strictly after it.
-          if (result.next) { cursor[part] = String(result.next); due[part] ||= String(result.next); more[part] = Date.now() + (this.moreMs ?? MORE_MS); }
-          if (later && (!cursor[part] || later <= cursor[part])) { delete cursor[part]; due[part] = later; }
+          // Read to the end: the hint and the place are done. Stopped at its page limit: the exact place is kept apart from the
+          // hints, and the look goes on strictly after it. Failed, timed out or the cloud not there: both stay as they were.
+          if (result?.done) { delete cursor[part]; if (due[part] === from) delete due[part]; }
+          else if (result?.next) { cursor[part] = String(result.next); due[part] ||= String(result.next); more[part] = Date.now() + (this.moreMs ?? MORE_MS); }
+          // A note that came during the look, after any of these: a hint below the place rewinds the next look to it (L88 review).
+          if (later) this.hint(part, later);
         };
         const options = after ? { after } : from ? { from } : undefined;
         if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { this.timers.set(timer, Date.now() + safety); await read(options); }

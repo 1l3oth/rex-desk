@@ -296,6 +296,61 @@ test('the shared records look says when the cloud did not answer and when it sto
   assert.ok(answer.next, 'with where it stopped');
 });
 
+// One look going on after its page limit (an exact place saved), and a note with a newly uploaded row. Through the real loop
+// (Peers.start) against a stand-in cloud, for chat and shared records at once. Returns what went wrong, or '' (L88 review).
+async function lookAndNote({ outcome, when, where }) {
+  const { b } = account(), peers = b.desk.peers, T = Date.now() - 3600000;
+  const version = (i, tag = 'other') => `${(T + i).toString(36).padStart(9, '0')}.0000.${tag}`;
+  const k = 10, count = outcome === 'page limit' ? k + 1 + 21000 : 60, place = version(k);
+  // The new row: below the place, right at it (the note names the place itself), or after the newest row.
+  const fresh = where === 'below' ? version(k - 5, 'otherb') : where === 'at' ? version(k, 'otherz') : version(count + 10);
+  const hint = where === 'at' ? place : fresh;
+  const cloud = {}, seen = {}, first = {};
+  for (const part of ['chat', 'shared']) { cloud[part] = Array.from({ length: count }, (_, i) => version(i)); seen[part] = new Set(); first[part] = true; }
+  const arrive = part => { if (!cloud[part].includes(fresh)) { cloud[part].push(fresh); cloud[part].sort(); } peers.hint(part, hint); };
+  const answer = async (part, since, size) => {
+    if (first[part]) {
+      first[part] = false;
+      if (when === 'during') arrive(part);
+      if (outcome === 'failed') throw new Error('fetch failed');
+      if (outcome === 'cloud unavailable') return null;
+      if (outcome === 'timed out') { await new Promise(resolve => setTimeout(resolve, 900)); return null; }
+    }
+    const list = cloud[part]; let low = 0, high = list.length;
+    while (low < high) { const middle = (low + high) >> 1; if (list[middle] > since) high = middle; else low = middle + 1; }
+    return list.slice(low, low + size);
+  };
+  b.store.cloud.pullChat = async since => (await answer('chat', since, 500))?.map(v => ({ uid: v, v })) ?? null;
+  b.store.cloud.pullShared = async since => (await answer('shared', since, 400))?.map(v => ({ kind: 'roommsg', id: v, deleted: false, value: null, v })) ?? null;
+  b.store.applyChatEvents = list => { for (const row of list) seen.chat.add(row.v); return list.length; };
+  peers.applyAll = list => { for (const row of list) seen.shared.add(row.v); };
+  peers.save({ chatNode: peers.self.id, chatRead: 2, chatAt: place, chatSettled: '', chatDeepAt: Date.now(), chatDeepFrom: '', tursoAt: T + k, tursoNode: peers.self.id, tursoSettled: '' });
+  peers.cursor = { chat: place, shared: place }; peers.due = { chat: version(0), shared: version(0) };
+  peers.moreMs = 20; peers.stepMs = 300; peers.timers.set('chat', Date.now() + 600000); peers.timers.set('turso', Date.now() + 600000);
+  if (when === 'before') { arrive('chat'); arrive('shared'); }
+  peers.start();
+  try {
+    const settled = () => ['chat', 'shared'].every(part => !(part in peers.due) && !peers.cursor[part] && !peers.reading?.[part]);
+    for (let wait = 0; wait < 600 && !settled(); wait++) await new Promise(resolve => setTimeout(resolve, 25));
+    if (!settled()) return 'never finished';
+    const missing = ['chat', 'shared'].filter(part => cloud[part].some(v => (v > place || v === fresh) && !seen[part].has(v)));
+    return missing.length ? `missed rows in ${missing.join(' and ')}` : '';
+  } finally { peers.stop(); }
+}
+
+test('every outcome of a look, with a note before or during it below, at or after its place: no row is missed and it finishes, for chat and shared records (L88 review)', async () => {
+  const cases = [];
+  for (const outcome of ['reached the end', 'page limit', 'failed', 'timed out', 'cloud unavailable'])
+    for (const when of ['before', 'during']) for (const where of ['below', 'at', 'after']) cases.push({ outcome, when, where });
+  const wrong = [];
+  for (let start = 0; start < cases.length; start += 10) {
+    const batch = cases.slice(start, start + 10);
+    const answers = await Promise.all(batch.map(lookAndNote));
+    batch.forEach((item, index) => { if (answers[index]) wrong.push(`${item.outcome}, note ${item.when}, hint ${item.where} the place: ${answers[index]}`); });
+  }
+  assert.deepEqual(wrong, []);
+});
+
 test('a different file already under the same upload name is never given out as the arriving one (L27)', () => {
   const { b } = account();
   const folder = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', mine = path.join(b.store.media('uploads'), folder, 'note.txt');
