@@ -1,9 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { stopTree } from './processes.js';
+
+// This Rex Desk, for the stdio proxy agy runs to reach the desk tools.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Gemini through Google's own Antigravity CLI (agy), signed in with the person's Google account. Rex Desk talks to it over the
 // Agent Client Protocol (agy acp: JSON-RPC on stdio) and never reads, copies or stores the Google sign-in.
@@ -21,9 +25,37 @@ export function agyCommand(env = process.env) {
   return folders.map(folder => path.join(folder, 'agy.exe')).find(file => existsSync(file)) || 'agy';
 }
 
-// The Rex Desk tools reach agy through its own MCP list (it ignores servers handed over in the session), installed once from Setup.
+// The Rex Desk tools reach agy through its own MCP list (it ignores servers handed over in the session). agy reads it from
+// its global file, the same on Windows and Mac: ~/.gemini/config/mcp_config.json (antigravity.google/docs/mcp). An entry is
+// { command, args } for a stdio server, under the mcpServers map.
+export function antigravityMcpPath(home = os.homedir()) { return path.join(home, '.gemini', 'config', 'mcp_config.json'); }
 export function antigravityMcpInstalled(home = os.homedir()) {
-  try { return Boolean(JSON.parse(readFileSync(path.join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8')).mcpServers?.rex_desk); } catch { return false; }
+  try { return Boolean(JSON.parse(readFileSync(antigravityMcpPath(home), 'utf8')).mcpServers?.rex_desk); } catch { return false; }
+}
+// The rex_desk stdio entry: run this Rex Desk's proxy, which finds its own local connection key, so no token is written here.
+export function antigravityMcpEntry({ node = process.execPath, root = packageRoot } = {}) {
+  return { command: node, args: [path.join(root, 'src', 'stdio.js')] };
+}
+// Put the rex_desk entry into agy's own MCP list, so a Gemini run has the desk tools instead of none (the agent then tells
+// the person to switch to Claude). It is merged in: every other server and every other key is kept, an empty or broken
+// file is replaced with a fresh one, and the previous file is copied to mcp_config.json.bak first. Returns whether the
+// entry is in place afterwards.
+export function ensureAntigravityMcp({ home = os.homedir(), node = process.execPath, root = packageRoot } = {}) {
+  const file = antigravityMcpPath(home), entry = antigravityMcpEntry({ node, root });
+  let data = {}, current = null;
+  try { const raw = readFileSync(file, 'utf8').trim(); if (raw) data = JSON.parse(raw); } catch {}
+  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+  if (!data.mcpServers || typeof data.mcpServers !== 'object' || Array.isArray(data.mcpServers)) data.mcpServers = {};
+  current = data.mcpServers.rex_desk;
+  if (current && current.command === entry.command && Array.isArray(current.args) && current.args[0] === entry.args[0]) return true;
+  // Keep any extra fields someone added to the entry (env, cwd), only correct the command and args.
+  data.mcpServers.rex_desk = { ...(current && typeof current === 'object' ? current : {}), ...entry };
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    try { const old = readFileSync(file, 'utf8'); if (old.trim()) writeFileSync(file + '.bak', old); } catch {}
+    writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+    return antigravityMcpInstalled(home);
+  } catch { return false; }
 }
 
 // Signed in when agy can list the account's models; the list is the proof, nothing is read from the sign-in itself.
@@ -144,6 +176,10 @@ export class AntigravityRunner {
   }
   async start(prompt) {
     if (this.signal?.aborted) throw new Error('Antigravity was stopped.');
+    // Gemini's CLI reads only its own MCP list, so put the Rex Desk tools in it before agy starts, or the agent has none of
+    // the desk_ tools and tells the person to switch to Claude. Merged in, keeping every other server (#a93b8959). Not in a
+    // test run, which must not write the real home folder.
+    const rexToolsReady = process.env.NODE_TEST_CONTEXT ? true : ensureAntigravityMcp({ node: process.execPath });
     const env = { ...this.agentEnv, REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     let failed; const broken = new Promise((resolve, reject) => { failed = reject; }); broken.catch(() => {});
     this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: dangerous(this.run.permissionMode) ? ['--dangerously-skip-permissions'] : [],
@@ -163,6 +199,13 @@ export class AntigravityRunner {
       await set('thought_level', thought(this.run.effort))?.catch(() => {});
       await this.setMode(set);
       this.live = true;
+      // If the entry still could not be written, say so in one line with the one place that fixes it, instead of leaving the
+      // agent to tell the person to switch to Claude.
+      if (!rexToolsReady && this.ask) {
+        const id = 'rex-tools-missing';
+        this.event('agent-tool', { id, tool: 'Rex Desk tools', input: { description: 'Rex Desk could not add its tools to Gemini on this computer. Open Settings, AI connection, choose Gemini and press Add tools, then send your message again.' } });
+        this.event('agent-tool-result', { id, text: `Could not write ${antigravityMcpPath()}.`, failed: true });
+      }
       const result = await Promise.race([this.client.request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0), broken]);
       this.flush();
       if (result.stopReason === 'cancelled') throw new Error('Antigravity was stopped.');

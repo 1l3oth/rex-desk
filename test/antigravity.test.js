@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, autoUnsupported, parseAgyModels } from '../src/antigravity.js';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, autoUnsupported, parseAgyModels, ensureAntigravityMcp, antigravityMcpInstalled, antigravityMcpPath, antigravityMcpEntry } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
 import { modesFor, effortsFor, runOptions, defaultModeFor } from '../src/choices.js';
 import { antigravityTool } from '../src/antigravity.js';
@@ -143,4 +144,48 @@ test('a Gemini Auto error that is not a refusal does not turn Auto off for later
   assert.equal(autoUnsupported(new Error('Auto mode is not available: it needs the OS terminal sandbox')), true);
   assert.equal(autoUnsupported(new Error('unsupported mode: auto')), true);
   assert.equal(autoUnsupported(new Error('Auto sandbox initialization failed')), false, 'a passing sandbox failure is not a refusal');
+});
+
+const tempHome = () => mkdtempSync(path.join(os.tmpdir(), 'rex-gemini-'));
+
+test('Rex Desk adds its own rex_desk entry to agy MCP list when the file is empty', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  writeFileSync(antigravityMcpPath(home), ''); // the real bug: an empty file
+  assert.equal(antigravityMcpInstalled(home), false);
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  assert.equal(antigravityMcpInstalled(home), true);
+  const data = JSON.parse(readFileSync(antigravityMcpPath(home), 'utf8'));
+  assert.deepEqual(data.mcpServers.rex_desk, antigravityMcpEntry({ node: 'node', root: 'D:/rex' }));
+});
+
+test('adding rex_desk keeps every other MCP server and backs up the old file', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  const before = { mcpServers: { other: { command: 'x', args: ['y'] } }, extra: 1 };
+  writeFileSync(antigravityMcpPath(home), JSON.stringify(before));
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  const data = JSON.parse(readFileSync(antigravityMcpPath(home), 'utf8'));
+  assert.deepEqual(data.mcpServers.other, { command: 'x', args: ['y'] }, 'the other server is kept');
+  assert.equal(data.extra, 1, 'other keys are kept');
+  assert.ok(data.mcpServers.rex_desk, 'rex_desk is added');
+  assert.deepEqual(JSON.parse(readFileSync(antigravityMcpPath(home) + '.bak', 'utf8')), before, 'the old file is backed up');
+});
+
+test('a broken MCP file is replaced, not left broken, and the write is idempotent', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  writeFileSync(antigravityMcpPath(home), '{ this is not json');
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  assert.equal(antigravityMcpInstalled(home), true);
+  const first = readFileSync(antigravityMcpPath(home), 'utf8');
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true, 'already-right entry returns true');
+  assert.equal(readFileSync(antigravityMcpPath(home), 'utf8'), first, 'no rewrite when the entry already matches');
+});
+
+test('ensureAntigravityMcp creates the config folder when it does not exist', () => {
+  const home = tempHome();
+  assert.equal(existsSync(path.join(home, '.gemini', 'config')), false);
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  assert.equal(antigravityMcpInstalled(home), true);
 });
