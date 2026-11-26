@@ -16,8 +16,6 @@ export function noticeKey(view) {
 }
 export const unreadFor = (ui, key) => ui.snap?.notices?.byKey?.[key] || 0;
 const when = at => { const minutes = Math.round((Date.now() - Date.parse(at)) / 60000); return minutes < 1 ? t('now') : minutes < 60 ? t`${minutes} min` : minutes < 1440 ? t`${Math.round(minutes / 60)} h` : new Date(at).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }); };
-const initials = text => (String(text || '').match(/[\p{L}\p{N}]/gu) || ['R']).slice(0, 2).join('').toUpperCase();
-const hue = text => [...String(text || t('Rex'))].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
 const who = item => item.from || String(item.title || '').replace(/ (replied|stopped|in .*|asked you.*)$/, '').replace(/^(Needs your (OK|answer) · )/, '') || t('Rex Desk');
 
 // ---------- sounds, made in the page (no files) ----------
@@ -59,13 +57,15 @@ function noticeListHtml(ctx) {
   const dnd = prefs.dndUntil && prefs.dndUntil > Date.now();
   const row = item => { const [label, tone] = KIND[item.kind] || [t('Update'), 'reply'], name = who(item);
     return `<li class="nt-row${item.read ? '' : ' unread'}"><button type="button" class="nt-open" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">
-      <span class="nt-av h${hue(name)}">${esc(initials(name))}</span><span class="nt-text"><span class="nt-top"><b>${esc(item.title)}</b><span class="nt-kind ${tone}">${esc(label)}</span></span><small>${esc(item.body)}</small></span><span class="nt-when">${esc(when(item.at))}${item.read ? '' : '<i class="nt-dot"></i>'}</span></button></li>`; };
+      ${avatarHtml(ctx, { name, size: 'sm' })}<span class="nt-text"><span class="nt-top"><b>${esc(item.title)}</b><span class="nt-kind ${tone}">${esc(label)}</span></span><small>${esc(item.body)}</small></span><span class="nt-when">${esc(when(item.at))}${item.read ? '' : '<i class="nt-dot"></i>'}</span></button></li>`; };
   return `<div class="nt-pane-head"><h2>${t`Notifications`}</h2>${dnd ? `<span class="nt-kind">${t`Do not disturb`}</span>` : prefs.quietNow ? `<span class="nt-kind">${t`Quiet hours`}</span>` : ''}<span class="spacer"></span>
       <button type="button" class="nt-gear" data-action="nt-settings" title="${t`Notification settings`}" aria-label="${t`Notification settings`}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button></div>
     <div class="nt-bar"><div class="pseg"><button type="button" class="tab ${filter === 'all' ? 'on' : ''}" data-action="nt-filter" data-tab="all">${t`All`}</button><button type="button" class="tab ${filter === 'unread' ? 'on' : ''}" data-action="nt-filter" data-tab="unread">${t('Unread')}${data.unread ? `<span class="tcount">${data.unread}</span>` : ''}</button></div><span class="spacer"></span>${data.unread ? `<button type="button" class="btn small quiet" data-action="nt-readall">${t`Mark all as read`}</button>` : ''}</div>
     ${list.length ? `<ul class="nt-list">${list.map(row).join('')}</ul>` : `<div class="nt-empty"><b>${filter === 'unread' ? t('All caught up') : t('Nothing yet')}</b><small>${t`When an agent replies, asks you something or stops, it shows here.`}</small></div>`}`;
 }
 let pane = null, paneHtml = '';
+// A phone-sized screen: pop-ups sit at the top and desktop-only settings are left out.
+const onPhone = () => Boolean(window.matchMedia?.('(max-width:760px)').matches);
 function placePane() {
   if (!pane) return;
   const bell = document.querySelector('.tile[data-action="nt-panel"]'), box = bell?.getBoundingClientRect(), narrow = window.innerWidth < 640;
@@ -83,6 +83,8 @@ function drawPane(ctx) {
 export function closeNoticePane() { pane?.remove(); pane = null; paneHtml = ''; document.querySelector('.tile[data-action="nt-panel"]')?.classList.remove('active'); }
 export function toggleNoticePane(ctx) {
   if (pane) return closeNoticePane();
+  // The list shows everything the pop-ups said, so open pop-ups go away instead of sitting over it.
+  document.querySelector('.nt-stack')?.replaceChildren();
   pane = document.createElement('div'); pane.className = 'nt-pane'; pane.setAttribute('role', 'dialog'); pane.setAttribute('aria-label', t('Notifications'));
   document.body.append(pane); drawPane(ctx); document.querySelector('.tile[data-action="nt-panel"]')?.classList.add('active');
   pane.querySelector('.tab.on')?.focus();
@@ -126,15 +128,15 @@ export function noticeSettingsHtml(ctx) {
       <label class="nt-field"><span><b>${t`Group chats`}</b><small>${t`Messages that @mention you always count, unless this is Off.`}</small></span>${select('kinds.room', kinds.room || 'all', [['all', t('Every message')], ['mentions', t('Only messages to me')], ['off', t('Off')]])}</label>
       <label class="nt-field"><span><b>${t`Busy group chats`}</b><small>${t`How often one room may pop up.`}</small></span>${select('roomGap', prefs.roomGap ?? 60, [[0, t('Every message')], [60, t('At most once a minute')], [300, t('Every 5 minutes')], [900, t('Every 15 minutes')]])}</label></section>
     <section class="card nt-card"><h3>${t`How it reaches you`}</h3>
-      ${toggle('inapp', prefs.inapp !== false, t('Pop-up inside Rex Desk'), t('Bottom right, for chats you are not looking at.'))}
-      ${toggle('windows', prefs.windows !== false, t('Windows pop-ups'), t('When Rex Desk is not the window in front.'))}
+      ${toggle('inapp', prefs.inapp !== false, t('Pop-up inside Rex Desk'), onPhone() ? t('At the top of the screen, for chats you are not looking at.') : t('Bottom right, for chats you are not looking at.'))}
+      ${onPhone() ? '' : toggle('windows', prefs.windows !== false, t('Windows pop-ups'), t('When Rex Desk is not the window in front.'))}
       ${toggle('preview', prefs.preview !== false, t('Show the message in pop-ups'), t('Off: pop-ups only say who wrote.'))}
       ${toggle('sound', prefs.sound !== false, t('Sound'))}
       <div class="nt-row2"><label>${t('Tone')}${select('tone', prefs.tone || 'chime', TONES)}</label><label>${t`Volume`}<input type="range" min="0" max="1" step="0.05" data-nt-pref="volume" value="${esc(prefs.volume ?? 0.6)}"></label></div>
       <div class="nt-chips"><button type="button" class="btn small" data-action="nt-hear">${t`Play`}</button><button type="button" class="btn small primary" data-action="nt-test">${t`Send a test notification`}</button></div>
       <p class="muted small">${t`Questions use a rising three-note sound, stops a falling one, so you can tell them apart without looking.`}</p></section>
     <section class="card nt-card"><h3>${t`Mute a chat`}</h3><p class="muted small">${t`No pop-ups, no sound and no unread count. Its messages stay in the list.`}</p>
-      <ul class="nt-mutes">${chats.map(chat => `<li><span class="nt-av sm h${hue(chat.name)}">${esc(initials(chat.name))}</span><span class="nt-mname"><b>${esc(chat.name)}</b>${chat.sub ? `<small>${esc(chat.sub)}</small>` : ''}</span><button type="button" class="btn small${mutes.has(chat.key) ? ' on' : ' quiet'}" data-action="nt-mute" data-key="${esc(chat.key)}" data-on="${mutes.has(chat.key) ? '0' : '1'}">${mutes.has(chat.key) ? t('Muted') : t('Mute')}</button></li>`).join('')}</ul></section>
+      <ul class="nt-mutes">${chats.map(chat => `<li>${avatarHtml(ctx, { name: chat.name, size: 'sm' })}<span class="nt-mname"><b>${esc(chat.name)}</b>${chat.sub ? `<small>${esc(chat.sub)}</small>` : ''}</span><button type="button" class="btn small${mutes.has(chat.key) ? ' on' : ' quiet'}" data-action="nt-mute" data-key="${esc(chat.key)}" data-on="${mutes.has(chat.key) ? '0' : '1'}">${mutes.has(chat.key) ? t('Muted') : t('Mute')}</button></li>`).join('')}</ul></section>
   </div>`;
 }
 

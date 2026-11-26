@@ -2697,7 +2697,7 @@ html[data-theme=dark] .pf-menu{background:linear-gradient(var(--panel),var(--pan
 .pf-seg.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.18)}
 .pf-seg:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 @media (max-width:760px){
-  .rail-foot{display:block}
+  .rail-foot{display:none}
   .pf-menu{left:10px;right:10px;bottom:calc(100% + 8px)}
   .pf-trigger{padding:9px 10px}
   .pf-item{padding:11px 10px;font-size:14.5px}
@@ -3170,3 +3170,26 @@ html:has(.iv[open]){overflow:hidden}
 .cn .cn-text small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 .cn .cn-row .btn{flex:none}
 .cn .cn-time{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit}
+/* Notifications, phone (QA 95872e35): the gear sits at the right of the panel head; on a phone the list is flat rows
+   like a native list, the kind is plain coloured text, the pop-up is a small banner at the top that opens the chat when
+   tapped, and the settings are plain sections instead of large cards. */
+.nt-gear{margin-left:auto}
+.nt-open .av{width:34px;height:34px;flex:none}
+.nt-mutes .av{width:28px;height:28px;flex:none}
+@media (max-width:760px){
+  .nt-pane{left:8px!important;right:8px;width:auto;max-height:calc(100dvh - 140px);padding:10px 10px 4px;border-radius:14px}
+  .nt-pane .nt-list{gap:0}
+  .nt-pane .nt-row + .nt-row{border-top:1px solid var(--line)}
+  .nt-pane .nt-open{border:0;border-radius:0;background:none;padding:10px 4px;gap:10px}
+  .nt-pane .nt-row.unread .nt-open{background:none}
+  .nt-pane .nt-kind{padding:0;background:none;font-weight:500;font-size:11.5px}
+  .nt-pane .nt-bar .tab{padding:3px 10px;font-size:12.5px}
+  .nt-pane .nt-bar .btn{padding:3px 8px;font-size:12.5px}
+  .nt-stack{top:calc(env(safe-area-inset-top,0px) + 64px);bottom:auto;left:8px;right:8px;width:auto}
+  .nt-pop{padding:8px 10px;gap:4px;border-radius:12px;background:var(--solid,var(--panel));-webkit-backdrop-filter:none;backdrop-filter:none;animation-name:nt-drop}
+  .nt-pop .nt-pop-row,.nt-pop .nt-pop-link,.nt-pop .nt-life{display:none}
+  .nt-pop-body{-webkit-line-clamp:1;font-size:13px}
+  .nt-settings .nt-card{padding:12px 4px!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+  .nt-settings .nt-card + .nt-card{border-top:1px solid var(--line)!important}
+}
+@keyframes nt-drop{from{transform:translateY(-16px);opacity:0}}

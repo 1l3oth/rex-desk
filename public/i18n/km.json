@@ -2814,5 +2814,6 @@
  "That token is for a different bot. Paste the token of this bot, or disconnect and connect the other bot.": "token នោះជារបស់បូតផ្សេង។ សូមបិទភ្ជាប់ token របស់បូតនេះ ឬផ្ដាច់ រួចភ្ជាប់បូតមួយទៀតនោះ។",
  "That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...": "នោះមិនដូច token របស់បូតទេ។ សូមចម្លងវាពី @BotFather៖ វាមើលទៅដូច 123456:ABC-...",
  "Finish sign-in on the computer running Rex Desk.": "សូមបញ្ចប់ការចូលគណនីនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
- "Agents cannot use {0} until you sign in again.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។"
+ "Agents cannot use {0} until you sign in again.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។",
+ "At the top of the screen, for chats you are not looking at.": "នៅខាងលើអេក្រង់ សម្រាប់ការជជែកដែលអ្នកមិនកំពុងមើល។"
 }
