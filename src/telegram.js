@@ -32,6 +32,8 @@ export function splitReply(text, size = 3800, maxParts = 4) {
   }
   return parts.filter(Boolean);
 }
+// What desk_telegram answers for an agent's own bot.
+export const OWN_BOT = "Nothing was sent: this is a chat of an agent's own Telegram bot, and desk_telegram only uses the personal bot. If you are answering a message from your bot, just reply: your final answer is sent back to that chat by itself. To send your bot's owner another message, use desk_text_person.";
 // What Telegram gets when a turn fails. The error itself stays in the app: it can hold account, request or file details.
 export const TURN_FAILED = "I couldn't answer just now. Please send your message again in a little while.";
 // What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
@@ -156,8 +158,11 @@ export class TelegramBridge {
   // is no longer the linked one. Without a tag it goes to the linked chat, as before.
   async sendFromAgent(agentId, name, text, { runId = '', tag = '' } = {}) {
     const found = telegramLink(this.store);
+    const wanted = String(tag || '').trim().toLowerCase(), chat = wanted ? this.store.list('tgchat').find(item => item.tag === wanted) : null;
+    // A chat with an agent's own bot (src/agent-bots.js), or a turn it started, never goes over to the personal bot.
+    const turnNow = runId ? this.store.get('tgturn', runId) : null;
+    if ([chat?.linkId, turnNow?.linkId].some(link => String(link || '').startsWith('agentbot:'))) throw new Error(OWN_BOT);
     if (tag) {
-      const wanted = String(tag).trim().toLowerCase(), chat = this.store.list('tgchat').find(item => item.tag === wanted);
       if (!chat) throw new Error(`There is no Telegram chat tagged ${tag}.`);
       if (!found?.values?.chatId || found.link.id !== chat.linkId || String(found.values.chatId) !== chat.chatId) throw new Error(`The Telegram chat ${chat.tag} is no longer linked, so nothing was sent.`);
     }

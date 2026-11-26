@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createApp } from '../src/server.js';
 import { ClaudeRunner } from '../src/runners.js';
+import { OWN_BOT, hideTelegramTag } from '../src/telegram.js';
 
 // A turn a Telegram message started, end to end: the real desk and the real Claude runner, with a fake AI and a fake Telegram.
 const TOKEN = '100001:AAAAAAAAAAAAAAAAAAAAAAAA';
@@ -14,7 +15,8 @@ const result = extra => ({ type: 'result', subtype: 'success', is_error: false, 
 async function desk(name) {
   const data = path.join(os.tmpdir(), `tg-turns-${name}-${process.pid}`, 'data'), plan = [];
   // What the next turn does: messages the fake AI sends back, or an error the runner throws.
-  const sdk = { query: () => { const next = plan.shift(); return Object.assign((async function* () { if (next instanceof Error) throw next; yield* next; })(), { close() {}, async interrupt() {} }); } };
+  const prompts = [];
+  const sdk = { query: ({ prompt }) => { prompts.push(String(prompt)); const next = plan.shift(); return Object.assign((async function* () { if (next instanceof Error) throw next; yield* next; })(), { close() {}, async interrupt() {} }); } };
   const app = await createApp({ dataDirectory: data, port: 0, requireAccount: false, runnerFactory: options => new ClaudeRunner({ ...options, sdk }) });
   const sent = [];
   const telegram = async (url, options) => {
@@ -37,7 +39,7 @@ async function desk(name) {
     await new Promise(resolve => setTimeout(resolve, 150));
     return sent.slice(from);
   };
-  return { app, ask, sent };
+  return { app, ask, sent, prompts, message };
 }
 
 test('a failed turn sends a short plain message on Telegram, never the raw error', async () => {
@@ -51,5 +53,28 @@ test('a failed turn sends a short plain message on Telegram, never the raw error
     // A usage limit with no other account to switch to.
     app.desk.agents.alternative = async () => null;
     assert.deepEqual(await ask([result({ result: 'Claude AI usage limit reached|1790000000' })]), [SORRY], 'a usage limit told as an ordinary reply');
+  } finally { await app.close(); }
+});
+
+test('a message from an agent bot says its answer goes back by itself, and desk_telegram never switches to the personal bot', async () => {
+  const { app, ask, sent, prompts } = await desk('tool');
+  try {
+    const { desk: { store, telegram } } = app;
+    // The personal bot is connected and linked too: the trap this closes.
+    store.put('secret', 'connector:personal', store.encrypt(JSON.stringify({ botToken: '100003:BBBBBBBBBBBBBBBBBBBBBBBB', chatId: '9' })));
+    store.put('connector', 'personal', { id: 'personal', connectorId: 'telegram', name: 'Telegram', at: new Date().toISOString() });
+    await ask([result({ result: 'Here.' })]);
+    const prompt = prompts.at(-1), line = prompt.split('\n').find(text => text.startsWith('[Telegram #'));
+    assert.match(line, /your final answer is sent back to this chat by itself.*desk_text_person, never desk_telegram\. \(tg:\d+\)$/);
+    assert.doesNotMatch(hideTelegramTag(`${line}\nhello`), /final answer|tg:/, 'the app chat does not show that line');
+    const tag = store.list('tgchat').find(item => item.linkId === 'agentbot:qa').tag, from = sent.length;
+    await assert.rejects(() => telegram.sendFromAgent('qa', 'QA', 'hi', { tag }), { message: OWN_BOT });
+    telegram.onTurnStart('bot-turn', 'one', { agentId: 'qa', linkId: 'agentbot:qa', chatId: '7' });
+    const personalTag = telegram.chatTag('personal', '9');
+    for (const options of [{ runId: 'bot-turn' }, { runId: 'bot-turn', tag: personalTag }]) await assert.rejects(() => telegram.sendFromAgent('qa', 'QA', 'hi', options), { message: OWN_BOT });
+    assert.equal(sent.length, from, 'nothing was sent');
+    assert.equal(store.get('tgturn', 'bot-turn').sent, false, 'so the final answer still goes out');
+    assert.match(OWN_BOT, /final answer is sent back.*desk_text_person/);
+    assert.deepEqual(await telegram.sendFromAgent('qa', 'QA', 'from the app', { runId: 'app-turn' }), { sent: true }, 'an app turn still reaches the personal bot');
   } finally { await app.close(); }
 });

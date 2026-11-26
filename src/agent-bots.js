@@ -155,7 +155,10 @@ export class AgentBots {
     const bridge = this.desk.telegram, link = linkOf(agentId);
     if (agentId === 'main') this.desk.specialists.ensureMain();
     const tag = bridge.chatTag(link, chat.id), key = randomUUID().replaceAll('-', '').slice(0, 12);
-    const prompt = fromTelegram(text, key, `Telegram, ${String(who).replace(/\s+/g, ' ').slice(0, 40)} (${tag})`);
+    // Said on the hidden first line, so the agent does not look for a tool to answer with.
+    const owner = String(chat.id) === String(this.record(agentId)?.ownerChatId);
+    const how = `This came through your own bot: your final answer is sent back to this chat by itself, so do not send it with a tool.${owner ? ' Only for an extra message use desk_text_person, never desk_telegram.' : ''}`;
+    const prompt = fromTelegram(text, key, `Telegram, ${String(who).replace(/\s+/g, ' ').slice(0, 40)}. ${how} (${tag})`);
     const replyTo = { agentId, linkId: link, chatId: String(chat.id), at: new Date().toISOString(), keys: [key] };
     this.store.put('tgqueued', key, { id: key, ...replyTo, keys: undefined });
     try { await this.desk.specialistTurn(agentId, { prompt, telegram: replyTo }); } catch (error) { this.store.delete('tgqueued', key); throw error; }
