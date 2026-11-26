@@ -119,7 +119,7 @@ test('a computer that says it is on through Turso counts as on, even when it can
   const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
   b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
   const copy = b.desk.store.get('specialist', dara.id);
-  assert.match(b.desk.specialists.status(copy).label, /has not checked in/, 'never seen at all: it says so, not that it is off');
+  assert.match(b.desk.specialists.status(copy).label, /^Offline · .+ has not checked in$/, 'never seen at all: it says so, not that it is off, with a real middle dot');
   b.desk.store.cloud = { ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, presence: async () => [{ node: a.desk.store.nodeId, name: 'Home laptop', at: Date.now(), agents: { [dara.id]: { state: 'replying', label: 'Replying in a room…' } } }] };
   await b.desk.peers.presence();
   assert.equal(b.desk.specialists.status(copy).state, 'replying', 'its status comes from the database');

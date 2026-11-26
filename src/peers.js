@@ -104,7 +104,7 @@ export class Peers {
   statusOf(agent) {
     if (this.direct(agent.node)) return this.live.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
     if (this.seen(agent.node)) return this.cloudSeen.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
-    return { state: 'offline', label: this.cloudSeen?.has(agent.node) || this.byNode(agent.node) ? `Offline Â· ${this.deviceName(agent.node)} is off` : `Offline Â· ${this.deviceName(agent.node)} has not checked in` };
+    return { state: 'offline', label: this.cloudSeen?.has(agent.node) || this.byNode(agent.node) ? `Offline · ${this.deviceName(agent.node)} is off` : `Offline · ${this.deviceName(agent.node)} has not checked in` };
   }
   // Runs and questions of agents on the other computers, shown as if they were here.
   remoteRuns() { return [...this.live].filter(([node]) => this.direct(node)).flatMap(([node, live]) => (live.runs || []).map(run => ({ ...run, remote: node }))); }
@@ -489,7 +489,7 @@ export class Peers {
   // `artifacts`: the chat's artifact records when the caller already has them (the start-up pass reads them all once).
   copyChat(runId, artifacts = null) {
     const run = this.store.get('run', runId); if (!this.copies(run)) return;
-    const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}â€¦` : value;
+    const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}…` : value;
     // The same message said again right after itself is shown once; tool output is shortened. The newest messages are kept.
     const events = [];
     for (const event of this.store.events(runId, { visible: true, limit: COPY_EVENTS })) {
