@@ -132,19 +132,27 @@ export function nodeFetch(target, init = {}) {
       options.lookup = (_host, opts, cb) => opts?.all ? cb(null, [{ address: pin.address, family }]) : cb(null, pin.address, family);
       if (url.protocol === 'https:') options.servername = url.hostname; // TLS still sees the real host name, not the pinned IP
     }
+    let settled = false;
+    const done = fn => { if (!settled) { settled = true; fn(); } };
+    const fail = error => done(() => reject(error instanceof Error ? error : new Error(String(error))));
     const request = mod.request(url, options, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
-      response.on('end', () => {
+      // If the connection drops after the headers but before the body ends, Node fires 'aborted'/'error'/'close' without
+      // 'end': reject instead of waiting forever, so a sign-in or refresh that loses its server fails rather than hangs.
+      response.on('aborted', () => fail(new Error('the connection dropped before the response finished')));
+      response.on('error', fail);
+      response.on('close', () => { if (!response.complete) fail(new Error('the connection closed before the response finished')); });
+      response.on('end', () => done(() => {
         const text = Buffer.concat(chunks).toString('utf8');
         const get = name => { const value = response.headers[String(name).toLowerCase()]; return Array.isArray(value) ? value.join(', ') : (value ?? null); };
         const make = () => ({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, statusText: response.statusMessage || '', url: url.href, type: 'basic', redirected: false,
           headers: { get, has: name => get(name) !== null, forEach: fn => { for (const [key, value] of Object.entries(response.headers)) fn(Array.isArray(value) ? value.join(', ') : value, key); } },
           async json() { return JSON.parse(text); }, async text() { return text; }, body: { cancel: async () => {} }, clone: () => make() });
         resolve(make());
-      });
+      }));
     });
-    request.on('error', reject);
+    request.on('error', fail);
     if (init.signal) {
       if (init.signal.aborted) request.destroy(new Error('aborted'));
       else init.signal.addEventListener('abort', () => request.destroy(new Error('aborted')), { once: true });
