@@ -28,6 +28,16 @@ export async function loadConnectors(ctx, state, draw) {
 
 const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? t('not synced yet') : minutes < 1 ? t('synced just now') : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
 
+// Remote MCP servers Rex Desk signs in to itself (L30): how each stands, with its one button.
+function signInParts({ esc }, item) {
+  const name = esc(item.name);
+  const bad = text => `<span class="tb-status bad"><i aria-hidden="true"></i>${text}</span>`;
+  if (item.waiting && item.link) return { sub: `<span>${t`Finish signing in in your browser.`} <a href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${t`Open the sign-in page`}</a></span>`, button: `<button type="button" class="btn small quiet" data-mcp-cancel="${name}">${t`Cancel`}</button>` };
+  const again = item.state === 'expired';
+  if (item.state === 'connected') return { sub: `<span>${t`Signed in. Rex Desk keeps the sign-in fresh.`}</span>`, button: `<button type="button" class="btn small quiet" data-mcp-sign-out="${name}">${t`Sign out`}</button>` };
+  return { sub: item.error ? bad(esc(item.error)) : again ? bad(t`Sign-in expired`) : `<span>${t`Not signed in`}</span>`, button: `<button type="button" class="btn small primary" data-mcp-start="${name}">${again ? t`Sign in again` : t`Sign in`}</button>` };
+}
+
 // One linked connection: its state line (or its failed sync, kept on its own row), then Sync, Change and Remove.
 function connectionRow({ ui, esc }, state, item, kind, tag) {
   const sync = (ui.snap.sync || []).find(entry => entry.sourceId === item.id), busy = state.extra.connectorBusy === item.id;
@@ -67,22 +77,27 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
     const kind = items.get(link.connectorId); if (!kind) continue;
     // Telegram needs a second step after the token: the person presses Start in the bot, then links that one chat.
     const tg = link.connectorId === 'telegram';
-    const sub = link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>`
+    const signIn = link.server ? (data.signIns || []).find(item => item.name === link.server) : null, parts = signIn ? signInParts(ctx, signIn) : null;
+    const sub = parts ? parts.sub : link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>`
       : tg ? `<span>${link.pairCode ? esc(t`Send ${link.pairCode} to your bot in Telegram, then tap Link.`) : link.linked ? esc(t`Linked to ${link.linkedName || t('your chat')}`) : esc(t`Tap Link to get a code to send to your bot.`)}</span>`
       : `<span>${esc(howLine(kind, true))}</span>`;
     const linkBtn = tg ? `<button type="button" class="btn small${link.linked ? ' quiet' : ' primary'}" data-cn-tg-link="${esc(link.id)}">${link.linked ? t`Relink` : t`Link`}</button>` : '';
     (rows[kind.group] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><span class="mk-name"><b>${esc(link.name)}</b><span class="mk-tag">${esc(tagOf(kind))}</span></span>${sub}</div>
-      ${linkBtn}<button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></li>`);
+      ${parts?.button || ''}${linkBtn}<button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></li>`);
   }
+  // Servers added by hand (not from this list) that need a sign-in get a row of their own.
+  const listed = new Set((data.links || []).filter(link => items.has(link.connectorId)).map(link => link.server));
+  const others = (data.signIns || []).filter(item => !listed.has(item.name)).map(item => { const parts = signInParts(ctx, item); return `<li class="tb-row cx-row"><div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${t`MCP`}</span></span>${parts.sub}</div>${parts.button}</li>`; });
   const hasTrackers = Boolean(trackers);
   const groups = (data.catalog?.groups || data.types).map(type => {
     const list = rows[type.id] || [], extra = type.id === 'tasks' ? trackers : '';
     if (!list.length && !extra) return '';
     return `<h3>${TYPE_NAMES[type.id] || esc(type.name)}</h3>${list.length ? `<ul class="tb-list">${list.join('')}</ul>` : ''}${extra}`;
   }).join('');
-  const empty = !groups && !hasTrackers;
+  const signInRows = others.length ? `<h3>${t`MCP sign-ins`}</h3><ul class="tb-list">${others.join('')}</ul>` : '';
+  const empty = !groups && !hasTrackers && !signInRows;
   return `<h2>${t`Connectors`}</h2><p class="muted">${t`Apps Rex Desk reaches through their API with a key you paste (API), or that agents use as an MCP server (MCP). Skills, commands, hooks and your other MCP servers are in Market.`}</p>
-    ${empty ? `<div class="cx-empty"><p>${t`No apps connected.`}</p></div>` : `${syncField}${groups}`}
+    ${empty ? `<div class="cx-empty"><p>${t`No apps connected.`}</p></div>` : `${syncField}${groups}${signInRows}`}
     <div class="st-actions"><button type="button" class="btn small${empty ? ' primary' : ''}" data-cn-add>${t`Add connector`}</button></div>`;
 }
 
@@ -167,10 +182,33 @@ function orbitFormHtml(ctx, state, cfg, kind) {
     <div class="st-actions"><button type="button" class="btn small primary" data-cn-orbit-save ${busy ? 'disabled' : ''}>${busy ? t('Checking the key…') : editing ? t('Save and sync') : t('Connect and sync')}</button><button type="button" class="btn small" data-cn-back>${t`Back`}</button></div>`;
 }
 
+// Starts Rex Desk's own sign-in for an MCP server and opens its page in the browser.
+export async function startMcpSignIn(ctx, name) {
+  const { url } = await ctx.api('/mcp-sign-in/start', { method: 'POST', data: { name } });
+  window.open(url, '_blank', 'noopener');
+}
+
 // Clicks on the page. Returns true when it handled the click.
 export async function connectorsClick(ctx, state, target, back, draw) {
   const { api, toast, refresh } = ctx, hit = name => target.closest(`[data-${name}]`);
   const reload = async () => { state.extra.connectors = await api('/connectors').catch(() => state.extra.connectors); await refresh({ full: true }); draw(); };
+  const mcp = hit('mcp-start') || hit('mcp-cancel') || hit('mcp-sign-out');
+  if (mcp) {
+    const { mcpStart, mcpCancel, mcpSignOut } = mcp.dataset;
+    if (mcpSignOut && !await askConfirm(t`Sign out of ${mcpSignOut}? Agents cannot use it until you sign in again.`)) return true;
+    try {
+      if (mcpStart) await startMcpSignIn(ctx, mcpStart);
+      else await api(`/mcp-sign-in/${mcpCancel ? 'cancel' : 'sign-out'}`, { method: 'POST', data: { name: mcpCancel || mcpSignOut } });
+    } catch (error) { toast(error.message, true); }
+    await reload();
+    // The browser comes back on its own: the row is looked at again until it does, while this page stays open.
+    while (mcpStart && back.isConnected && (state.extra.connectors?.signIns || []).some(item => item.name === mcpStart && item.waiting && item.link)) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const next = await api('/connectors').catch(() => null); if (!next) break;
+      const changed = JSON.stringify(next.signIns) !== JSON.stringify(state.extra.connectors.signIns); state.extra.connectors = next; if (changed && back.isConnected) draw();
+    }
+    return true;
+  }
   if (hit('cn-add')) { state.extra.connectorPick = 'all'; state.extra.connectorError = ''; draw(); return true; }
   if (hit('cn-back')) { const toOrbit = state.extra.connectorPick === 'orbit' && Boolean(state.extra.connectorEdit); state.extra.cnProbe = null; state.extra.cnValues = {}; state.extra.connectorPick = ''; state.extra.connectorEdit = ''; state.extra.connectorError = ''; state.extra.orbitLogin = null; if (toOrbit) state.extra.connectorPick = 'orbit'; draw(); return true; }
   // Flow and Morningmate open their card in the list (chat-trackers.js adds it); this just leaves the picker.

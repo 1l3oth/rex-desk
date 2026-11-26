@@ -77,6 +77,7 @@ import { catalog as connectorCatalog, connections as connectionList, connector a
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { TelegramBridge } from './telegram.js';
 import { AgentBots } from './agent-bots.js';
+import { addressOf } from './mcp-signin.js';
 import { BugBot } from './bug-bot.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
@@ -352,6 +353,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // The bug-report group bot: a separate bot added to customer groups that only files bug reports (src/bug-bot.js).
     desk.agentBots = new AgentBots(desk);
     if (!process.env.NODE_TEST_CONTEXT) desk.agentBots.start();
+    desk.onMcpSignIn = () => notify();
+    if (!process.env.NODE_TEST_CONTEXT) desk.mcpSignIn.startTimer();
     desk.bugBot = new BugBot(desk);
     if (!process.env.NODE_TEST_CONTEXT) desk.bugBot.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
@@ -373,7 +376,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const { desk, store, id } = session; session = null;
     if (forget) { accounts?.forget(id); store.cloud.account?.clearAvatar(); }
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
-    desk.peers?.goodbye?.(); desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.peers?.goodbye?.(); desk.phoneRelay?.stop(); desk.mcpSignIn.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -1102,10 +1105,25 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/sources/orbit') url.pathname = '/api/connectors/orbit';
       else if (url.pathname.startsWith('/api/orbit/account')) url.pathname = url.pathname.replace('/api/orbit/account', '/api/connectors/orbit/account');
       // Connectors (connectors.js): what can be connected, and what is.
+      // Rex Desk's own sign-in for a remote MCP server (mcp-signin.js): the page opens the address it gets back.
+      const mcpAuth = url.pathname.match(/^\/api\/mcp-sign-in(?:\/(start|cancel|sign-out))?$/);
+      if (mcpAuth && request.method === 'GET' && !mcpAuth[1]) return json(response, 200, { signIns: desk.mcpSignIns() });
+      if (mcpAuth?.[1] && request.method === 'POST') {
+        const name = String((await body(request).catch(() => ({}))).name || ''), config = desk.toolbox.servers()[name], address = addressOf(config);
+        if (!address) return json(response, 400, { error: 'That server is not connected on this computer.' });
+        try {
+          if (mcpAuth[1] === 'start') { const started = await desk.mcpSignIn.start(name, address); notify(); return json(response, 200, { url: started.url, signIns: desk.mcpSignIns() }); }
+          if (mcpAuth[1] === 'cancel') desk.mcpSignIn.cancel(address); else desk.mcpSignIn.signOut(address);
+          notify(); return json(response, 200, { signIns: desk.mcpSignIns() });
+        } catch (error) { return json(response, 400, { error: error.message }); }
+      }
       if (url.pathname === '/api/connectors' && request.method === 'GET') {
+        // Each remote server is asked once (kept 10 minutes), so one that wants a sign-in shows its button; a slow one is not waited for.
+        let remote = []; try { remote = Object.entries(desk.toolbox.servers()).filter(([, item]) => item.url); } catch { /* no config */ }
+        await Promise.race([Promise.all(remote.filter(([name]) => !desk.toolbox.failed.has(name)).map(([name, item]) => desk.toolbox.toolsOf(name, item))), new Promise(resolve => setTimeout(resolve, 6000).unref?.())]);
         const config = store.publicConfig(), account = desk.orbitAccount();
         return json(response, 200, { ...connectorCatalog(), connections: connectionList(config).map(item => ({ ...item, hasKey: Boolean(config.sources.find(source => source.id === item.id)?.hasKey) })),
-          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [], catalog: loadCatalog(), links: catalogConnections({ toolbox: desk.toolbox, store }) });
+          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [], catalog: loadCatalog(), links: catalogConnections({ toolbox: desk.toolbox, store }), signIns: desk.mcpSignIns() });
       }
       // The catalog (connector-catalog.js): check connects for real and saves nothing; add checks again and saves only when it passes.
       const catalogMatch = url.pathname.match(/^\/api\/connectors\/catalog\/([a-z0-9-]+)(\/probe)?$/);

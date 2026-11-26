@@ -281,6 +281,8 @@ export class Store extends EventEmitter {
   backupOff(part) { return this.get('backup', 'parts')?.[part] === false; }
   isPrivate(kind, value) {
     if (!value) return false;
+    // MCP sign-ins stay on the computer they were made on (L30): each computer signs in once.
+    if (kind === 'mcpauth') return true;
     if (BACKUP_PART[kind] && this.backupOff(BACKUP_PART[kind])) return true;
     if (kind === 'run') return this.privateAgent(value.specialistId) || this.privateAgent(value.roomAgent);
     if (kind === 'chatcopy' || kind === 'peercmd' || kind === 'chatfile') return this.privateAgent(value.agentId);

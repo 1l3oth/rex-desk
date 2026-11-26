@@ -1,4 +1,12 @@
 {
+ "Finish signing in in your browser.": "សូមបញ្ចប់ការចូលគណនីក្នុងកម្មវិធីរុករករបស់អ្នក។",
+ "Signed in. Rex Desk keeps the sign-in fresh.": "បានចូលគណនីហើយ។ Rex Desk រក្សាការចូលគណនីនេះឱ្យនៅប្រើបាន។",
+ "Sign-in expired": "ការចូលគណនីផុតកំណត់",
+ "MCP sign-ins": "ការចូលគណនី MCP",
+ "Sign out of {0}? Agents cannot use it until you sign in again.": "ចាកចេញពី {0}? ភ្នាក់ងារមិនអាចប្រើវាបានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។",
+ "Agents cannot use {0} until you sign in again. Rex Desk opens your browser and does the rest. Do this on the computer that runs Rex Desk.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។ Rex Desk បើកកម្មវិធីរុករក ហើយធ្វើអ្វីដែលនៅសល់ដោយខ្លួនឯង។ សូមធ្វើនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
+ "{0} sign-in expired": "ការចូលគណនី {0} ផុតកំណត់",
+ "Sign-in": "ការចូលគណនី",
  ", copied from {0}": ", ចម្លងពី {0}",
  "… {0} more lines": "… {0} បន្ទាត់ទៀត",
  "· @ to mention · # for a task": "· @ ដើម្បីលើកឈ្មោះ · # សម្រាប់កិច្ចការ",

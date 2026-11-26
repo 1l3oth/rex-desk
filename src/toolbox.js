@@ -13,9 +13,14 @@ import { resolveCommand } from './processes.js';
 import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
+import { SIGN_IN_HELP, addressOf } from './mcp-signin.js';
 
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
+// A server that wants a sign-in (or no longer takes this one), not one that is broken.
+const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|invalid_token|missing_bearer/i.test(String(error?.message || ''));
+// An address with a typed key of its own is the person's to fix; every other refused address needs a sign-in.
+const signsIn = (signIn, config) => Boolean(config?.url && (signIn?.record(addressOf(config)) || !Object.keys(config.headers || {}).length));
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
 const words = text => String(text || '').toLowerCase().normalize('NFKD').split(/[^a-z0-9ក-៿가-힯]+/).filter(word => word.length > 1);
@@ -96,7 +101,9 @@ export class Toolbox {
   }
 
   // ---------- talking to one MCP server ----------
-  async client(name, config) {
+  async client(name, raw) {
+    // The person's sign-in for this address is put on here, fresh each time (L30); a renewed token opens a new connection.
+    const config = this.signIn ? await this.signIn.authorize(raw) : raw;
     const open = this.clients.get(name);
     if (open && JSON.stringify(open.config) === JSON.stringify(config)) { clearTimeout(open.timer); open.timer = setTimeout(() => void this.close(name), IDLE_MS); open.timer.unref?.(); return open.client; }
     if (open) await this.close(name);
@@ -107,7 +114,7 @@ export class Toolbox {
   }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
-  async toolsOf(name, config) {
+  async toolsOf(name, config, again = true) {
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
     try {
@@ -117,7 +124,14 @@ export class Toolbox {
       const list = tools.map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
-    } catch (error) { this.failed.set(name, { at: Date.now(), error: plainError(error.message) }); await this.close(name); return known?.tools || []; }
+    } catch (error) {
+      await this.close(name);
+      const refused = wantsSignIn(error) && signsIn(this.signIn, config);
+      if (refused && again && await this.signIn?.refused(config)) return this.toolsOf(name, config, false);
+      if (refused && !again) this.signIn?.rejected?.(config);
+      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(error.message), ...(refused ? { signIn: true } : {}) });
+      return known?.tools || [];
+    }
   }
   async catalog(project = '') {
     const servers = this.servers(project);
@@ -311,8 +325,19 @@ export class Toolbox {
       const text = readFileSync(target.skill.file, 'utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
       return { skill: target.skill.name, folder: target.skill.folder, instructions: clip(text, 40000), note: `Follow these instructions now. Files they mention are in ${target.skill.folder}; read them with your own tools when needed.` };
     }
-    const client = await this.client(target.server, target.config);
-    const result = await client.callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS });
+    const call = async () => (await this.client(target.server, target.config)).callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS });
+    const result = await call().catch(async error => {
+      if (!wantsSignIn(error) || !signsIn(this.signIn, target.config)) throw error;
+      await this.close(target.server);
+      if (await this.signIn?.refused(target.config)) return call().catch(async second => {
+        if (!wantsSignIn(second)) throw second;
+        await this.close(target.server); this.signIn.rejected(target.config);
+        this.failed.set(target.server, { at: Date.now(), error: SIGN_IN_HELP, signIn: true });
+        throw new Error(`${target.server}: ${SIGN_IN_HELP}`);
+      });
+      this.failed.set(target.server, { at: Date.now(), error: SIGN_IN_HELP, signIn: true });
+      throw new Error(`${target.server}: ${SIGN_IN_HELP}`);
+    });
     const text = (result.content || []).map(part => part.type === 'text' ? part.text : part.type === 'resource' ? part.resource?.text || `[resource ${part.resource?.uri || ''}]` : `[${part.type}${part.mimeType ? ` ${part.mimeType}` : ''}]`).join('\n');
     return { tool: `${target.server}/${target.tool.name}`, ...(result.isError ? { failed: true } : {}), result: clip(text || (result.structuredContent ? JSON.stringify(result.structuredContent) : ''), 30000) };
   }

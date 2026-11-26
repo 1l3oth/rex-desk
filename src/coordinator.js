@@ -4,6 +4,8 @@ import { AntigravityRunner, antigravityModels } from './antigravity.js';
 import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
+import { McpSignIn, addressOf } from './mcp-signin.js';
+import { catalogItem } from './connector-catalog.js';
 import { Team } from './team.js';
 import { Schedules } from './schedules.js';
 import { AgentNotes } from './agent-notes.js';
@@ -15,7 +17,7 @@ import { AgentReach } from './agent-reach.js';
 import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE, NOTICE_RULE, LEARN_RULE, WORKFLOW_RULE, inHours } from './specialists.js';
 import { PROTECT_RULE, APP_GUIDE } from './app-guard.js';
-import { ClaudeRunner } from './runners.js';
+import { ClaudeRunner, existingMcpConnections } from './runners.js';
 import { Notifier } from './notify.js';
 import { EFFORTS, MODES, modesFor, effortsFor, defaultModeFor, runOptions, modelList, pickerModels } from './choices.js';
 import { fetchModels } from './models.js';
@@ -210,6 +212,9 @@ export class Desk {
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.
     this.toolbox.computer = () => this.peers.self.name;
+    // Rex Desk signs in to remote MCP servers itself and keeps those sign-ins fresh for every agent (L30).
+    this.mcpSignIn = new McpSignIn(store, { changed: url => this.mcpSignInChanged(url) });
+    this.toolbox.signIn = this.mcpSignIn;
     // The browser agents use (Settings, Agents): downloaded on first use after a yes in Needs you.
     this.agentBrowser = new AgentBrowser(this); this.evidence.agentBrowser = () => this.agentBrowser;
     // Agent Reach (YouTube, GitHub, Reddit, web pages), read-only, downloaded on first use after a yes.
@@ -252,7 +257,7 @@ export class Desk {
       // A local run for a chat whose agent now lives on another computer is hidden: that computer's live copy (in cloudRuns) shows instead, so the chat is not stuck on a stale local version.
       runs: [...this.store.list('run').filter(run => !this.peers.copyWins(this.store.get('chatcopy', run.id))), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
-      devices: this.peers.status(this.port), phones: this.phoneRelay?.view() || null, telegramInbox: this.telegram?.inboxView() || [], bugQueue: this.bugBot?.queueView() || [], chatSplits: this.chatSplits.open().map(split => ({ ...split, sides: split.sides.map(side => ({ ...side, name: this.peers.deviceName(side.node), here: side.node === this.peers.self.id })) })),
+      devices: this.peers.status(this.port), phones: this.phoneRelay?.view() || null, telegramInbox: this.telegram?.inboxView() || [], bugQueue: this.bugBot?.queueView() || [], mcpExpired: this.mcpSignIn.expired().map(item => ({ ...item, label: catalogItem(item.name)?.name || item.name })), chatSplits: this.chatSplits.open().map(split => ({ ...split, sides: split.sides.map(side => ({ ...side, name: this.peers.deviceName(side.node), here: side.node === this.peers.self.id })) })),
       teamTasks: this.store.list('team-task').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 200).map(task => ({ id: task.id, managerId: task.managerId, managerName: task.managerName || '', workerId: task.workerId, workerName: task.workerName, title: task.title, state: task.state, question: task.question || '', answer: String(task.answer || '').slice(0, 1500), remote: Boolean(task.remote), createdAt: task.createdAt, endedAt: task.endedAt || '' })),
       artifacts: this.store.list('artifact'), pins: this.pins.list(), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, projectRules: this.projectRules.list(), agentBrowser: this.agentBrowser.status(), agentReach: this.agentReach.status(), choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
@@ -372,6 +377,26 @@ export class Desk {
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
   // An account signed in at the old Orbit address is used at the current one.
   orbitAccount() { const saved = this.store.get('secret', 'orbit-account'); if (!saved) return null; try { const account = JSON.parse(this.store.decrypt(saved)); return account?.base ? { ...account, base: currentBase('orbit', account.base) } : account; } catch { return null; } }
+  mcpSignInChanged(url) {
+    let servers = {}; try { servers = this.toolbox.servers(); } catch { /* no config */ }
+    for (const [name, config] of Object.entries(servers)) if (addressOf(config) === url) { this.toolbox.lists.delete(name); this.toolbox.failed.delete(name); void this.toolbox.close(name); }
+    this.onMcpSignIn?.();
+  }
+  // With the toolbox off, agents open the person's servers themselves: the ones signed in here get the sign-in as a header.
+  async signedMcp(sourcePath) {
+    const servers = existingMcpConnections(sourcePath);
+    return this.mcpSignIn.authorizeAll(Object.fromEntries(Object.entries(servers).filter(([name, config]) => name !== 'rex_desk' && this.mcpSignIn.record(addressOf(config))?.status === 'connected')));
+  }
+  // The remote servers on this computer that Rex Desk can sign in to, and how each stands.
+  mcpSignIns() {
+    let servers = {}; try { servers = this.toolbox.servers(); } catch { /* no config */ }
+    return Object.entries(servers).flatMap(([name, config]) => {
+      const url = addressOf(config); if (!url) return [];
+      const state = this.mcpSignIn.state(url), refused = Boolean(this.toolbox.failed.get(name)?.signIn);
+      if (!state.state && !state.waiting && !refused) return [];
+      return [{ name, url, ...state, state: state.state === 'expired' || (state.state && refused) ? 'expired' : state.state || 'needed' }];
+    });
+  }
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
   // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.
@@ -914,7 +939,7 @@ export class Desk {
           if (!hands.length) return this.requeue(runId, text);
           for (const ticket of hands.flatMap(item => item.tickets || [])) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'waiting' });
           this.requeue(runId, hands.flatMap(item => item.entries || []));
-        }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
+        }, extraMcp: { ...this.orbitAccountMcp(), ...(this.store.config().toolGateway === false ? await this.signedMcp(this.store.config().repositories.find(item => item.id === run.repositoryId)?.path) : {}) }, gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
           if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }

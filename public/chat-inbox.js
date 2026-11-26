@@ -3,6 +3,7 @@
 import { t } from './i18n.js';
 import { avatarHtml } from '/chat-rooms.js';
 import { phoneAskHtml, ICON as DEVICE_ICON } from '/chat-devices.js';
+import { startMcpSignIn } from '/chat-connectors.js';
 
 // A flat paper-plane for Telegram rows, drawn in the neutral icon disc (no gradient, no colour badge).
 const TG_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
@@ -46,6 +47,7 @@ function detail(ctx, helpers, entry) {
     const target = entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button type="button" class="btn primary" data-ny-open-chat ${target} data-tg="${esc(entry.tg.id)}">${t`Open chat`}</button></div></div>`;
   }
+  if (entry.mcp) return `<div class="ny-detail">${head}${question}<p class="muted">${t`Agents cannot use ${entry.mcp.label || entry.mcp.name} until you sign in again. Rex Desk opens your browser and does the rest. Do this on the computer that runs Rex Desk.`}</p><div class="ny-dact"><button class="btn primary" data-mcp-again="${esc(entry.mcp.name)}">${t`Sign in again`}</button></div></div>`;
   if (entry.bug) {
     const bug = entry.bug;
     return `<div class="ny-detail">${head}${question}<p class="muted">${esc([bug.severityLabel || bug.kind, bug.groupTitle, bug.reporterName].filter(Boolean).join(' · '))}</p><p class="muted">${t`Hidden until you approve it. Approving makes a task for the App Agent.`}</p><div class="ny-dact"><button class="btn quiet danger" data-bug-reject="${esc(bug.id)}">${t`Reject`}</button><button class="btn primary" data-bug-approve="${esc(bug.id)}">${t`Approve`}</button></div></div>`;
@@ -79,7 +81,7 @@ function review(ctx, item, head, question) {
 }
 
 export function inboxStage(ctx, helpers) {
-  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], telegram = ui.snap.telegramInbox || [], bugs = ui.snap.bugQueue || [], count = asks.length + wakes.length + phones.length + telegram.length + bugs.length;
+  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], telegram = ui.snap.telegramInbox || [], bugs = ui.snap.bugQueue || [], expired = ui.snap.mcpExpired || [], count = expired.length + asks.length + wakes.length + phones.length + telegram.length + bugs.length;
   if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and messages from your agents show up here.`}</p></div>` };
   const group = saved(), entries = [
     ...asks.map(item => { const who = asker(ctx, helpers, item.runId); return { item, who, at: item.createdAt || '', text: plain(item.title), sub: who.project }; }),
@@ -91,6 +93,8 @@ export function inboxStage(ctx, helpers) {
     ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') })),
     // A bug a customer reported through the bug bot, hidden until the person approves it.
     ...bugs.map(report => ({ item: { id: `bug:${report.id}` }, bug: report, who: { name: report.groupTitle || t('Bug bot'), project: '', agent: null }, at: report.createdAt || '', text: `#${report.num} ${report.text || ''}`, sub: t('Bug report') })),
+    // An MCP sign-in that ran out and could not be renewed (L30).
+    ...expired.map(row => ({ item: { id: `mcp:${row.id}` }, mcp: row, who: { name: t('Rex Desk'), project: '', agent: null }, at: row.at || '', text: t`${row.label || row.name} sign-in expired`, sub: t('Sign-in') })),
     // A message that arrived from Telegram, waiting in the agent's chat.
     ...telegram.map(row => ({ item: { id: `tg:${row.id}` }, tg: row, who: { name: row.chatName || t('Telegram'), project: '', agent: null }, at: row.at || '', text: row.text || '', sub: t('Telegram'), unread: !row.read }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
@@ -129,6 +133,8 @@ export function wireInbox(ctx) {
     const pick = event.target.closest?.('[data-ny-pick]');
     if (pick) { const id = pick.dataset.nyPick; ctx.ui.nySelected = id; ctx.ui.nyOpen = true; if (id.startsWith('tg:')) { ctx.api('/telegram/inbox/read', { method: 'POST', data: { id: id.slice(3) } }).then(() => ctx.refresh()).catch(() => {}); } ctx.renderAll(); return; }
     if (event.target.closest?.('[data-ny-back]')) { ctx.ui.nyOpen = false; ctx.renderAll(); return; }
+    const again = event.target.closest?.('[data-mcp-again]');
+    if (again) { again.disabled = true; startMcpSignIn(ctx, again.dataset.mcpAgain).catch(error => ctx.toast(error.message, true)).finally(() => { again.disabled = false; }); return; }
     const bugGo = event.target.closest?.('[data-bug-approve],[data-bug-reject]');
     if (bugGo) { const approve = bugGo.dataset.bugApprove !== undefined; bugGo.disabled = true; ctx.api(`/bugbot/${approve ? 'approve' : 'reject'}`, { method: 'POST', data: { id: approve ? bugGo.dataset.bugApprove : bugGo.dataset.bugReject } }).then(() => { ctx.ui.nyOpen = false; return ctx.refresh?.(); }).catch(error => { bugGo.disabled = false; ctx.toast?.(error.message, true); }); return; }
     const quick = event.target.closest?.('[data-ny-quick]');
