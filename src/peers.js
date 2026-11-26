@@ -352,7 +352,8 @@ export class Peers {
   // have stamped a little in the past; reading a message twice changes nothing.
   // A safety look (no arguments) starts two minutes back, and now and then a day back. from: a note said messages from this
   // version on were uploaded; the look then starts there (or at the last one read, if that is older) and reads nothing twice.
-  async pullChats({ from = '', overlap = 120000 } = {}) {
+  // after: the exact last version a look that stopped at its page limit read; the look goes on strictly after it (no rewind).
+  async pullChats({ from = '', after = '', overlap = 120000 } = {}) {
     // What a look answers (the tick keeps a note's hint until one says done): false when the cloud could not be read (nothing
     // is saved then), { done: false, next } when it stopped at its page limit at next, { done: true } once it read to the end.
     if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return false;
@@ -374,6 +375,9 @@ export class Peers {
     else if (since && !settled) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : overlap)).toString(36).padStart(9, '0'); }
     // Uploaded late, or by a computer whose clock is behind: the note names the oldest one, so it is read now, not lost.
     if (from && since && from <= since) since = justBelow(from);
+    // Going on after a page limit: from the exact row it stopped at. Back to the start of that millisecond, more rows than one
+    // look reads sharing it (a clock that moved back) were read again on every look and the rest never came.
+    if (after) since = String(after);
     let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
@@ -391,7 +395,7 @@ export class Peers {
       if (count < 500) { finished = true; break; }
     }
     // A look from a note that went on from the second look's place (chatDeepFrom) to the newest row finished that one too.
-    const through = !deep && finished && from && settings.chatDeepFrom && from <= String(settings.chatDeepFrom);
+    const start = after || from, through = !deep && finished && start && settings.chatDeepFrom && start <= String(settings.chatDeepFrom);
     const look = deep && !finished ? { chatDeepFrom: since } : again || deep || through ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
     const calm = safety ? { chatSettled: newest && Date.now() >= (parseInt(newest.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newest : '' } : {};
     if (again || deep || newest !== String(settings.chatAt || '') || (safety && calm.chatSettled !== String(settings.chatSettled || ''))) step('sync chat: save read position', () => this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look, ...calm }));
@@ -417,7 +421,7 @@ export class Peers {
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   // Like pullChats: a safety look starts two minutes back; one after a note starts where the note says (or at the last one read).
   // Answers like pullChats: false when the cloud could not be read, { done: false, next } at the page limit, true at the end.
-  async pullTurso({ from = '', overlap = 120000 } = {}) {
+  async pullTurso({ from = '', after = '', overlap = 120000 } = {}) {
     if (!this.store.cloud?.ready) return false;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = step('sync shared: read peer settings', () => this.settings()), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
@@ -426,6 +430,7 @@ export class Peers {
     const settled = overlap > 0 && !again && at > 0 && Boolean(settings.tursoSettled) && (parseInt(String(settings.tursoSettled).split('.')[0], 36) || 0) === at;
     let since = settled ? String(settings.tursoSettled) : `${Math.max(0, at - overlap).toString(36).padStart(9, '0')}`, newest = at, newestV = settled ? since : '';
     if (from && !again && from <= since) since = justBelow(from);
+    if (after) since = String(after); // on after a page limit, from the exact row it stopped at (see pullChats)
     let finished = false;
     try {
       // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
@@ -766,11 +771,19 @@ export class Peers {
       const seen = this.store.cloud?.pulled; if (seen) for (const item of body.records) seen.set(`${item.kind}\u001f${item.id}`, item.v);
     }
     if (Array.isArray(body.rows) && body.rows.length) step('sync note: chat messages', () => this.store.applyChatEvents(body.rows));
-    // late: a note that comes while a look is running; its hint stays after that look, even when the look read to the end (see start).
-    const late = this.lateHint ||= {}, reading = this.reading || {};
-    if (body.shared && (body.more || !Array.isArray(body.records))) { due.shared = older(due.shared, String(body.shared)); if (reading.shared) late.shared = older(late.shared, String(body.shared)); }
-    if (body.chat && (body.more || !Array.isArray(body.rows))) { due.chat = older(due.chat, String(body.chat)); if (reading.chat) late.chat = older(late.chat, String(body.chat)); }
+    // Each hint goes through hint(): a look's exact place stays apart from it, and one that comes during a look outlives that look.
+    if (body.shared && (body.more || !Array.isArray(body.records))) this.hint('shared', String(body.shared));
+    if (body.chat && (body.more || !Array.isArray(body.rows))) this.hint('chat', String(body.chat));
     if ('shared' in due || 'chat' in due) this.kick?.();
+  }
+  // A note's rewind hint (the oldest row it uploaded). A look going on after its page limit keeps its exact place (cursor);
+  // only a hint below that place rewinds it, and then the look starts at the hint (rows from there on were not all read yet).
+  // A hint at or past the place changes nothing: the look reaches it anyway. During a look the hint waits in lateHint.
+  hint(part, at) {
+    const due = this.due ||= {}, cursor = this.cursor ||= {};
+    if ((this.reading || {})[part]) { const late = this.lateHint ||= {}; late[part] = older(late[part], at); due[part] = older(due[part], at); return; }
+    if (cursor[part]) { if (at <= cursor[part]) { delete cursor[part]; due[part] = at; } else due[part] ||= at; return; }
+    due[part] = older(due[part], at);
   }
   // Another computer that is on but sends no notes (its line is down, or it runs a version without them): it is still looked
   // for in the cloud every FALLBACK_MS.
@@ -801,7 +814,7 @@ export class Peers {
         // The hint is cleared only by a look that says it read to the end. One that failed, timed out or found the cloud not there
         // leaves it as it was; one that stopped at its page limit leaves where it stopped instead (rows below that are read), and
         // the next look goes on from there MORE_MS later. A note that came during the look keeps its own hint.
-        const timer = part === 'shared' ? 'turso' : 'chat', from = due[part], more = this.more ||= {};
+        const timer = part === 'shared' ? 'turso' : 'chat', from = due[part], more = this.more ||= {}, cursor = this.cursor ||= {}, after = cursor[part];
         const read = async options => {
           const reading = this.reading ||= {}, late = this.lateHint ||= {};
           reading[part] = true; delete late[part];
@@ -810,11 +823,14 @@ export class Peers {
           finally { reading[part] = false; doing(''); }
           const later = late[part]; delete late[part];
           if (!result) return;
-          if (result.done) { if (later) due[part] = later; else if (due[part] === from) delete due[part]; return; }
-          if (result.next) { due[part] = older(String(result.next), later); more[part] = Date.now() + (this.moreMs ?? MORE_MS); }
+          if (result.done) { delete cursor[part]; if (later) due[part] = later; else if (due[part] === from) delete due[part]; return; }
+          // Stopped at its page limit: the exact place is kept apart from the hints, and the look goes on strictly after it.
+          if (result.next) { cursor[part] = String(result.next); due[part] ||= String(result.next); more[part] = Date.now() + (this.moreMs ?? MORE_MS); }
+          if (later && (!cursor[part] || later <= cursor[part])) { delete cursor[part]; due[part] = later; }
         };
-        if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { this.timers.set(timer, Date.now() + safety); await read(from ? { from } : undefined); }
-        else if (part in due && (more[part] || 0) <= Date.now()) await read({ from, overlap: 0 });
+        const options = after ? { after } : from ? { from } : undefined;
+        if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { this.timers.set(timer, Date.now() + safety); await read(options); }
+        else if ((part in due || after) && (more[part] || 0) <= Date.now()) await read({ ...options, overlap: 0 });
         else if ((this.timers.get(timer) || 0) > Date.now() + safety) this.timers.set(timer, Date.now() + safety);
       }
       if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { step('sync: settling split chats', () => this.desk.chatSplits?.settleAll()); step('sync: detecting split chats', () => this.desk.chatSplits?.detect()); step('sync: pushing chat messages', () => this.pushChats()); } catch { /* tried again in a minute */ } finally { doing(''); } }

@@ -258,6 +258,32 @@ test("a note's hint stays while the cloud is not there, and its rows are read on
   } finally { peers.stop(); }
 });
 
+test('more rows than one look reads, all in one millisecond: each look goes on strictly after the last row read, and every row is read once (L88 review)', async () => {
+  const { b, peers, asked } = hinted(1);
+  const at = (Date.now() - 3600000).toString(36).padStart(9, '0'), version = i => `${at}.${i.toString(36).padStart(4, '0')}.other`;
+  const chat = Array.from({ length: 25000 }, (_, i) => ({ uid: `u${i}`, v: version(i) })), shared = Array.from({ length: 25000 }, (_, i) => ({ kind: 'roommsg', id: `m${i}`, deleted: false, value: null, v: version(i) }));
+  const applied = { chat: 0, shared: 0 }, seen = { chat: new Set(), shared: new Set() }, sharedAsked = [];
+  b.store.cloud.pullChat = async since => { asked.push(since); return chat.filter(row => row.v > since).slice(0, 500); };
+  b.store.cloud.pullShared = async since => { sharedAsked.push(since); return shared.filter(row => row.v > since).slice(0, 400); };
+  b.store.applyChatEvents = list => { for (const row of list) { applied.chat++; seen.chat.add(row.uid); } return list.length; };
+  peers.applyAll = list => { for (const row of list) { applied.shared++; seen.shared.add(row.id); } };
+  peers.save({ chatAt: version(24999), chatSettled: version(24999), tursoAt: parseInt(at, 36), tursoNode: peers.self.id, tursoSettled: version(24999) });
+  peers.due = { chat: version(0), shared: version(0) };
+  peers.start();
+  try {
+    await waitFor(() => !('chat' in peers.due) && !('shared' in peers.due));
+    assert.equal(seen.chat.size, 25000); assert.equal(applied.chat, 25000, 'each chat row once');
+    assert.equal(seen.shared.size, 25000); assert.equal(applied.shared, 25000, 'each shared record once');
+    assert.equal(new Set(asked).size, asked.length); assert.equal(new Set(sharedAsked).size, sharedAsked.length, 'no page read twice');
+  } finally { peers.stop(); }
+  // A hint at or past a look's place leaves the place as it is; only one below it rewinds the look, to that hint.
+  peers.cursor = { chat: version(20000) }; peers.due = { chat: version(0) };
+  peers.hint('chat', version(22000));
+  assert.deepEqual([peers.cursor.chat, peers.due.chat], [version(20000), version(0)]);
+  peers.hint('chat', version(100));
+  assert.equal(peers.cursor.chat, undefined); assert.equal(peers.due.chat, version(100));
+});
+
 test('the shared records look says when the cloud did not answer and when it stopped at its page limit (L88 review)', async () => {
   const { b, peers } = hinted(1);
   peers.applyAll = () => {};
