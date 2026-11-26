@@ -388,6 +388,28 @@ test('a note too big to carry its rows, or one the line could not send, makes th
   } finally { b.desk.peers.stop(); }
 });
 
+test("a note's hint goes with a safety look too, and stays until a look has read it (L88 review)", async () => {
+  const { a, b } = computers();
+  sharedCloud({ a: a.desk, b: b.desk }); linkByRelay(a, b);
+  const asked = []; let fail = 1;
+  b.desk.peers.pullTurso = async () => true;
+  b.desk.peers.pullChats = async options => { asked.push(options); if (options?.from && fail-- > 0) throw new Error('fetch failed'); return 0; };
+  b.desk.peers.start();
+  try {
+    await within(5000, () => asked.length >= 1); asked.length = 0;
+    const big = Array.from({ length: 40 }, (_, i) => ({ uid: `u${i}`, run_id: 'r', kind: 'agent-text', visible: 1, value: 'x'.repeat(1000), created_at: '', v: `00000000${i}.0000.n`, deleted: 0 }));
+    a.desk.peers.uploaded({ chat: '000000005.0000.n', rows: big });
+    await within(4000, () => asked.filter(options => options?.from).length >= 2);
+    assert.deepEqual(asked.filter(options => options?.from).slice(0, 2).map(options => options.from), ['000000005.0000.n', '000000005.0000.n'], 'the look failed, so the next one starts there again');
+    await within(2000, () => !('chat' in b.desk.peers.due));
+    // A safety look that is due while a hint waits takes the hint along, instead of dropping it.
+    b.desk.peers.timers.set('chat', 0); b.desk.peers.due.chat = '000000003.0000.n'; asked.length = 0;
+    await within(3000, () => asked.length >= 1);
+    assert.deepEqual(asked[0], { from: '000000003.0000.n' });
+    await within(2000, () => !('chat' in b.desk.peers.due));
+  } finally { b.desk.peers.stop(); }
+});
+
 test('a note from another account, or one that cannot be opened, is ignored; a closing computer shows off at once (L88)', async () => {
   const { a, b } = computers();
   sharedCloud({ a: a.desk, b: b.desk }); linkByRelay(a, b);

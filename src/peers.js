@@ -103,7 +103,7 @@ export class Peers {
   statusOf(agent) {
     if (this.direct(agent.node)) return this.live.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
     if (this.seen(agent.node)) return this.cloudSeen.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
-    return { state: 'offline', label: this.cloudSeen?.has(agent.node) || this.byNode(agent.node) ? `Offline · ${this.deviceName(agent.node)} is off` : `Offline · ${this.deviceName(agent.node)} has not checked in` };
+    return { state: 'offline', label: this.cloudSeen?.has(agent.node) || this.byNode(agent.node) ? `Offline Â· ${this.deviceName(agent.node)} is off` : `Offline Â· ${this.deviceName(agent.node)} has not checked in` };
   }
   // Runs and questions of agents on the other computers, shown as if they were here.
   remoteRuns() { return [...this.live].filter(([node]) => this.direct(node)).flatMap(([node, live]) => (live.runs || []).map(run => ({ ...run, remote: node }))); }
@@ -352,7 +352,8 @@ export class Peers {
   // A safety look (no arguments) starts two minutes back, and now and then a day back. from: a note said messages from this
   // version on were uploaded; the look then starts there (or at the last one read, if that is older) and reads nothing twice.
   async pullChats({ from = '', overlap = 120000 } = {}) {
-    if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return 0;
+    // false: nothing was read (the tick then keeps a note's hint for the next look).
+    if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return false;
     // Each database call is named while it runs (step), so the freeze log names the one that is really running.
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
     const settings = step('sync chat: read peer settings', () => this.settings()), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
@@ -370,7 +371,7 @@ export class Peers {
     if (going) since = going;
     else if (since && !settled) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : overlap)).toString(36).padStart(9, '0'); }
     // Uploaded late, or by a computer whose clock is behind: the note names the oldest one, so it is read now, not lost.
-    if (from && since && !going && from <= since) since = justBelow(from);
+    if (from && since && from <= since) since = justBelow(from);
     let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
@@ -409,8 +410,9 @@ export class Peers {
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   // Like pullChats: a safety look starts two minutes back; one after a note starts where the note says (or at the last one read).
+  // true once the look read to the end; false when the cloud could not be read, so the tick keeps a note's hint.
   async pullTurso({ from = '', overlap = 120000 } = {}) {
-    if (!this.store.cloud?.ready) return;
+    if (!this.store.cloud?.ready) return false;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = step('sync shared: read peer settings', () => this.settings()), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
     // Settled like pullChats: once a safety look ran a minute past the overlap after the newest row, the looks after it start at
@@ -434,7 +436,8 @@ export class Peers {
       }
       const calm = overlap > 0 ? { tursoSettled: newestV && Date.now() >= (parseInt(newestV.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newestV : '' } : {};
       if (again || newest > at || (overlap > 0 && calm.tursoSettled !== String(settings.tursoSettled || ''))) step('sync shared: save read position', () => this.save({ tursoAt: newest, tursoNode: this.self.id, ...calm }));
-    } catch { /* Turso shows its own state in Settings */ }
+      return true;
+    } catch { /* Turso shows its own state in Settings */ return false; }
   }
   // What this computer's agents are doing, as the other computers show it in their sidebar.
   mineStatus() {
@@ -473,7 +476,7 @@ export class Peers {
   // `artifacts`: the chat's artifact records when the caller already has them (the start-up pass reads them all once).
   copyChat(runId, artifacts = null) {
     const run = this.store.get('run', runId); if (!this.copies(run)) return;
-    const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}…` : value;
+    const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}â€¦` : value;
     // The same message said again right after itself is shown once; tool output is shortened. The newest messages are kept.
     const events = [];
     for (const event of this.store.events(runId, { visible: true, limit: COPY_EVENTS })) {
@@ -755,8 +758,10 @@ export class Peers {
       const seen = this.store.cloud?.pulled; if (seen) for (const item of body.records) seen.set(`${item.kind}\u001f${item.id}`, item.v);
     }
     if (Array.isArray(body.rows) && body.rows.length) step('sync note: chat messages', () => this.store.applyChatEvents(body.rows));
-    if (body.shared && (body.more || !Array.isArray(body.records))) due.shared = older(due.shared, String(body.shared));
-    if (body.chat && (body.more || !Array.isArray(body.rows))) due.chat = older(due.chat, String(body.chat));
+    // dueCount: a note that comes while a look is running keeps its hint, even when the look then succeeds (see start).
+    const count = this.dueCount ||= { shared: 0, chat: 0 };
+    if (body.shared && (body.more || !Array.isArray(body.records))) { due.shared = older(due.shared, String(body.shared)); count.shared++; }
+    if (body.chat && (body.more || !Array.isArray(body.rows))) { due.chat = older(due.chat, String(body.chat)); count.chat++; }
     if ('shared' in due || 'chat' in due) this.kick?.();
   }
   // Another computer that is on but sends no notes (its line is down, or it runs a version without them): it is still looked
@@ -783,9 +788,12 @@ export class Peers {
       this.desk.phoneRelay?.ensure?.();
       const linked = this.linked(), safety = linked && !this.quietPeer() ? SAFETY_MS : FALLBACK_MS, due = this.due ||= {}, catchUp = this.catchUp; this.catchUp = false;
       for (const [part, pull] of [['shared', options => this.pullTurso(options)], ['chat', options => this.pullChats(options)]]) {
-        const timer = part === 'shared' ? 'turso' : 'chat';
-        if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { delete due[part]; this.timers.set(timer, Date.now() + safety); await bounded(() => pull()); doing(''); }
-        else if (part in due) { const from = due[part]; delete due[part]; await bounded(() => pull({ from, overlap: 0 })); doing(''); }
+        // A note's hint (where its rows start) goes with the safety look too, and stays until a look read to the end: dropped at
+        // the start, a look that failed or timed out lost a late row stamped below the settled read position (L88 review).
+        const timer = part === 'shared' ? 'turso' : 'chat', from = due[part], count = (this.dueCount ||= { shared: 0, chat: 0 })[part];
+        const read = async options => { const ok = await bounded(async () => (await pull(options)) !== false); doing(''); if (ok === true && from === due[part] && count === this.dueCount[part]) delete due[part]; };
+        if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { this.timers.set(timer, Date.now() + safety); await read(from ? { from } : undefined); }
+        else if (part in due) await read({ from, overlap: 0 });
         else if ((this.timers.get(timer) || 0) > Date.now() + safety) this.timers.set(timer, Date.now() + safety);
       }
       if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { step('sync: settling split chats', () => this.desk.chatSplits?.settleAll()); step('sync: detecting split chats', () => this.desk.chatSplits?.detect()); step('sync: pushing chat messages', () => this.pushChats()); } catch { /* tried again in a minute */ } finally { doing(''); } }
