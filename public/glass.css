@@ -61,6 +61,8 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;op
 .tour-card{background:var(--solid);-webkit-backdrop-filter:none;backdrop-filter:none}
 /* The notifications list is solid too: rows of text over a see-through panel were hard to read, most of all on a phone. */
 .nt-pane{background:var(--solid);-webkit-backdrop-filter:none;backdrop-filter:none}
+/* On a phone, Settings fills the screen over a blurred backdrop: solid too, over every skin, for the same WebKit reason. */
+@media (max-width:760px){.settings-pop{background:var(--solid)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}}
 .dialog-back{background:rgba(6,9,16,.38);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 html:not([data-theme=dark]) .dialog-back{background:rgba(120,135,165,.28)}
 .st-nav{background:transparent}
