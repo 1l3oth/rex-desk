@@ -8,7 +8,8 @@ import path from 'node:path';
 import { createApp } from '../src/server.js';
 import { Store } from '../src/store.js';
 import { TursoSync } from '../src/turso.js';
-import { accountSignIn } from '../src/rexdesk-account.js';
+import { accountSignIn, AccountLink } from '../src/rexdesk-account.js';
+import { existsSync } from 'node:fs';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const passphrase = 'correct horse battery';
@@ -296,6 +297,32 @@ test('on a new computer the Rex Desk sign-in finds the backup, and its passphras
     assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
     assert.equal((await visitor('/api/state')).body.database.account.email, 'person@example.com');
   } finally { await second.close(); }
+});
+
+test('a sign-in picture still downloading when the person logs out is thrown away, so it never rewrites the cache for a signed-out account', async () => {
+  const dir = temporary('avatar-logout');
+  const store = { directory: dir, encrypt: text => text, decrypt: text => text };
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  // A download the test holds open, so it can log out mid-flight and then let it finish.
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const fetcher = async () => { await gate; return { ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => pngBytes.buffer.slice(0) }; };
+  const link = new AccountLink(store, { fetcher });
+  link.saved = { token: 't', user: { id: 'u1', image: 'https://pics.test/u1.png' } };
+
+  const download = link.refreshAvatar();
+  // The person logs out while the picture is still coming down (the closeSession forget path, which clears the avatar).
+  link.clearAvatar();
+  release();
+  await download;
+  assert.equal(link.avatar, '', 'the in-memory picture stays empty after logout');
+  assert.equal(existsSync(link.avatarFile), false, 'the finished download wrote nothing to the cache');
+
+  // Sanity: with no logout, the same download does cache the picture.
+  const ok = new AccountLink(store, { fetcher: async () => ({ ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => pngBytes.buffer.slice(0) }) });
+  ok.saved = { token: 't', user: { id: 'u1', image: 'https://pics.test/u1.png' } };
+  await ok.refreshAvatar();
+  assert.match(ok.avatar, /^data:image\/png;base64,/, 'a download that finishes while signed in is cached');
+  assert.equal(existsSync(ok.avatarFile), true);
 });
 
 test('the sign-in screen can go straight to Google or GitHub; anything else gets the account page', async () => {

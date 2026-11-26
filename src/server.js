@@ -342,7 +342,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   async function closeSession({ forget = false } = {}) {
     if (!session) return;
     const { desk, store, id } = session; session = null;
-    if (forget) accounts?.forget(id);
+    if (forget) { accounts?.forget(id); store.cloud.account?.clearAvatar(); }
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
     desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }

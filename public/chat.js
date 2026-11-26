@@ -23,7 +23,7 @@ import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORK
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { inboxStage, wireInbox } from '/chat-inbox.js';
 import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
-import { maybeStartTour } from '/chat-tour.js';
+import { maybeStartTour, startTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
@@ -209,7 +209,7 @@ function renderRail() {
     ${newComputerCard(snap)}
     ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<button type="button" class="rail-cta" data-action="new-room">${t`New meeting room`}</button>`)}
     ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
-  </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot"><button class="acct-btn" data-action="account-open" title="${t`Your Rex Desk account`}">${rexAccountChip()}</button><button type="button" class="acct-ai" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><div class="rail-row"><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SETTINGS_GEAR}</svg>${t`Settings`}</button><button class="btn small rail-theme" data-action="theme" title="${t`Light or dark`}" aria-label="${t`Light or dark`}"><svg class="ti-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="ti-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg><span class="ti-word" data-light>${t`Light`}</span><span class="ti-word" data-dark>${t`Dark`}</span></button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div></div>`;
+  </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot">${profileFoot()}</div></div>`;
 }
 
 // ---------- run conversation ----------
@@ -806,6 +806,8 @@ function showProfile(id) {
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.querySelector('.agp-modal') && !document.querySelector('.dialog-back')) closeProfile(); });
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
+  // A profile-menu item that leaves the menu closes it first; the appearance segments keep it open so you can try each one.
+  if (target.closest('#pf-menu') && target.dataset.action !== 'theme-set') setTimeout(closeProfileMenu, 0);
   if (target.dataset.open) {
     event.preventDefault();
     // An agent you already chat with opens that chat, like a messenger; its profile is on the right ("Edit profile" opens the card).
@@ -869,6 +871,11 @@ document.addEventListener('click', async event => {
     else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
     else if (action === 'kg-view') { try { localStorage.setItem('rex-knowledge-view', target.dataset.view); } catch {} renderAll(true); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    else if (action === 'profile-toggle') toggleProfileMenu();
+    else if (action === 'theme-set') { const mode = target.dataset.themeSet; window.rexTheme?.set(mode); target.parentElement?.querySelectorAll('.pf-seg').forEach(seg => { const on = seg.dataset.themeSet === mode; seg.classList.toggle('on', on); seg.setAttribute('aria-checked', String(on)); }); }
+    else if (action === 'upgrade-open') openSettings(ctx, 'backup');
+    else if (action === 'profile-tour') startTour(ctx);
+    else if (action === 'profile-logout') { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; }
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast(t('Agent resumed.')); await refresh(); }
@@ -1502,17 +1509,85 @@ document.addEventListener('click', async event => {
 }, true);
 
 // ---------- Claude accounts: which subscription the agents run on ----------
-function rexAccountChip() {
-  const account = ui.snap?.database?.account, who = account?.name || account?.email || ui.snap?.account?.email || '';
-  if (!who) return `<span class="acct-av none" aria-hidden="true">?</span><span class="acct-text"><b>${t`Sign in to Rex Desk`}</b></span>`;
-  const paid = ui.snap?.database?.space?.paid, plan = ui.snap?.database?.space ? (paid ? t('Cloud backup') : t('Free')) : '';
-  return `<span class="acct-av" aria-hidden="true">${esc(who[0].toUpperCase())}</span><span class="acct-text"><b>${esc(who)}</b>${plan ? `<small>${esc(plan)}</small>` : ''}</span>`;
-}
-function accountChip() {
+// Thin line icons for the profile menu: one quiet stroke, no fill, so they read like native settings glyphs.
+const PF_ICON = {
+  up: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"/></svg>',
+  sliders: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>',
+  chip: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></svg>',
+  gear: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + SETTINGS_GEAR + '</svg>',
+  info: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  compass: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>',
+  logout: '<svg class="pf-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 12H3M6 8l-4 4 4 4"/></svg>',
+};
+const PF_CHEV = '<svg class="pf-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Whether the AI the agents use (Claude, Codex, Gemini) is connected right now, for the dot on the AI accounts row.
+function aiConnected() {
   const name = aiKey(ui.snap?.config?.provider), list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
-  const ai = { codex: t('Codex'), gemini: t('Gemini') }[name] || t('Claude');
-  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text">${current?.loggedIn ? t`${ai} connected` : t`${ai} not connected`}</span>`;
+  return Boolean(current?.loggedIn);
 }
+// The avatar: the person's real sign-in picture (Google or GitHub, cached beside the data folder so it works offline). The
+// initial is painted underneath, so if there is no picture, or it fails to load, the letter shows with nothing to fetch.
+function pfAvatar(who, image, extra = '') {
+  return `<span class="pf-av ${extra}" aria-hidden="true">${esc((who || '?')[0].toUpperCase())}${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">` : ''}</span>`;
+}
+// The footer: one quiet row (picture, name, plan) that opens the menu above it, plus an Upgrade button for free accounts.
+function profileFoot() {
+  const account = ui.snap?.database?.account, who = account?.name || account?.email || ui.snap?.account?.email || '';
+  const signedIn = Boolean(who), space = ui.snap?.database?.space, paid = space?.paid, free = Boolean(space) && !paid;
+  const plan = space ? (paid ? t('Cloud backup') : t('Free')) : '';
+  const image = account?.image || '', name = signedIn ? who : t('Sign in to Rex Desk');
+  const updateNew = ui.snap.update?.ready || ui.snap.update?.available;
+  const version = ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev';
+  const row = `<div class="pf-row"><button type="button" class="pf-trigger" data-action="profile-toggle" aria-haspopup="menu" aria-expanded="false" title="${t`Your account and settings`}">${pfAvatar(who, image)}<span class="pf-meta"><b>${esc(name)}</b>${plan ? `<small>${esc(plan)}</small>` : ''}</span>${updateNew ? `<span class="pf-new" title="${t`Update ready`}"></span>` : ''}</button><button type="button" class="pf-rowver${updateNew ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(version)}</button></div>`;
+  return row + profileMenu({ who, image, name, plan, signedIn, free, updateNew });
+}
+// The menu above the row. Every item maps to a real action or page; nothing here is decoration.
+function profileMenu({ who, image, name, plan, signedIn, free, updateNew }) {
+  const item = (attrs, icon, label, extra = '') => `<button type="button" class="pf-item" role="menuitem" ${attrs}>${icon}<span class="pf-label">${label}</span>${extra}</button>`;
+  const version = ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev';
+  const pref = (typeof window !== 'undefined' && window.rexTheme?.preference) || 'system';
+  const seg = (value, label) => `<button type="button" class="pf-seg${pref === value ? ' on' : ''}" role="menuitemradio" aria-checked="${pref === value}" data-action="theme-set" data-theme-set="${value}">${label}</button>`;
+  return `<div class="pf-menu" id="pf-menu" role="menu" aria-label="${t`Account and settings`}" hidden>
+    <button type="button" class="pf-item pf-acct" role="menuitem" data-action="account-open">${pfAvatar(who, image, 'lg')}<span class="pf-meta"><b>${esc(name)}</b>${plan ? `<small>${esc(plan)}</small>` : ''}</span>${PF_CHEV}</button>
+    <div class="pf-div"></div>
+    ${free ? item('data-action="upgrade-open"', PF_ICON.up, t('Upgrade plan')) : ''}
+    ${item('data-open="person" data-id=""', PF_ICON.sliders, t('Personalization'))}
+    ${item('data-action="accounts"', PF_ICON.chip, t('AI provider'), `<span class="pf-dot ${aiConnected() ? 'good' : 'bad'}"></span>`)}
+    ${item('data-action="settings-open"', PF_ICON.gear, t('Settings'))}
+    <div class="pf-div"></div>
+    <div class="pf-appear" role="group" aria-label="${t`Appearance`}"><span class="pf-seg-wrap">${seg('light', t('Light'))}${seg('system', t('System'))}${seg('dark', t('Dark'))}</span></div>
+    <div class="pf-div"></div>
+    ${item('data-action="about-open"', PF_ICON.info, t('About Rex Desk'), `<span class="pf-ver">${esc(version)}</span>${updateNew ? `<span class="pf-dot good" title="${t`Update ready`}"></span>` : ''}`)}
+    ${item('data-action="profile-tour"', PF_ICON.compass, t('Take the tour'))}
+    ${signedIn ? `<div class="pf-div"></div>${item('data-action="profile-logout"', PF_ICON.logout, t('Log out'))}` : ''}
+  </div>`;
+}
+function closeProfileMenu() {
+  const menu = document.getElementById('pf-menu'); if (menu) menu.hidden = true;
+  document.querySelector('[data-action="profile-toggle"]')?.setAttribute('aria-expanded', 'false');
+}
+function toggleProfileMenu() {
+  const menu = document.getElementById('pf-menu'); if (!menu) return;
+  if (menu.hidden) {
+    // Reflect the theme chosen anywhere (here or in Settings) on the segments before the menu shows.
+    const pref = window.rexTheme?.preference || 'system';
+    menu.querySelectorAll('.pf-seg').forEach(seg => { const on = seg.dataset.themeSet === pref; seg.classList.toggle('on', on); seg.setAttribute('aria-checked', String(on)); });
+    menu.hidden = false; document.querySelector('[data-action="profile-toggle"]')?.setAttribute('aria-expanded', 'true'); menu.querySelector('[role="menuitem"]')?.focus();
+  } else closeProfileMenu();
+}
+// The menu closes when the person clicks away or presses Escape, and arrow keys walk its items, like a native menu.
+document.addEventListener('pointerdown', event => { const menu = document.getElementById('pf-menu'); if (menu && !menu.hidden && !event.target.closest?.('.rail-foot')) closeProfileMenu(); }, true);
+document.addEventListener('keydown', event => {
+  const menu = document.getElementById('pf-menu'); if (!menu || menu.hidden) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeProfileMenu(); document.querySelector('[data-action="profile-toggle"]')?.focus(); return; }
+  // Only steer the arrows while focus is inside the open menu, so Tabbing out and pressing an arrow is never pulled back in.
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && menu.contains(document.activeElement)) {
+    event.preventDefault();
+    const items = [...menu.querySelectorAll('[role="menuitem"],[role="menuitemradio"]')].filter(element => element.offsetParent !== null);
+    const at = items.indexOf(document.activeElement), next = event.key === 'ArrowDown' ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next]?.focus();
+  }
+});
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();

@@ -69,16 +69,51 @@ export class AccountLink {
   constructor(store, { fetcher = fetch, base = ACCOUNT_API } = {}) {
     this.store = store; this.fetcher = fetcher; this.base = base; this.lastTry = 0;
     this.file = path.join(store.directory, 'rexdesk.account');
+    // The person's sign-in picture (Google photo or GitHub avatar) is cached here, beside the data folder, as a data URI, so
+    // it shows offline and never loads from a C: path. The file holds the ready-to-use data URI, read once on start.
+    this.avatarFile = path.join(store.directory, 'account-avatar');
+    this.avatar = '';
+    // Bumped whenever the cached picture is dropped (logout or an account switch), so a download already running at that
+    // moment finishes into nowhere instead of rewriting the cache for an account that is no longer signed in.
+    this.avatarGen = 0;
     if (existsSync(this.file)) { try { this.saved = JSON.parse(store.decrypt(readFileSync(this.file, 'utf8'))); } catch { this.saved = null; } }
+    // Only use the cached picture when it belongs to the account signed in now, so a new account never sees the last one's.
+    if (existsSync(this.avatarFile)) { try { const cached = JSON.parse(readFileSync(this.avatarFile, 'utf8')); if (cached?.id && cached.id === this.saved?.user?.id) this.avatar = cached.uri || ''; } catch { this.avatar = ''; } }
+    if (this.saved?.user?.image) void this.refreshAvatar();
   }
   get signedIn() { return Boolean(this.saved?.token); }
   // What the screens may show. Never the sign-in itself.
-  summary() { return this.signedIn ? { email: this.saved.user?.email || '', name: this.saved.user?.name || '', url: this.saved.url || '', keyExpiresAt: this.saved.keyExpiresAt || '' } : null; }
+  summary() { return this.signedIn ? { email: this.saved.user?.email || '', name: this.saved.user?.name || '', image: this.avatar || '', url: this.saved.url || '', keyExpiresAt: this.saved.keyExpiresAt || '' } : null; }
   save(session, database) {
+    // A different account signing in drops the last one's picture from memory at once, so the old face never lingers on the new row.
+    const switched = (this.saved?.user?.id || '') !== (session.user?.id || '');
     this.saved = { token: session.token, expiresAt: session.expiresAt, user: session.user, url: database.url, keyExpiresAt: database.expiresAt };
+    if (switched) this.clearAvatar();
     writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
+    if (this.saved.user?.image) void this.refreshAvatar();
   }
-  clear() { this.saved = null; rmSync(this.file, { force: true }); }
+  // Fetch the sign-in picture once and keep it as a cached data URI, tagged with the account id. On failure (offline, blocked)
+  // the last cached copy stays.
+  async refreshAvatar() {
+    const asked = this.saved, gen = this.avatarGen, id = asked?.user?.id || '', url = asked?.user?.image;
+    if (!url || !/^https:\/\//i.test(url)) return;
+    try {
+      const response = await this.fetcher(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) return;
+      const type = (response.headers.get('content-type') || '').split(';')[0].trim() || 'image/jpeg';
+      if (!type.startsWith('image/')) return;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > 512 * 1024) return;
+      // The account may have signed out or switched while this was downloading: drop a picture that is no longer the one in use.
+      // The generation check also catches a logout that clears the avatar without replacing this.saved (closeSession forget path).
+      if (this.saved !== asked || this.avatarGen !== gen) return;
+      this.avatar = `data:${type};base64,${bytes.toString('base64')}`;
+      writeFileSync(this.avatarFile, JSON.stringify({ id, uri: this.avatar }), { mode: 0o600 });
+    } catch { /* keep whatever was cached */ }
+  }
+  // Delete the cached picture from disk (on sign-out or a full logout), so the next person on this computer never sees it.
+  clearAvatar() { this.avatar = ''; this.avatarGen++; rmSync(this.avatarFile, { force: true }); }
+  clear() { this.saved = null; rmSync(this.file, { force: true }); this.clearAvatar(); }
   // The account's private file folder on the account service (users/<id>/ in a private bucket). The bytes are already
   // encrypted on this computer; the service only ever stores them.
   async fileCall(method, pathname, body) {
