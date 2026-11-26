@@ -82,6 +82,7 @@
 .ig-dots i{width:6px;height:6px;border-radius:50%;background:var(--line,#d6dce2);transition:width .25s,background .25s}
 .ig-dots i.done{background:var(--muted,#59636e)}
 .ig-dots i.on{width:16px;border-radius:3px;background:var(--accent,#0969da)}
+.ig-alt{margin:4px 0 0;padding:2px 0;border:0;background:none;color:var(--accent,#0969da);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
 .ig-btns{display:flex;gap:6px}
 .ig-btns .btn{min-width:64px}
 
