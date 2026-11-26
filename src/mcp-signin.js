@@ -67,7 +67,7 @@ export class McpSignIn {
     this.store.put(KIND, record.id, { ...now, status: 'expired', at: new Date().toISOString() }); this.changed(now.url);
   }
   // Every secret held for a server's address, so it can be taken out of whatever that server sends back.
-  secrets(config) { const record = this.record(addressOf(config)), held = record && this.secret(record); return held ? [held.accessToken, held.refreshToken, held.client?.client_secret].filter(Boolean) : []; }
+  secrets(config) { const record = this.record(addressOf(config)), held = record && this.secret(record); return held ? [held.accessToken, held.refreshToken, held.client?.client_secret, held.client?.registration_access_token].filter(Boolean) : []; }
   // What the pages show: no token, ever.
   state(url) {
     const record = this.record(url);

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
 import { SIGN_IN_HELP, addressOf } from './mcp-signin.js';
+import { headerSecrets, pinnedFetch, redactor, safeError } from './mcp-guard.js';
 
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
@@ -116,9 +117,10 @@ export class Toolbox {
   // asked to sign in again. Whatever comes back, answer or error, leaves without the sign-in in it. key: the open
   // connection's name, when it is not the server's own.
   async signed(name, config, work, key = name) {
-    const used = [];
-    const call = async () => { const client = await this.client(key, config); used.push(this.clients.get(key)?.config); return work(client); };
-    const over = () => { this.failed.set(name, { at: Date.now(), error: SIGN_IN_HELP, signIn: true }); return new Error(`${name}: ${SIGN_IN_HELP}`); };
+    const secrets = new Set(), note = used => this.secretsInto(secrets, config, used);
+    // Noted before and after the work: a token renewed on the way leaves both the old and the new one to hide.
+    const call = async () => { note(); const client = await this.client(key, config); note(this.clients.get(key)?.config); return work(client); };
+    const over = () => { this.failed.set(name, { at: Date.now(), error: SIGN_IN_HELP, signIn: true }); return Object.assign(new Error(`${name}: ${SIGN_IN_HELP}`), { own: true }); };
     try {
       const answer = await call().catch(async error => {
         if (!wantsSignIn(error) || !signsIn(this.signIn, config)) throw error;
@@ -130,35 +132,28 @@ export class Toolbox {
           throw over();
         });
       });
-      return this.scrub(answer, config, used);
-    } catch (error) {
-      // Only a message that held the sign-in is replaced (some errors, like a timeout's, cannot be rewritten).
-      const message = String(error?.message || ''), clean = this.scrub(message, config, used);
-      throw clean === message ? error : Object.assign(new Error(clean), { code: error.code });
-    }
+      note();
+      return redactor(secrets)(answer);
+    } catch (error) { note(); throw safeError(error, name, secrets); }
   }
-  // Takes the sign-in out of anything a server sent back (some repeat the request's headers in their answers).
-  scrub(value, config, used = []) {
-    const headers = [config, ...used].flatMap(item => Object.entries(item?.headers || {}).filter(([key]) => key.toLowerCase() === 'authorization').map(([, text]) => String(text)));
-    const secrets = [...headers.map(text => text.replace(/^Bearer\s+/i, '')), ...(this.signIn?.secrets?.(config) || [])].filter(text => text.length >= 6);
-    if (!secrets.length || value === undefined) return value;
-    const clean = text => secrets.reduce((out, secret) => out.split(secret).join('[hidden]'), text);
-    if (typeof value === 'string') return clean(value);
-    const text = JSON.stringify(value), out = clean(text);
-    return out === text ? value : JSON.parse(out);
+  // Every credential a server could send back: the ones in its headers (as filled in), and the ones its sign-in holds.
+  secretsInto(secrets, ...configs) {
+    for (const config of configs) for (const secret of headerSecrets(expand(config))) secrets.add(secret);
+    for (const secret of this.signIn?.secrets?.(configs[0]) || []) if (secret) secrets.add(String(secret));
+    return secrets;
   }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
   async toolsOf(name, config, again = true) {
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
-    let used;
+    const secrets = this.secretsInto(new Set(), config);
     try {
       const client = await this.client(name, config), tools = [];
-      used = this.clients.get(name)?.config;
+      this.secretsInto(secrets, config, this.clients.get(name)?.config);
       let cursor;
       do { const page = await client.listTools(cursor ? { cursor } : {}); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor && tools.length < 1000);
-      const list = this.scrub(tools, config, [used]).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
+      const list = redactor(this.secretsInto(secrets, config))(tools).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
     } catch (error) {
@@ -166,7 +161,7 @@ export class Toolbox {
       const refused = wantsSignIn(error) && signsIn(this.signIn, config);
       if (refused && again && await this.signIn?.refused(config)) return this.toolsOf(name, config, false);
       if (refused && !again) this.signIn?.rejected?.(config);
-      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(this.scrub(String(error.message || ''), config, [used])), ...(refused ? { signIn: true } : {}) });
+      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(safeError(error, name, this.secretsInto(secrets, config)).message), ...(refused ? { signIn: true } : {}) });
       return known?.tools || [];
     }
   }
@@ -381,14 +376,16 @@ export async function connectServer(name, config) {
     return client;
   }
   const headers = config.headers || {};
+  // A server given headers (a sign-in, a key) is reached at its registered address only (mcp-guard.js).
+  const options = sse => ({ requestInit: { headers }, ...(Object.keys(headers).length ? { fetch: pinnedFetch(config.url, { sse }) } : {}) });
+  // A transport that failed to connect is closed, or the SSE one goes on trying by itself.
+  const open = async (opened, transport) => { try { await opened.connect(transport); return opened; } catch (error) { await transport.close().catch(() => {}); throw error; } };
   if (config.type !== 'sse') {
-    try { const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js'); await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })); return client; }
+    try { const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js'); return await open(client, new StreamableHTTPClientTransport(new URL(config.url), options(false))); }
     catch (error) { if (config.type === 'http') throw error; }
   }
   const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-  const fallback = new Client({ name: 'rex-desk-toolbox', version: '1.0.0' });
-  await fallback.connect(new SSEClientTransport(new URL(config.url), { requestInit: { headers } }));
-  return fallback;
+  return open(new Client({ name: 'rex-desk-toolbox', version: '1.0.0' }), new SSEClientTransport(new URL(config.url), options(true)));
 }
 
 // Every SKILL.md under a folder, a few levels down, skipping .git and node_modules.
