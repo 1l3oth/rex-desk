@@ -1336,7 +1336,7 @@ function connectorsPanel(agent) {
   const id = esc(agent.id), draft = ui.agentBotDraft || {};
   const about = `<section class="aps-sec"><h3>${t`What this is`}</h3><p class="cn-note">${t`A connector gives ${esc(agent.name)} its own Telegram bot. People message the bot and ${esc(agent.name)} answers, like a chat in this app.`}</p>
     <ul class="cn-note cn-steps"><li>${t`Make a bot with @BotFather and paste its token.`}</li><li>${t`Send the pairing code to the bot to make yourself its owner. The owner chats with it privately.`}</li><li>${t`Allow the bot in groups. Members of an allowed group can mention the bot or reply to its messages.`}</li></ul></section>`;
-  const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? sharedState(bot.readBy) : ''}</div>`;
+  const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? sharedState(bot.readBy || bot.why) : ''}</div>`;
   if (!bot.connected) {
     return `<div class="side-body aps cn">${about}
       <section class="aps-sec">${head}<p class="cn-note">${t`Give ${esc(agent.name)} its own Telegram bot, so people can talk to it there. Make one with @BotFather and paste its token here.`}</p>
@@ -1351,7 +1351,7 @@ function connectorsPanel(agent) {
     ${bot.pending.length ? `<ul class="cn-list">${bot.pending.map(group => groupRow(group, `<button type="button" class="btn small" data-action="ab-allow" data-agent="${id}" data-gid="${esc(String(group.id))}" data-title="${esc(group.title || '')}">${t`Allow`}</button>`)).join('')}</ul>` : ''}
     ${bot.groups.length ? `<ul class="cn-list">${bot.groups.map(group => groupRow(group, `<button type="button" class="btn small quiet danger" data-action="ab-remove" data-agent="${id}" data-gid="${esc(String(group.id))}">${t`Remove`}</button>`)).join('')}</ul>` : (bot.pending.length ? '' : `<p class="cn-note">${t`No groups yet.`}</p>`)}</section>`;
   return `<div class="side-body aps cn">${about}
-    <section class="aps-sec">${head}${sharedNote(bot.readBy)}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(bot.botUsername)}</div></div>${owner}
+    <section class="aps-sec">${head}${bot.why === 'unreadable' ? unreadableNote() : sharedNote(bot.readBy)}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(bot.botUsername)}</div></div>${owner}
       <button type="button" class="btn small quiet danger cn-wide" data-action="ab-disconnect" data-agent="${id}">${t`Disconnect`}</button></section>
     ${groups}${bugBotSection(agent)}</div>`;
 }
@@ -1359,6 +1359,8 @@ function connectorsPanel(agent) {
 // one of them is the fix. It takes over by itself once the other is gone.
 const sharedState = readBy => readBy ? `<span class="cn-state"><span class="dot warn"></span>${t`Not reading`}</span>` : `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>`;
 const readerName = readBy => readBy.kind === 'personal' ? t`your personal Telegram bot` : readBy.kind === 'bugs' ? t`the bug report bot` : readBy.name ? t`${readBy.name}'s own bot` : t`another agent's own bot`;
+// The saved token cannot be read on this computer (a broken or foreign seal), so this bot gets nothing until it is set up again.
+const unreadableNote = () => `<p class="cn-note">${t`Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent. Disconnect it, then paste the token from @BotFather again.`}</p>`;
 const sharedNote = readBy => readBy ? `<p class="cn-note">${t`This bot is also saved as ${esc(readerName(readBy))}, which reads its messages. Disconnect one of them; this one takes over by itself.`}</p>` : '';
 // The bug-report bot lives in the App Agent's Connectors tab, since its approved reports become tasks for that agent. Its queue
 // of reports waiting for an OK is in Needs you.

@@ -737,3 +737,26 @@ test('review f5391ce2 (3): an agent bot whose token cannot be read never wins th
   assert.equal(readerOf(store, { agentId: 'qa' }).reads, false);
   assert.equal(readerOf(store, { connectorId: 'telegram' }).reads, true);
 });
+
+// ---- review 25ebc3b0 ----
+test('review 25ebc3b0 (1): a stale waiter never cancels the read of the use that owns the bot', async () => {
+  const records = new Map(), store = { get: (k, id) => records.get(`${k}:${id}`) ?? null, put: (k, id, v) => records.set(`${k}:${id}`, v), delete: (k, id) => records.delete(`${k}:${id}`), list: () => [] };
+  let cancelled = false, release;
+  const valid = holdBot(store, 'S', { agentId: 'owner' }, new AbortController(), signal => new Promise(resolve => { release = resolve; signal.addEventListener('abort', () => { cancelled = true; resolve('cancelled'); }); }));
+  let read = 0;
+  const stale = await holdBot(store, 'S', { agentId: 'stale' }, new AbortController(), async () => { read++; return []; }, () => false);
+  assert.equal(stale, botUse.SKIPPED, 'the stale waiter gives up');
+  assert.equal(read, 0);
+  assert.equal(cancelled, false, "the owner's poll was not cancelled");
+  release('done'); assert.equal(await valid, 'done');
+});
+
+test('review 25ebc3b0 (2): an agent bot whose token cannot be read says Not reading with the reason, not Connected', async () => {
+  const { desk, store } = makeDesk();
+  store.put('agentbot', 'main', { id: 'main', botId: '42', botUsername: 'x_bot', groups: [], pending: [] }); store.put('secret', 'agentbot:main', 'not json');
+  assert.deepEqual(readerOf(store, { agentId: 'main' }), { reads: false, readBy: null, why: 'unreadable' });
+  const { AgentBots } = await import('../src/agent-bots.js');
+  const status = new AgentBots(desk).status('main');
+  assert.equal(status.connected, true, 'it can still be disconnected');
+  assert.equal(status.why, 'unreadable');
+});

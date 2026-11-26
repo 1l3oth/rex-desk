@@ -68,6 +68,8 @@ export function botReader(store, mine) {
   const uses = botUses(store), own = uses.find(item => same(item.use, mine));
   if (!own) return { reads: true, readBy: null };
   const able = uses.filter(item => item.botId === own.botId && item.paired);
+  // An agent bot whose saved token cannot be read on this computer never reads: why says so, so its card never shows Connected.
+  if (!own.paired && own.reader.kind === 'agent') return { reads: false, readBy: null, why: 'unreadable' };
   // A personal bot not paired yet never reads; it pairs once no working use reads the bot (TelegramBridge.link).
   if (!own.paired) return { reads: false, readBy: able.find(item => !item.failed)?.reader || null };
   const first = able.find(item => !item.failed) || able[0];
@@ -94,7 +96,13 @@ export const SKIPPED = Symbol('skipped');
 export async function readBot(store, botId, mine, abort, read, still = () => true) {
   let reads = inFlight.get(store); if (!reads) inFlight.set(store, reads = new Map());
   const key = String(botId);
-  for (let now = reads.get(key); now; now = reads.get(key)) { if (!same(now.use, mine)) now.abort.abort(); await now.done; }
+  // A waiter that may no longer read (removed, replaced, or another use owns the bot) gives up before it cancels anyone: a stale
+  // one must never end the poll of the use that does own the bot. It is checked again after every wait, and once it holds the bot.
+  for (let now = reads.get(key); now; now = reads.get(key)) {
+    if (abort.signal.aborted || !still()) return SKIPPED;
+    if (!same(now.use, mine)) now.abort.abort();
+    await now.done;
+  }
   let finish; const entry = { use: mine, abort, done: new Promise(resolve => { finish = resolve; }) };
   reads.set(key, entry);
   try { return abort.signal.aborted || !still() ? SKIPPED : await read(abort.signal); } finally { if (reads.get(key) === entry) reads.delete(key); finish(); }

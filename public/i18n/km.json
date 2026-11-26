@@ -2787,5 +2787,6 @@
  "Create shortcut": "Create shortcut",
  "Tap Create shortcut.": "ចុច Create shortcut។",
  "Tap Install again to confirm.": "ចុច Install ម្ដងទៀតដើម្បីបញ្ជាក់។",
- "Tap Add.": "ចុច Add។"
+ "Tap Add.": "ចុច Add។",
+ "Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent. Disconnect it, then paste the token from @BotFather again.": "Rex Desk មិនអាចអាន token ដែលបានរក្សាទុករបស់ bot នេះនៅលើកុំព្យូទ័រនេះបានទេ ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។ សូមផ្ដាច់វា រួចបិទភ្ជាប់ token ពី @BotFather ម្ដងទៀត។"
 }

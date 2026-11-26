@@ -46,7 +46,8 @@ export class AgentBots {
     const record = this.record(agentId);
     if (!record) return { connected: false };
     const fresh = record.pairCode && Number(record.pairUntil) > Date.now();
-    return { connected: true, readBy: botReader(this.store, { agentId }).readBy, botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
+    const reader = botReader(this.store, { agentId });
+    return { connected: true, readBy: reader.readBy, why: reader.why || '', botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
   }
   async connect(agentId, botToken) {
     const agent = this.agent(agentId); if (!agent) throw new Error('That agent is gone.');
