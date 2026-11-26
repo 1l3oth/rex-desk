@@ -55,13 +55,13 @@ const opened = (kind, secure, app) => app ? t('Open Rex Desk from your home scre
 // Android (Chrome): Install and create shortcut (Add to home screen on older Chrome) opens a choice: Install (an app that opens
 // in its own window) or Create shortcut (opens in Chrome; the only choice on plain http), then Add. Install app goes straight
 // to the Install confirmation. Checked against Chrome Help 9658361 and 15085120, and Apple's iPhone guide iphea86e5236.
-// iPhone: if Add to Home Screen is hidden, Edit Actions at the bottom of the Share list adds it; Done goes back to the list,
-// where it is then tapped.
+// iPhone: if Add to Home Screen is hidden, Edit Actions at the bottom of the Share list adds it; then back in the Share
+// list it is tapped.
 const STEPS = {
   ios: secure => [
     { say: t('Tap More (•••) at the bottom of Safari. If you see Share in the bar at the bottom or top instead, tap Share, then tap I tapped Share below.'), alt: { label: t('I tapped Share'), go: 2 }, scene: `<div class="ig-scene ig-ios-more">${page}<div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span><span class="ig-tap">${ICONS.more}</span></div></div>` },
     { say: t('Tap Share.'), scene: `<div class="ig-scene ig-ios-menu">${page}<div class="ig-menu ig-menu-low"><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.share}<span>${t('Share')}</span></div></div><div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span>${ICONS.more}</div></div>` },
-    { say: t('Scroll down and tap Add to Home Screen. If it is not there, tap Edit Actions at the bottom of the list, tap the add button next to Add to Home Screen, then tap Done to go back to the list and tap Add to Home Screen there.'), scene: `<div class="ig-scene ig-ios-sheet">${page}<div class="ig-sheet"><div class="ig-row">${ICONS.copy}<span>${t('Copy')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Add to Reading List')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.plus}<span>${t('Add to Home Screen')}</span></div></div></div>` },
+    { say: t('Scroll down and tap Add to Home Screen. If it is not there, tap Edit Actions at the bottom of the list and tap the add button next to Add to Home Screen. Return to the Share list, then tap Add to Home Screen.'), scene: `<div class="ig-scene ig-ios-sheet">${page}<div class="ig-sheet"><div class="ig-row">${ICONS.copy}<span>${t('Copy')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Add to Reading List')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.plus}<span>${t('Add to Home Screen')}</span></div></div></div>` },
     secure
       ? { say: t('If you see Open as Web App, turn it on. Then tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}<div class="ig-toggle"><span>${t('Open as Web App')}</span><i class="on"></i></div></div>` }
       : { say: t('Tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}</div>` },
