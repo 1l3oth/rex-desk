@@ -120,3 +120,39 @@ test('media from anyone but the owner is ignored; a stranger\'s text still gets 
     assert.deepEqual(await said(() => from(7, { photo: [] })), ['Only text works here for now. Please send your message as text.']);
   } finally { await close(); }
 });
+
+test('a bot saved in two places is read by one of them only, the same one on every start, and the next one takes over once it is disconnected (L105 review)', async () => {
+  const { app, close } = await desk('one-reader');
+  const store = app.desk.store, polls = [], parts = [app.desk.telegram, app.desk.bugBot, app.desk.agentBots];
+  // A fake Telegram that remembers which token text asked for updates. One bot (777), three token texts of it.
+  const fake = async (url, options) => {
+    const [, bot, method] = String(url).match(/bot([^/]+)\/(\w+)/), text = decodeURIComponent(bot), id = Number(text.split(':')[0]);
+    if (method === 'getMe') return Response.json({ ok: true, result: { id, username: `fake${id}_bot` } });
+    if (method === 'getUpdates') { polls.push(text); await new Promise(resolve => setTimeout(resolve, 40)); return Response.json({ ok: true, result: [] }); }
+    return Response.json({ ok: true, result: true });
+  };
+  for (const part of parts) { part.fetcher = fake; part.waitMs = 40; }
+  // Saved by an older version, before a bot could have only one use.
+  const save = (id, connectorId, values) => { store.put('connector', id, { id, connectorId, at: new Date().toISOString() }); store.put('secret', `connector:${id}`, store.encrypt(JSON.stringify(values))); };
+  save('mine', 'telegram', { botToken: token(777, 'A'), chatId: '42' });
+  save('bugs', 'telegram-bugs', { botToken: token(777, 'C'), botUsername: 'fake777_bot', botId: 777 });
+  store.put('agentbot', 'qa', { id: 'qa', botId: 777, botUsername: 'fake777_bot', ownerChatId: '', groups: [], pending: [], offset: 0 });
+  store.put('secret', 'agentbot:qa', store.encrypt(JSON.stringify({ botToken: token(777, 'B') })));
+  const readers = async () => { polls.length = 0; await new Promise(resolve => setTimeout(resolve, 600)); return [...new Set(polls)].sort(); };
+  const start = () => { for (const part of parts) part.start(); }, stop = () => Promise.all(parts.map(part => part.stop()));
+  try {
+    start();
+    assert.deepEqual(await readers(), [token(777, 'A')], 'only the personal bot reads it');
+    assert.equal(app.desk.agentBots.status('qa').readBy.kind, 'personal', "QA's bot says who reads it");
+    assert.equal(app.desk.bugBot.status().readBy.kind, 'personal');
+    await stop(); start();
+    assert.deepEqual(await readers(), [token(777, 'A')], 'the same one after a restart');
+    // Disconnected: the next one reads it, without a restart.
+    store.delete('connector', 'mine'); store.delete('secret', 'connector:mine');
+    assert.deepEqual(await readers(), [token(777, 'C')], 'then the bug report bot');
+    assert.equal(app.desk.agentBots.status('qa').readBy.kind, 'bugs');
+    app.desk.bugBot.disconnect();
+    assert.deepEqual(await readers(), [token(777, 'B')], "then QA's own bot");
+    assert.equal(app.desk.agentBots.status('qa').readBy, null);
+  } finally { await stop(); await close(); }
+});

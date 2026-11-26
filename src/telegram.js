@@ -6,6 +6,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { botReader } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // One-time pairing code: only the chat that sends it to the bot can be linked, so a stranger who happens to press Start on the
@@ -258,6 +259,8 @@ export class TelegramBridge {
       const found = telegramLink(this.store);
       // Idle (no getUpdates) until a chat is linked, so the Link button's one-shot getUpdates never hits a 409 conflict.
       if (!found?.values?.chatId) { await this.sleep(8000); continue; }
+      // Another use of the same bot reads it (bot-use.js botReader): wait, and read it once that one is disconnected.
+      if (!botReader(this.store, { connectorId: 'telegram' }).reads) { await this.sleep(this.waitMs ?? 3000); continue; }
       await this.ensureCommands(found);
       try {
         const offset = offsetFor(this.store, found.link.id);

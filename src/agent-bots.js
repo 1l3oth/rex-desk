@@ -4,7 +4,7 @@
 // in the Inbox, and the agent's final reply goes back to the chat it came from. The token stays encrypted on this computer.
 import { randomInt, randomUUID } from 'node:crypto';
 import { fromTelegram } from './telegram.js';
-import { assertBotFree } from './bot-use.js';
+import { assertBotFree, botReader } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // What a person can send besides text. Telegram's own notices (someone joined, a message was pinned) are none of these.
@@ -46,7 +46,7 @@ export class AgentBots {
     const record = this.record(agentId);
     if (!record) return { connected: false };
     const fresh = record.pairCode && Number(record.pairUntil) > Date.now();
-    return { connected: true, botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
+    return { connected: true, readBy: botReader(this.store, { agentId }).readBy, botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
   }
   async connect(agentId, botToken) {
     const agent = this.agent(agentId); if (!agent) throw new Error('That agent is gone.');
@@ -98,6 +98,8 @@ export class AgentBots {
   async poll(agentId, loop) {
     while (this.running && this.loops.get(agentId) === loop) {
       const record = this.record(agentId), token = this.token(agentId); if (!record || !token) return;
+      // Another use of the same bot reads it (bot-use.js botReader): wait, and read it once that one is disconnected.
+      if (!botReader(this.store, { agentId }).reads) { await new Promise(resolve => { const timer = setTimeout(resolve, this.waitMs ?? 3000); timer.unref?.(); }); continue; }
       try {
         loop.abort = new AbortController();
         const response = await this.fetcher(`${API}/bot${token}/getUpdates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offset: record.offset || 0, timeout: 30, allowed_updates: ['message', 'my_chat_member'] }), signal: loop.abort.signal });

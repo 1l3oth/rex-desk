@@ -10,7 +10,7 @@
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
 import { createHash, randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
-import { assertBotFree, botIdOf } from './bot-use.js';
+import { assertBotFree, botIdOf, botReader } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 const CONNECTOR = 'telegram-bugs';
@@ -267,6 +267,8 @@ export class BugBot {
       if (!found.values.botUsername || !found.values.botId) {
         try { const me = await this.call(found.values.botToken, 'getMe'); this.saveValues(found.link.id, { ...found.values, botUsername: me?.username || '', botId: me?.id || '' }); continue; } catch { /* retry next loop */ }
       }
+      // Another use of the same bot reads it (bot-use.js botReader): wait, and read it once that one is disconnected.
+      if (!botReader(this.store, { connectorId: CONNECTOR }).reads) { await this.sleep(this.waitMs ?? 3000); continue; }
       try {
         const offset = this.offsetFor(found);
         this.abort = new AbortController();
@@ -567,7 +569,7 @@ export class BugBot {
     const found = bugBotLink(this.store);
     const reports = this.reports();
     return {
-      agentId: this.appAgent()?.id || '', connected: Boolean(found?.values?.botToken), botUsername: found?.values?.botUsername || '',
+      agentId: this.appAgent()?.id || '', connected: Boolean(found?.values?.botToken), readBy: found ? botReader(this.store, { connectorId: CONNECTOR }).readBy : null, botUsername: found?.values?.botUsername || '',
       reportAt: found?.values?.reportAt || '09:00', groups: this.groups(found?.values), pending: this.pending(),
       queue: reports.filter(report => report.status === 'queued').map(this.publicReport),
       features: reports.filter(report => report.status === 'feature').map(this.publicReport),

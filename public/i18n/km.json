@@ -1,4 +1,10 @@
 {
+ "Not reading": "មិនកំពុងអាន",
+ "your personal Telegram bot": "បូត Telegram ផ្ទាល់ខ្លួនរបស់អ្នក",
+ "the bug report bot": "បូតរាយការណ៍កំហុស",
+ "{0}'s own bot": "បូតផ្ទាល់ខ្លួនរបស់ {0}",
+ "another agent's own bot": "បូតផ្ទាល់ខ្លួនរបស់ភ្នាក់ងារផ្សេង",
+ "This bot is also saved as {0}, which reads its messages. Disconnect one of them; this one takes over by itself.": "បូតនេះក៏ត្រូវបានរក្សាទុកជា {0} ដែលកំពុងអានសាររបស់វា។ ផ្តាច់មួយក្នុងចំណោមពួកវា ហើយបូតនេះនឹងបន្តដោយខ្លួនឯង។",
  ", copied from {0}": ", ចម្លងពី {0}",
  "… {0} more lines": "… {0} បន្ទាត់ទៀត",
  "· @ to mention · # for a task": "· @ ដើម្បីលើកឈ្មោះ · # សម្រាប់កិច្ចការ",
