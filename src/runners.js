@@ -312,7 +312,7 @@ export class ClaudeRunner {
         // The real context window of the model, as Claude Code reports it, so the circle and auto handoff do not guess 200k.
         const windows = Object.values(message.modelUsage || {}).map(usage => Number(usage?.contextWindow) || 0).filter(Boolean);
         if (windows.length) { this.contextWindow = Math.max(...windows); if (this.contextUsed) this.event('context', { used: this.contextUsed, window: this.contextWindow }); }
-        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, tokens: tokensOf(message.usage), steps: message.num_turns || 0, durationMs: message.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
+        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, isError: Boolean(message.is_error), cost: message.total_cost_usd, tokens: tokensOf(message.usage), steps: message.num_turns || 0, durationMs: message.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
         // An open Claude-app session carries on after one failed reply; the person sees it and writes again.

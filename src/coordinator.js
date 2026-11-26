@@ -60,7 +60,7 @@ import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
 import { pullLiveCheckout } from './live-checkout.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
-import { hideTelegramTag } from './telegram.js';
+import { hideTelegramTag, TURN_FAILED } from './telegram.js';
 
 const exec = promisify(execFile);
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
@@ -86,6 +86,8 @@ const webAgentPrompt = task => [
 ].join('\n');
 // What Claude Code says when an account has used up its plan for now.
 const LIMIT = /usage limit|limit reached|out of (extra )?usage|credit balance is too low|weekly limit|5-hour limit|rate_limit_error|reached your .{0,20}limit/i;
+// A short reply that reads as a usage limit notice, the same measure switchIfLimited uses.
+const limitNotice = text => String(text || '').length <= 240 && LIMIT.test(String(text || ''));
 const firstTaskReview = project => `This is the first task on ${project} whose workflow the person has not checked yet. When the work is done and verified, before your final report: write the workflow you actually followed as a short numbered list (where you branched from, how you set it up, how you tested and verified, where the pull request goes, who reviews, anything you avoided touching). Ask the person with desk_ask whether to change anything, with the options "Looks right" and "Change something" plus a text box for what to change. Save each step they confirm or correct with desk_learn_workflow (one short rule each), then call desk_confirm_workflow so every agent on ${project} follows it from now on and nobody asks again.`;
 const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
 // Codex on a ChatGPT plan says "The '<model>' model is not supported when using Codex with a ChatGPT account" (model_not_found).
@@ -773,7 +775,8 @@ export class Desk {
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     // heldResult: the final reply of a Telegram turn, sent once the turn really ended (see finally), never before the
     // usage-limit check: Claude can report its result and then fail on the limit, and the retry answers instead.
-    let run = this.run(runId), token, handedOn = false, heldResult = null;
+    // turnFailed: Telegram is then told only that there is no answer, never the error or a failed reply's own words.
+    let run = this.run(runId), token, handedOn = false, heldResult = null, turnFailed = false;
     // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
@@ -954,7 +957,7 @@ export class Desk {
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           // A turn a Telegram message started sends its final reply back to that Telegram chat (src/telegram.js).
           // An open Claude-app session goes on after a reply, so its reply goes now; any other turn's waits for its end.
-          if (kind === 'agent-result') { if (remoteOn) void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {}); else heldResult = data.result; }
+          if (kind === 'agent-result') { if (remoteOn) void this.telegram?.onTurnResult?.(runId, data.isError || limitNotice(data.result) ? TURN_FAILED : data.result)?.catch?.(() => {}); else heldResult = data.isError ? null : data.result; }
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the
@@ -1033,6 +1036,8 @@ ${message}` : message;
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
       if (await this.switchIfLimited(runId, '', turnKey)) { handedOn = true; return; }
+      // A usage limit told as an ordinary reply, with no other account to go on with, is a failed turn too.
+      turnFailed = ['claude', 'codex'].includes(run.provider || 'claude') && limitNotice(heldResult);
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' || this.personalRun(run) ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
@@ -1056,6 +1061,7 @@ ${message}` : message;
       // A turn cut at a step boundary for a fresh start (handoffMidTurn) ended on purpose: it goes on to the handoff, not to failed.
       if (!controller.signal.aborted && this.store.get('run', runId)?.handoffMidTurn) this.patchRun(runId, { state: 'finished', endedAt: now() });
       else {
+      turnFailed = !controller.signal.aborted;
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
       this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
       }
@@ -1063,7 +1069,8 @@ ${message}` : message;
     } finally {
       // The Telegram reply destination ends with this turn; a turn handed on to the next one passes it on.
       // Its reply goes now, unless the turn was handed on (another account or model): then the retry answers on Telegram.
-      if (heldResult !== null && !handedOn) void this.telegram?.onTurnResult?.(runId, heldResult)?.catch?.(() => {});
+      const telegramReply = turnFailed ? TURN_FAILED : heldResult;
+      if (telegramReply !== null && !handedOn) void this.telegram?.onTurnResult?.(runId, telegramReply)?.catch?.(() => {});
       { const replyBack = this.telegram?.onTurnEnd?.(runId, turnKey); if (handedOn && replyBack) this.patchRun(runId, { replyTo: replyBack }); }
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });

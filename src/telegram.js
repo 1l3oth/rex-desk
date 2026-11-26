@@ -32,6 +32,8 @@ export function splitReply(text, size = 3800, maxParts = 4) {
   }
   return parts.filter(Boolean);
 }
+// What Telegram gets when a turn fails. The error itself stays in the app: it can hold account, request or file details.
+export const TURN_FAILED = "I couldn't answer just now. Please send your message again in a little while.";
 // What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
 export const TELEGRAM_MARK = '[Telegram]';
 // The mark's line also says where it came from and the chat's own tag (tg:N), which the agent can pass to desk_telegram to
