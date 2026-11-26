@@ -112,6 +112,10 @@ export class Toolbox {
 
   // ---------- talking to one MCP server ----------
   async client(name, raw) {
+    // A configured key too short to tell from ordinary words is refused when a connection is opened too, after variable
+    // expansion, so a saved or synced short key is caught on the signed bridge and not only when the tool list is built,
+    // with the same plain message. The server's own configured credentials are checked, not the sign-in token added below.
+    if (shortKey(expand(raw))) throw Object.assign(new Error(KEY_TOO_SHORT), { own: true });
     // The person's sign-in for this address is put on here, fresh each time (L30); a renewed token opens a new connection.
     const config = this.signIn ? await this.signIn.authorize(raw) : raw;
     const open = this.clients.get(name);

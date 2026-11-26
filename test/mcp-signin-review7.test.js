@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { McpSignIn, nodeFetch } from '../src/mcp-signin.js';
+import { Toolbox } from '../src/toolbox.js';
 
 // L30 review 4941d45c (1): a connection that drops after the headers but before the body ends must fail, not hang, so a
 // sign-in or refresh that loses its server gives up instead of waiting forever.
@@ -65,4 +66,23 @@ test('review 4941d45c (2): a failed token exchange shows a plain failure page, n
     assert.match(page, /could not finish/, 'a plain failure page');
     assert.notEqual(signIn.state(fake.url).state, 'connected', 'nothing is saved as connected');
   } finally { signIn.stop(); fake.close(); }
+});
+
+// L30 review 4941d45c (3): the signed MCP bridge must refuse a saved or synced short key when it opens a connection, after
+// variable expansion, with the same plain message, not only when the tool list is built.
+test('review 4941d45c (3): the signed bridge refuses a short key, and a reference that expands to one, before connecting', async () => {
+  const box = new Toolbox({ home: '.', mcpConfig: () => ({}), bundled: '' });
+  let connects = 0; box.connectWith = async () => { connects += 1; return { listTools: async () => ({ tools: [] }), close: async () => {} }; };
+  await assert.rejects(() => box.signed('srv', { type: 'http', url: 'http://x', headers: { Authorization: 'Bearer abc' } }, client => client.listTools()), /at least 8/);
+  process.env.REX_REVIEW7_KEY = 'abc';
+  try { await assert.rejects(() => box.signed('ref', { type: 'http', url: 'http://x', headers: { Authorization: 'Bearer ${REX_REVIEW7_KEY}' } }, client => client.listTools()), /at least 8/); }
+  finally { delete process.env.REX_REVIEW7_KEY; }
+  assert.equal(connects, 0, 'a short key never opens a connection on the bridge');
+});
+
+test('review 4941d45c (3): the signed bridge opens a connection when the key is long enough', async () => {
+  const box = new Toolbox({ home: '.', mcpConfig: () => ({}), bundled: '' });
+  let connects = 0; box.connectWith = async () => { connects += 1; return { listTools: async () => ({ tools: [] }), close: async () => {} }; };
+  const answer = await box.signed('srv', { type: 'http', url: 'http://x', headers: { Authorization: 'Bearer abcdefgh' } }, async () => 'done');
+  assert.equal(answer, 'done'); assert.equal(connects, 1);
 });

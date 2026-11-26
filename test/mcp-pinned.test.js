@@ -92,6 +92,17 @@ for (const [what, token] of CREDENTIALS) {
       const connect = async () => ({ listTools: async () => ({ tools: [{ name: 'whoami', description: `sent ${token}`, inputSchema: { type: 'object', properties: { q: { type: 'string', default: token } } } }] }), callTool: async () => next(), close: async () => {} });
       const toolbox = new Toolbox({ connect, mcpConfig: () => ({ orbit: settings }) });
       if (signed) { let held = [token]; toolbox.signIn = { record: () => ({}), authorize: async raw => ({ ...raw, headers: { 'X-Kept': '1' } }), secrets: () => { const now = held; return now; }, refused: async () => false }; const read = next; next = () => { held = ['renewed-secret']; return read(); }; }
+      // A configured (non-signed) server whose own key is under 8 characters is refused everywhere now (L30): on the signed
+      // bridge and when listing, with the plain reason and no key in it. The echoed sign-in redaction is covered for every
+      // length by the signed branch, whose short secret comes from the sign-in, not a configured key.
+      if (!signed && token.length < 8) {
+        await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), /at least 8/, `${what}: a short configured key is refused on the bridge`);
+        toolbox.lists.clear(); await toolbox.closeAll();
+        assert.deepEqual(await toolbox.toolsOf('orbit', settings), [], `${what}: a short configured key is not listed`);
+        assert.match(toolbox.failed.get('orbit').error, /at least 8/, `${what}: the plain too-short reason`);
+        assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason never shows the key`);
+        continue;
+      }
       const answer = await toolbox.signed('orbit', settings, client => client.callTool());
       assert.ok(!shows(answer, token), `${what}: an answer`);
       assert.equal(answer.content[0].text, 'you sent [hidden] ([hidden])', what);
@@ -100,35 +111,25 @@ for (const [what, token] of CREDENTIALS) {
       const named = next; next = () => ({ ...named(), structuredContent: { [token]: 1 } });
       await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), { message: 'orbit: The server sent back an answer that could show your sign-in, so Rex Desk held it back.' }, what);
       next = named;
-      // A server's own configured key must be at least 8 characters (L30). A long one still lists and runs with its
-      // sign-in hidden; a key too short to tell from ordinary text is refused before it connects, with the plain reason
-      // and no key in it. The echoed sign-in redaction above is tested for every length, short ones included.
-      if (token.length >= 8) {
-        assert.ok(!shows(await toolbox.toolsOf('orbit', settings), token), `${what}: the tool list`);
-        assert.ok(!shows((await toolbox.run('orbit/whoami', {})).result, token), `${what}: desk_run`);
-        // Errors: the server's own protocol error is cleaned; a failed request never passes on what came back with it.
-        next = () => { throw rpcError(); };
-        await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), error => !shows(error.message, token) && !error.data && /bad \[hidden\]/.test(error.message), `${what}: a protocol error`);
-        const body = `{"seen":${JSON.stringify(`Bearer ${token}`).replaceAll('/', '\\/')}}`;
-        next = () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
-        await assert.rejects(() => toolbox.run('orbit/whoami', {}), { message: 'orbit: the server answered with an error (HTTP 500).' }, `${what}: a failed request`);
-        toolbox.lists.clear(); toolbox.connectWith = async () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
-        await toolbox.closeAll(); await toolbox.toolsOf('orbit', settings);
-        assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason on the connector`);
-      } else {
-        toolbox.lists.clear(); await toolbox.closeAll();
-        assert.deepEqual(await toolbox.toolsOf('orbit', settings), [], `${what}: a short configured key is not listed`);
-        assert.match(toolbox.failed.get('orbit').error, /at least 8/, `${what}: the plain too-short reason`);
-        assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason never shows the key`);
-      }
+      assert.ok(!shows(await toolbox.toolsOf('orbit', settings), token), `${what}: the tool list`);
+      assert.ok(!shows((await toolbox.run('orbit/whoami', {})).result, token), `${what}: desk_run`);
+      // Errors: the server's own protocol error is cleaned; a failed request never passes on what came back with it.
+      next = () => { throw rpcError(); };
+      await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), error => !shows(error.message, token) && !error.data && /bad \[hidden\]/.test(error.message), `${what}: a protocol error`);
+      const body = `{"seen":${JSON.stringify(`Bearer ${token}`).replaceAll('/', '\\/')}}`;
+      next = () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
+      await assert.rejects(() => toolbox.run('orbit/whoami', {}), { message: 'orbit: the server answered with an error (HTTP 500).' }, `${what}: a failed request`);
+      toolbox.lists.clear(); toolbox.connectWith = async () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
+      await toolbox.closeAll(); await toolbox.toolsOf('orbit', settings);
+      assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason on the connector`);
     }
   });
 }
 
 test('credentials in other headers, and ones filled in from the environment, are hidden too', async () => {
-  process.env.PINNED_TEST_KEY = 'k7';
-  const settings = { type: 'http', url: 'https://tool.example.test/mcp', headers: { 'X-API-Key': '${PINNED_TEST_KEY}', Cookie: 'sid=c8', 'Proxy-Authorization': 'Basic p9==', Accept: 'application/json' } };
-  const toolbox = new Toolbox({ connect: async () => ({ callTool: async () => ({ content: [{ type: 'text', text: 'k7 | c8 | p9== | application/json' }] }), close: async () => {} }), mcpConfig: () => ({}) });
+  process.env.PINNED_TEST_KEY = 'apikey12345';
+  const settings = { type: 'http', url: 'https://tool.example.test/mcp', headers: { 'X-API-Key': '${PINNED_TEST_KEY}', Cookie: 'sid=cookievalue8', 'Proxy-Authorization': 'Basic proxypass99', Accept: 'application/json' } };
+  const toolbox = new Toolbox({ connect: async () => ({ callTool: async () => ({ content: [{ type: 'text', text: 'apikey12345 | cookievalue8 | proxypass99 | application/json' }] }), close: async () => {} }), mcpConfig: () => ({}) });
   try { assert.equal((await toolbox.signed('tool', settings, client => client.callTool())).content[0].text, '[hidden] | [hidden] | [hidden] | application/json'); }
   finally { delete process.env.PINNED_TEST_KEY; await toolbox.closeAll(); }
 });
