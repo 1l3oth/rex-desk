@@ -108,6 +108,33 @@ const json = (response, code, data) => {
   }
   response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(text);
 };
+// The phone keeps the app's own files (scripts, styles, icons) saved in the browser so only data goes over the relay. The
+// service worker (public/sw.js) names its cache after the running build, written in here: the installed app's version, or
+// the source checkout's commit. A new release changes it, so the phone takes the new worker, a new cache, and drops the
+// old one. The worker itself is served revalidated (no-cache) so a new build is picked up on the next open.
+function buildToken() { return process.env.REX_DESK_VERSION || codeVersion() || 'dev'; }
+// The app's own files, saved on the phone at install so the next open needs none of them from the relay: every script and
+// style in public, the fonts, the icons, the offline page, and the three.js / driver bundles. Pages and language files are
+// left out (a page carries the sign-in state, a language file may be fixed mid-release). Built once; it only grows when a
+// file is added, which is a new build anyway.
+let appAssetList;
+function appAssets() {
+  if (appAssetList) return appAssetList;
+  const files = new Set(['/offline.html', '/manifest.webmanifest', '/favicon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png',
+    '/vendor/three/three.module.js', '/vendor/three/three.core.js', '/vendor/driver/driver.js.mjs', '/vendor/driver/driver.css']);
+  try { for (const name of readdirSync(path.join(root, 'public'))) if (/\.(?:js|css)$/.test(name)) files.add('/' + name); } catch {}
+  try { for (const name of readdirSync(path.join(root, 'public', 'guides'))) if (/\.(?:js|css)$/.test(name)) files.add('/guides/' + name); } catch {}
+  try { for (const name of readdirSync(path.join(root, 'public', 'fonts'))) if (name.endsWith('.woff2')) files.add('/fonts/' + name); } catch {}
+  appAssetList = [...files];
+  return appAssetList;
+}
+function serveServiceWorker(request, response) {
+  let body;
+  try { body = readFileSync(path.join(root, 'public', 'sw.js'), 'utf8').replace('__REX_BUILD__', buildToken()).replace("['__REX_PRECACHE__']", JSON.stringify(appAssets())); }
+  catch { return json(response, 404, { error: 'Page not found.' }); }
+  response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/', 'X-Content-Type-Options': 'nosniff' });
+  response.end(body);
+}
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
 async function rawBody(request, limit = 20 * 1024 * 1024) {
   const chunks = []; let size = 0;
@@ -588,6 +615,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const remoteSocket = relayed || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress) || (/\.ts\.net$/i.test(hostname) && !publicMcp);
       if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
+      // The phone keeps the app's own files saved (public/sw.js); served with the running build written in, before any
+      // sign-in, so the saved app refreshes when the computer updates and only data still crosses the relay. L88.
+      if (url.pathname === '/sw.js' && request.method === 'GET') return serveServiceWorker(request, response);
       // A2A: other agents reach this desk with the A2A key alone (it is off until the person turns it on), here or over Tailscale.
       if (session?.desk && await handleA2aHttp(session.desk, request, response, url, request => body(request, 1024 * 1024))) return;
       let peerSignedIn = false;
@@ -598,7 +628,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/mcp') return json(response, 403, { error: 'Agents connect on this computer only.' });
         if (url.pathname === '/login.css') return serveFile(request, response, path.join(root, 'public', 'login.css'));
         // What installing Rex Desk on the phone needs: the app's name and icons, and the page shown when the computer can't be reached.
-        if (['/manifest.webmanifest', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/favicon.svg', '/sw.js', '/offline.html'].includes(url.pathname)) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)));
+        if (['/manifest.webmanifest', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/favicon.svg', '/offline.html'].includes(url.pathname)) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)));
         // Through the relay the account is already checked there. A phone on this desk's own account comes straight in; any
         // other phone this desk has not seen yet waits for the person's OK here.
         // Another computer of this account asks for a file it does not have (peer-files.js). The relay names it as a desk of
