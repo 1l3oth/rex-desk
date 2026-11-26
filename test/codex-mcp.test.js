@@ -206,3 +206,19 @@ test('the stdio proxy reaches a desk tool using the token from the per-run var (
     await new Promise(resolve => httpServer.close(resolve));
   }
 });
+
+test('the Codex app-server keeps REX_DESK_TOKEN_VAR, so the desk proxy reads its per-run token instead of failing at start (0.0.127 handshake error)', async () => {
+  const { CodexClient, codexDeskConnection } = await import('../src/codex.js');
+  const desk = codexDeskConnection({ token: 'run-token', mcpUrl: 'http://127.0.0.1:1/mcp' });
+  let spawned;
+  const spawnProcess = (command, args, options) => { spawned = options.env; throw new Error('stop here'); };
+  const client = new CodexClient({ env: { ...desk.env, REX_DESK_TOKEN: 'inherited', REX_AGENT_TOKEN: 'inherited' }, spawnProcess });
+  await client.open().catch(() => {});
+  assert.equal(spawned.REX_DESK_TOKEN_VAR, desk.tokenVar, 'the proxy is told which variable holds its token');
+  assert.equal(spawned[desk.tokenVar], 'run-token');
+  assert.equal(spawned.REX_DESK_TOKEN, undefined, 'the shared desk sign-in is still stripped');
+  assert.equal(spawned.REX_AGENT_TOKEN, undefined);
+  const stray = new CodexClient({ env: { REX_DESK_TOKEN_VAR: 'PATH' }, spawnProcess });
+  await stray.open().catch(() => {});
+  assert.equal(spawned.REX_DESK_TOKEN_VAR, undefined, 'an inherited name that is not a per-run token variable is dropped');
+});

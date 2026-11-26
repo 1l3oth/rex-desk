@@ -26,6 +26,15 @@ export function codexEnvironment(env = process.env) {
   return clean;
 }
 
+// The app-server's environment: inherited sign-ins stripped, but the per-run token's variable name kept when it names a
+// per-run token variable that is really set. Stripping it too (0.0.127) left stdio.js without REX_DESK_TOKEN_VAR, so it
+// looked for the local vault, failed before the MCP handshake, and every Codex run stopped at 'initialize response'.
+export function appServerEnvironment(env = process.env) {
+  const clean = codexEnvironment(env), named = env.REX_DESK_TOKEN_VAR;
+  if (/^REX_DESK_TOKEN_[0-9A-F]{18}$/.test(named || '') && env[named]) clean.REX_DESK_TOKEN_VAR = named;
+  return clean;
+}
+
 const uniqueId = () => randomBytes(9).toString('hex');
 
 // The run's own connection to this Rex Desk, built fresh for each run so nothing in the person's Codex profile
@@ -78,7 +87,7 @@ export class CodexClient {
   async open() {
     const executable = resolveCommand('codex');
     this.child = this.spawnProcess(executable.command, [...executable.args, 'app-server', '--listen', 'stdio://', '-c', 'forced_login_method="chatgpt"'],
-      { env: codexEnvironment(this.env), cwd: this.cwd, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      { env: appServerEnvironment(this.env), cwd: this.cwd, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.once('error', error => this.fail(error));
     this.child.once('exit', code => { if (!this.closed) this.fail(new Error(`Codex app-server exited (${code}).`)); });
     this.child.stdin.on('error', error => { if (!this.closed) this.fail(error); });
