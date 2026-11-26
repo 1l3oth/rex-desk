@@ -210,7 +210,7 @@ export class Toolbox {
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) throw new Error('A name is letters, numbers, - or _.');
     if (!command.trim() && !/^https?:\/\//.test(url.trim())) throw new Error('Give the command that starts it, or its https address.');
     // A key too short to tell from ordinary words is refused before anything is saved (L30), so what was typed is not lost.
-    if (shortKey(url.trim() ? { url: url.trim() } : { args: splitCommand(command) })) throw new Error(KEY_TOO_SHORT);
+    if (shortKey(expand(url.trim() ? { url: url.trim() } : { args: splitCommand(command) }))) throw new Error(KEY_TOO_SHORT);
     const args = url.trim() ? ['mcp', 'add', '--scope', 'user', '--transport', 'http', id, url.trim()] : ['mcp', 'add', '--scope', 'user', id, '--', ...splitCommand(command)];
     await this.cli(args); this.lists.delete(id); await this.close(id);
     return { added: id };
@@ -268,7 +268,7 @@ export class Toolbox {
     }
     // Every install path (a pasted command, a bare URL, a JSON block) is checked before a single server is written, so a
     // key too short to tell from ordinary words never reaches Claude Code's config and the pasted text is kept to be fixed.
-    for (const args of plan.calls) if (shortKey(installConfig(args))) throw new Error(KEY_TOO_SHORT);
+    for (const args of plan.calls) if (shortKey(expand(installConfig(args)))) throw new Error(KEY_TOO_SHORT);
     for (const args of plan.calls) await this.cli(args);
     const servers = this.servers(), check = [];
     for (const name of plan.names) {
@@ -430,7 +430,7 @@ export function parseInstall(text) {
     if (!map || typeof map !== 'object') throw new Error('Paste the block with its name, like {"mcpServers": {"slack": {...}}}.');
     const entries = Object.entries(map).filter(([name, config]) => config && (config.command || config.url) && /^[A-Za-z0-9_-]{1,40}$/.test(name));
     if (!entries.length) throw new Error('No server in that JSON has a name and a command or url.');
-    for (const [, config] of entries) if (shortKey(config)) throw new Error(KEY_TOO_SHORT);
+    for (const [, config] of entries) if (shortKey(expand(config))) throw new Error(KEY_TOO_SHORT);
     return { kind: 'server', names: entries.map(([name]) => name), calls: entries.map(([name, config]) => ['mcp', 'add-json', '--scope', 'user', name, JSON.stringify(config)]) };
   }
   const parts = splitCommand(line);

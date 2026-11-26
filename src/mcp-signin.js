@@ -117,7 +117,15 @@ export function nodeFetch(target, init = {}) {
     let url; try { url = new URL(String(target)); } catch (error) { reject(error); return; }
     const mod = url.protocol === 'https:' ? https : http;
     const pin = init.pin;
-    const options = { method: (init.method || 'GET').toUpperCase(), headers: { ...(init.headers || {}) } };
+    // The OAuth SDK passes a Headers object and a URLSearchParams body, neither of which survives a plain spread or
+    // Buffer.from: normalize the headers to a flat object (covering Headers, arrays of pairs and plain objects) and the
+    // body to a string so the content-type and form the SDK set actually reach the token and refresh endpoints.
+    const headers = {};
+    if (init.headers) for (const [key, value] of new Headers(init.headers)) headers[key] = value;
+    let body = init.body;
+    if (body != null && typeof body !== 'string') body = body instanceof URLSearchParams ? body.toString() : Buffer.from(body);
+    if (body != null && headers['content-length'] == null) headers['content-length'] = String(Buffer.byteLength(body));
+    const options = { method: (init.method || 'GET').toUpperCase(), headers };
     if (pin?.address) {
       const family = pin.family || (pin.address.includes(':') ? 6 : 4);
       // Node asks for either one address (cb(err, address, family)) or, with autoselect, all of them (cb(err, [{...}])).
@@ -141,7 +149,7 @@ export function nodeFetch(target, init = {}) {
       if (init.signal.aborted) request.destroy(new Error('aborted'));
       else init.signal.addEventListener('abort', () => request.destroy(new Error('aborted')), { once: true });
     }
-    if (init.body != null) request.write(typeof init.body === 'string' ? init.body : Buffer.from(init.body));
+    if (body != null) request.write(body);
     request.end();
   });
 }
@@ -257,13 +265,15 @@ export class McpSignIn {
   endpoint(value, what) { const url = safeAddress(value, what, this.loopback); if (carriesCredential(url)) throw new Plain(`The ${what} this server named has a key or password in it, so Rex Desk does not sign in there.`); return url; }
   // Resolve a host once and refuse it if it is private: a literal private address, or a name the injected resolver maps to
   // one (so a public name pointed at a private IP is caught too). Returns the resolved address to pin the connection to, so
-  // the address checked is the address reached; null when the name cannot be resolved (left to the fetch, which then fails
-  // on its own) or when the host is a private one the caller is allowed to reach (home / loopback, handled by ensurePublic).
+  // the address checked is the address reached. Fails closed: a name that does not resolve (lookup error or empty answer)
+  // is refused, never left to an unpinned fetch that could reach an unchecked address. Only home / loopback destinations
+  // skip this (ensurePublic returns before calling here), so a private server the person set up themselves still signs in.
   async publicAddress(host, what) {
-    if (privateHost(host)) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
-    let addresses; try { addresses = await this.resolver(host); } catch { return null; }
-    if (!addresses?.length) return null;
-    if (addresses.some(entry => privateHost(entry.address))) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    const inside = () => new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    if (privateHost(host)) throw inside();
+    let addresses; try { addresses = await this.resolver(host); } catch { addresses = null; }
+    if (!addresses?.length) throw new Plain(`The ${what} this server named could not be checked, so Rex Desk did not sign in there.`);
+    if (addresses.some(entry => privateHost(entry.address))) throw inside();
     return { address: addresses[0].address, family: addresses[0].family };
   }
   // Check a request that would reach an address the server named, and give back the resolved address to pin the connection
