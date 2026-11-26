@@ -36,6 +36,18 @@
 .ig-sheet .ig-row{background:#fff;border-top-color:#eef0f2}
 .ig-sheet .ig-row:first-child{border-radius:8px 8px 0 0}.ig-sheet .ig-row:last-child{border-radius:0 0 8px 8px}
 .ig-menu{position:absolute;top:26px;right:6px;width:112px;background:#fff;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.2);transform-origin:top right;animation:ig-menu 3.2s cubic-bezier(.2,.8,.2,1) infinite}
+.ig-menu-low{top:auto;bottom:34px;transform-origin:bottom right}
+.ig-ios-more .ig-bar,.ig-ios-menu .ig-bar{justify-content:space-between;gap:6px;padding:0 8px}
+.ig-ios-more .ig-tap svg,.ig-ios-menu .ig-bar>svg:last-child{fill:currentColor;stroke:none}
+.ig-toggle{display:flex;align-items:center;justify-content:space-between;margin:0 10px;padding:8px;border-radius:8px;background:#f4f5f7;font-size:9px}
+.ig-toggle i{position:relative;width:22px;height:13px;border-radius:7px;background:#34c759}
+.ig-toggle i::after{content:"";position:absolute;top:1.5px;right:1.5px;width:10px;height:10px;border-radius:50%;background:#fff}
+.ig-choice{display:flex;align-items:center;gap:8px;margin:6px 6px 0;padding:8px;border-radius:7px;color:#1f2328}
+.ig-choice.ig-tap{display:flex;justify-content:flex-start}
+.ig-head span,.ig-head b{white-space:nowrap}
+.ig-head span{flex-shrink:0}
+.ig-head b{min-width:0;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+.ig-choice svg{width:13px;height:13px;color:#59636e}
 .ig-pick{animation:ig-pick 3.2s ease infinite}
 .ig-head{display:flex;align-items:center;justify-content:space-between;padding:10px 8px;border-bottom:1px solid #e1e4e8;background:#f4f5f7;font-size:9px}
 .ig-head span{color:#0a64d8}.ig-head b{font-weight:600}
@@ -48,7 +60,7 @@
 .ig-dialog>b{display:block;padding:0 10px;font-size:11px;font-weight:600}
 .ig-dialog .ig-card{margin:10px 6px}
 .ig-acts{display:flex;justify-content:flex-end;gap:12px;padding:0 10px;color:#0a64d8;font-weight:600}
-.ig-and-install .ig-page,.ig-and-list .ig-page,.ig-ios-sheet .ig-page{opacity:.55}
+.ig-and-install .ig-page,.ig-and-list .ig-page,.ig-ios-menu .ig-page,.ig-ios-sheet .ig-page{opacity:.55}
 .ig-home{background:linear-gradient(160deg,#3b4452,#1f242c)}
 .ig-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px;padding:30px 14px}
 .ig-grid span{aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.16)}
@@ -59,8 +71,8 @@
 /* The finger: travels from below to the tap target, presses, and lifts away. */
 .ig-finger{position:absolute;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:rgba(9,105,218,.28);border:2px solid rgba(9,105,218,.9);pointer-events:none;animation:ig-finger 3.2s cubic-bezier(.4,0,.2,1) infinite}
 .ig-finger::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid rgba(9,105,218,.7);opacity:0;animation:ig-ripple 3.2s ease-out infinite}
-.ig-ios-sheet .ig-finger,.ig-and-list .ig-finger,.ig-and-install .ig-finger{animation-name:ig-finger-late}
-.ig-ios-sheet .ig-finger::after,.ig-and-list .ig-finger::after,.ig-and-install .ig-finger::after{animation-name:ig-ripple-late}
+.ig-ios-sheet .ig-finger,.ig-ios-menu .ig-finger,.ig-and-list .ig-finger,.ig-and-install .ig-finger{animation-name:ig-finger-late}
+.ig-ios-sheet .ig-finger::after,.ig-ios-menu .ig-finger::after,.ig-and-list .ig-finger::after,.ig-and-install .ig-finger::after{animation-name:ig-ripple-late}
 
 .ig-step{min-height:84px;padding:12px 2px 4px}
 .ig-step small{color:var(--muted,#59636e);font-size:11.5px}

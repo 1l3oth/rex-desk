@@ -21,6 +21,7 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V4h12"/></svg>',
   book: '<svg viewBox="0 0 24 24"><path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
   dots: '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   fwd: '<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>',
@@ -33,19 +34,37 @@ const lines = n => Array.from({ length: n }, (_, i) => `<i style="width:${[86, 6
 const page = `<div class="ig-page">${lines(5)}</div>`;
 const home = () => `<div class="ig-scene ig-home"><div class="ig-grid">${'<span></span>'.repeat(7)}<span class="ig-new">${APP}<b>Rex Desk</b></span></div></div>`;
 
+// The address the phone has open, as the drawings show it (none when there is none).
+const here = () => esc(location.host || '');
+const esc = text => String(text).replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
+const card = () => `<div class="ig-card">${APP}<div><b>Rex Desk</b>${here() ? `<small>${here()}</small>` : ''}</div></div>`;
+// A page on plain http (not this computer) cannot be installed as an app: the browser makes a shortcut, which opens in the
+// browser and needs a connection to the computer running Rex Desk.
+export const secureHere = () => window.isSecureContext !== false;
+const opened = secure => secure ? t('Open Rex Desk from your home screen. It opens full screen, like an app.')
+  : t('Open Rex Desk from your home screen. It is a shortcut to this page, so it opens in the browser and needs a connection to your computer.');
+
 // Each step: what to do, and the drawn screen. .ig-tap marks where the finger goes.
+// iPhone (Safari, iOS 26 and later): the compact bar hides Share behind More; the bottom and top bars show Share directly.
+// Android (Chrome): Add to home screen, then Install (an app) or Create shortcut (always offered, the only one on plain http).
 const STEPS = {
-  ios: () => [
-    { say: t('Tap the Share button at the bottom of Safari.'), scene: `<div class="ig-scene ig-ios-share">${page}<div class="ig-bar ig-bottom">${ICONS.back}${ICONS.fwd}<span class="ig-tap">${ICONS.share}</span>${ICONS.book}${ICONS.tabs}</div></div>` },
+  ios: secure => [
+    { say: t('Tap More (•••) at the bottom of Safari. If you see the Share button there instead, tap it and go to step 3.'), scene: `<div class="ig-scene ig-ios-more">${page}<div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span><span class="ig-tap">${ICONS.more}</span></div></div>` },
+    { say: t('Tap Share.'), scene: `<div class="ig-scene ig-ios-menu">${page}<div class="ig-menu ig-menu-low"><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.share}<span>${t('Share')}</span></div></div><div class="ig-bar ig-bottom">${ICONS.back}<span class="ig-url">${here()}</span>${ICONS.more}</div></div>` },
     { say: t('Scroll down and tap Add to Home Screen.'), scene: `<div class="ig-scene ig-ios-sheet">${page}<div class="ig-sheet"><div class="ig-row">${ICONS.copy}<span>${t('Copy')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Add to Reading List')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.plus}<span>${t('Add to Home Screen')}</span></div></div></div>` },
-    { say: t('Tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div><div class="ig-card">${APP}<div><b>Rex Desk</b><small>app.rexdesk.dev</small></div></div></div>` },
-    { say: t('Open Rex Desk from your home screen. It opens full screen, like an app.'), scene: home() },
+    { say: t('Leave Open as Web App on, then tap Add at the top right.'), scene: `<div class="ig-scene ig-ios-add"><div class="ig-head"><span>${t('Cancel')}</span><b>${t('Add to Home Screen')}</b><span class="ig-tap ig-link">${t('Add')}</span></div>${card()}<div class="ig-toggle"><span>${t('Open as Web App')}</span><i class="on"></i></div></div>` },
+    { say: opened(secure), scene: home() },
   ],
-  android: () => [
-    { say: t('Tap the menu at the top right of Chrome.'), scene: `<div class="ig-scene ig-and-menu"><div class="ig-bar ig-top"><span class="ig-url">app.rexdesk.dev</span><span class="ig-tap">${ICONS.dots}</span></div>${page}</div>` },
-    { say: t('Tap Install app. Some phones call it Add to Home screen.'), scene: `<div class="ig-scene ig-and-list"><div class="ig-bar ig-top"><span class="ig-url">app.rexdesk.dev</span>${ICONS.dots}</div>${page}<div class="ig-menu"><div class="ig-row">${ICONS.tabs}<span>${t('New tab')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.install}<span>${t('Install app')}</span></div></div></div>` },
-    { say: t('Tap Install.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Install app?')}</b><div class="ig-card">${APP}<div><b>Rex Desk</b><small>app.rexdesk.dev</small></div></div><div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Install')}</span></div></div></div>` },
-    { say: t('Open Rex Desk from your home screen. It opens full screen, like an app.'), scene: home() },
+  android: secure => [
+    { say: t('Tap the menu (⋮) at the top right of Chrome.'), scene: `<div class="ig-scene ig-and-menu"><div class="ig-bar ig-top"><span class="ig-url">${here()}</span><span class="ig-tap">${ICONS.dots}</span></div>${page}</div>` },
+    { say: t('Tap Add to home screen. Some phones call it Install app.'), scene: `<div class="ig-scene ig-and-list"><div class="ig-bar ig-top"><span class="ig-url">${here()}</span>${ICONS.dots}</div>${page}<div class="ig-menu"><div class="ig-row">${ICONS.tabs}<span>${t('New tab')}</span></div><div class="ig-row">${ICONS.book}<span>${t('Bookmarks')}</span></div><div class="ig-row ig-tap ig-pick">${ICONS.install}<span>${t('Add to home screen')}</span></div></div></div>` },
+    secure
+      ? { say: t('Tap Install.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b><div class="ig-choice ig-tap ig-pick">${ICONS.install}<span>${t('Install')}</span></div><div class="ig-choice">${ICONS.plus}<span>${t('Create shortcut')}</span></div></div></div>` }
+      : { say: t('Tap Create shortcut.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b><div class="ig-choice ig-tap ig-pick">${ICONS.plus}<span>${t('Create shortcut')}</span></div></div></div>` },
+    secure
+      ? { say: t('Tap Install again to confirm.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Install app?')}</b>${card()}<div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Install')}</span></div></div></div>` }
+      : { say: t('Tap Add.'), scene: `<div class="ig-scene ig-and-install">${page}<div class="ig-dialog"><b>${t('Add to home screen')}</b>${card()}<div class="ig-acts"><span>${t('Cancel')}</span><span class="ig-tap ig-link">${t('Add')}</span></div></div></div>` },
+    { say: opened(secure), scene: home() },
   ],
 };
 
@@ -54,15 +73,15 @@ export function closeGuide() {
   root.classList.add('ig-out'); setTimeout(() => root.remove(), 220);
 }
 
-export function showInstallGuide({ kind = phoneKind() || 'ios' } = {}) {
+export function showInstallGuide({ kind = phoneKind() || 'ios', secure = secureHere() } = {}) {
   document.querySelector('.ig')?.remove();
   try { localStorage.setItem(SEEN, '1'); } catch { /* private window */ }
   const state = { kind, step: 0 };
   const root = document.createElement('div'); root.className = 'ig'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', t('Install Rex Desk'));
   document.body.append(root);
   const draw = () => {
-    const steps = STEPS[state.kind](); const step = steps[state.step]; const last = state.step === steps.length - 1;
-    const quick = state.kind === 'android' && offer;
+    const steps = STEPS[state.kind](secure); const step = steps[state.step]; const last = state.step === steps.length - 1;
+    const quick = state.kind === 'android' && secure && offer;
     root.innerHTML = `<div class="ig-box">
       <div class="ig-top-row"><b class="ig-title">${t('Install Rex Desk')}</b><button class="ig-x" data-ig="close" aria-label="${t('Close')}">${ICONS.close}</button></div>
       <div class="ig-seg" role="tablist">${[['ios', 'iPhone'], ['android', 'Android']].map(([key, label]) => `<button role="tab" aria-selected="${state.kind === key}" class="${state.kind === key ? 'on' : ''}" data-ig="kind" data-kind="${key}">${label}</button>`).join('')}</div>
@@ -101,11 +120,12 @@ export function showInstallGuide({ kind = phoneKind() || 'ios' } = {}) {
 }
 
 // Once, on a phone browser where Rex Desk is not installed, after the first screen has settled. The app calls this on every
-// refresh, so one plan waits at a time; while the tour or a dialog is open it waits, and a later refresh plans it again.
+// refresh, so one plan waits at a time; while the tour, a dialog or the New computer card (naming this computer) is open it
+// waits, and a later refresh plans it again.
 let planned = false;
 export function maybeInstallGuide({ delay = 4000 } = {}) {
-  if (planned || installed() || !phoneKind()) return;
+  if (planned || installed() || !phoneKind() || document.querySelector('[data-newpc]')) return;
   try { if (localStorage.getItem(SEEN)) return; } catch { return; }
   planned = true;
-  setTimeout(() => { planned = false; if (!installed() && !document.querySelector('.tour-back, .dialog-back, .ig')) showInstallGuide(); }, delay);
+  setTimeout(() => { planned = false; if (!installed() && !document.querySelector('.tour-back, .dialog-back, [data-newpc], .ig')) showInstallGuide(); }, delay);
 }
