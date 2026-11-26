@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connectServer, plainError } from './toolbox.js';
+import { assertBotFree, botIdOf } from './bot-use.js';
 
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'connectors', 'catalog.json');
 let cached = null;
@@ -116,6 +117,8 @@ export async function saveConnector(item, input, { toolbox, store, probed }) {
     toolbox.lists.delete(item.id); toolbox.failed.delete(item.id); await toolbox.close(item.id);
     return { id: item.id, connectorId: item.id, name: item.name, kind: probed.method, server: item.id };
   }
+  // The personal Telegram bot may not be the bug report bot or an agent's own bot (bot-use.js).
+  if (item.id === 'telegram') assertBotFree(store, botIdOf(values.botToken), { connectorId: 'telegram' });
   const id = `${item.id}-${Date.now().toString(36)}`, label = probed.label || '';
   store.put('secret', `connector:${id}`, store.encrypt(JSON.stringify(values)));
   const saved = { id, connectorId: item.id, name: label ? `${item.name} ${label}` : item.name, kind: probed.method, at: new Date().toISOString() };

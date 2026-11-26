@@ -40,6 +40,34 @@ async function desk(name) {
   return { app, plan, sent, setUp, close };
 }
 
+test('a bot has one use: every setup refuses a bot another one holds, even with a newer token of it', async () => {
+  for (const first of ['personal', 'bugs', 'agent']) {
+    for (const second of ['personal', 'bugs', 'agent'].filter(item => item !== first)) {
+      const { app, setUp, close } = await desk(`${first}-${second}`);
+      try {
+        assert.equal((await setUp[first](token(500001))).status, 200, `${first} takes a free bot`);
+        const saved = () => JSON.stringify([app.desk.store.list('connector'), app.desk.store.list('agentbot'), app.desk.store.list('secret').length]), before = saved();
+        const refused = await setUp[second](token(500001, 'N'));
+        assert.equal(refused.status, 400, `${second} after ${first}`);
+        assert.match(refused.error, { personal: /your personal Telegram bot/, bugs: /the bug report bot/, agent: /QA's own bot|belongs to QA/ }[first]);
+        assert.ok(!/AAAA|NNNN/.test(refused.error), 'no token in the words');
+        assert.equal(saved(), before, `${second} saved nothing`);
+        assert.equal((await setUp[second](token(500002))).status, 200, `${second} takes its own bot`);
+      } finally { await close(); }
+    }
+  }
+});
+
+test('a bot has one use: the same use can set its own bot again, and two setups at once cannot both get one bot', async () => {
+  const { app, setUp, close } = await desk('again');
+  try {
+    for (const [use, id] of [['personal', 600001], ['bugs', 600002], ['agent', 600003]]) for (const letter of ['A', 'B']) assert.equal((await setUp[use](token(id, letter))).status, 200, `${use} again`);
+    assert.equal((await setUp.agent(token(600003), 'dev')).status, 400, 'another agent');
+    const both = await Promise.all([setUp.bugs(token(600009)), setUp.agent(token(600009), 'dev'), setUp.personal(token(600009))]);
+    assert.deepEqual(both.map(item => item.status).sort(), [200, 400, 400]);
+  } finally { await close(); }
+});
+
 test('an answer that cannot be used gets fixed words in the personal bot chat, never the error', async () => {
   const { app, sent, close } = await desk('answer');
   try {

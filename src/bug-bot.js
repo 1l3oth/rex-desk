@@ -10,6 +10,7 @@
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
 import { createHash, randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
+import { assertBotFree, botIdOf } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 const CONNECTOR = 'telegram-bugs';
@@ -206,6 +207,7 @@ export class BugBot {
     const token = String(botToken || '').trim();
     if (!token) throw new Error('Paste the bot token from @BotFather.');
     const me = await this.call(token, 'getMe').catch(() => { throw new Error('Telegram does not know that bot token. Copy it again from @BotFather.'); });
+    assertBotFree(this.store, me?.id || botIdOf(token), { connectorId: CONNECTOR });
     const existing = bugBotLink(this.store);
     const values = { ...(existing?.values || {}), botToken: token, botUsername: me?.username || '', botId: me?.id || '' };
     // The agent that owns this bot is pinned by its id, so renaming that agent never hides its controls or loses its tasks.
