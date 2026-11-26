@@ -56,7 +56,8 @@ export function botUses(store) {
     let token = ''; try { token = JSON.parse(store.decrypt(store.get('secret', `agentbot:${item.id}`))).botToken || ''; } catch { /* unreadable */ }
     const botId = String(item.botId || botIdOf(token)); if (!botId) continue;
     const use = { agentId: item.id };
-    uses.push({ use, botId, paired: true, failed: Boolean(token) && failed(store, use, token), reader: { kind: 'agent', name: item.id === 'main' ? 'Rex Agent' : store.get('specialist', item.id)?.name || '' } });
+    // A token that cannot be read (a broken or foreign seal) cannot poll, so it never wins the bot: it waits like an unpaired use.
+    uses.push({ use, botId, paired: Boolean(token), failed: Boolean(token) && failed(store, use, token), reader: { kind: 'agent', name: item.id === 'main' ? 'Rex Agent' : store.get('specialist', item.id)?.name || '' } });
   }
   return uses;
 }
@@ -86,14 +87,17 @@ export function noteBotAnswer(store, mine, token, error = null) {
 // the old one is still waiting, or Telegram answers 409 and a batch can go to the old side. Every getUpdates of a bot (the poll
 // loops and the Link button) goes through here: a read by another use is cancelled and waited for first, a read by this same
 // use is waited for, and only then does this one start. abort: the caller's AbortController, so another use can cancel it.
+// still: checked once this read holds the bot, after any wait: the connection may have been removed or replaced, or another use
+// may now own the bot. When it says no, nothing is read and SKIPPED comes back, so the caller looks again from the top.
 const inFlight = new WeakMap();
-export async function readBot(store, botId, mine, abort, read) {
+export const SKIPPED = Symbol('skipped');
+export async function readBot(store, botId, mine, abort, read, still = () => true) {
   let reads = inFlight.get(store); if (!reads) inFlight.set(store, reads = new Map());
   const key = String(botId);
   for (let now = reads.get(key); now; now = reads.get(key)) { if (!same(now.use, mine)) now.abort.abort(); await now.done; }
   let finish; const entry = { use: mine, abort, done: new Promise(resolve => { finish = resolve; }) };
   reads.set(key, entry);
-  try { return await read(abort.signal); } finally { if (reads.get(key) === entry) reads.delete(key); finish(); }
+  try { return abort.signal.aborted || !still() ? SKIPPED : await read(abort.signal); } finally { if (reads.get(key) === entry) reads.delete(key); finish(); }
 }
 // Cancels this use's read in flight and resolves once it has ended.
 export async function endBotRead(store, mine) {

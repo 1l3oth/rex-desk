@@ -10,7 +10,7 @@
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
 import { createHash, randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
-import { assertBotFree, botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
+import { SKIPPED, assertBotFree, botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 const CONNECTOR = 'telegram-bugs';
@@ -277,7 +277,9 @@ export class BugBot {
         const updates = await readBot(this.store, String(found.values.botId), mine, abort, async signal => {
           try { const result = await this.call(token, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query', 'my_chat_member'] }, { signal: AbortSignal.any([signal, AbortSignal.timeout(55000)]) }); noteBotAnswer(this.store, mine, token); return result; }
           catch (error) { if (!signal.aborted) noteBotAnswer(this.store, mine, token, error); throw error; }
-        });
+        }, () => { const now = bugBotLink(this.store); return Boolean(now) && this.botKey(now) === this.botKey(found) && botReader(this.store, mine).reads; });
+        // The bot changed or another use took it while this one waited for the bot: look again from the top.
+        if (updates === SKIPPED) continue;
         for (const update of updates) {
           if (!this.running) break;
           // The bot changed while this batch was in flight (another token, or a removed link): drop the rest of it.

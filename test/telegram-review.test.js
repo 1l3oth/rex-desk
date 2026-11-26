@@ -185,9 +185,11 @@ async function readerDesk(name, how) {
   const save = (id, connectorId, values) => { store.put('connector', id, { id, connectorId, at: new Date().toISOString() }); store.put('secret', `connector:${id}`, store.encrypt(JSON.stringify(values))); };
   const agent = (id, value) => { store.put('agentbot', id, { id, botId: 777, botUsername: 'fake777_bot', ownerChatId: '', groups: [], pending: [], offset: 0 }); store.put('secret', `agentbot:${id}`, store.encrypt(JSON.stringify({ botToken: value }))); };
   const readers = async (ms = 600) => { fake.polls.length = 0; await new Promise(resolve => setTimeout(resolve, ms)); return [...new Set(fake.polls)].sort(); };
+  // Who reads once the handover has settled: a loop that just backed off after a cancelled poll may take a few seconds.
+  const settles = async expected => { const until = Date.now() + 7000; let now = await readers(300); while (JSON.stringify(now) !== JSON.stringify(expected) && Date.now() < until) now = await readers(300); return now; };
   const start = () => { for (const part of parts) part.start(); };
   const close = async () => { await Promise.all(parts.map(part => part.stop())); await made.close(); };
-  return { ...made, store, fake, save, agent, readers, start, close };
+  return { ...made, store, fake, save, agent, readers, settles, start, close };
 }
 const bugValues = value => ({ botToken: value, botUsername: 'fake777_bot', botId: 777 });
 
@@ -239,11 +241,11 @@ test('a reader that is disconnected ends its poll before the next one asks, for 
     assert.deepEqual(await d.readers(300), [token(777, 'A')]);
     // The personal bot is removed in Settings while its long poll is out.
     assert.equal(await call('DELETE', '/api/connectors/links/mine'), 200);
-    assert.deepEqual(await d.readers(300), [token(777, 'C')], 'the bug report bot reads next');
+    assert.deepEqual(await d.settles([token(777, 'C')]), [token(777, 'C')], 'the bug report bot reads next');
     assert.ok(d.fake.aborted.includes(token(777, 'A')), "the personal bot's poll was cancelled");
     assert.equal(d.fake.max, 1, 'never two polls of one bot at once');
     assert.equal(await call('POST', '/api/bugbot/disconnect'), 200);
-    assert.deepEqual(await d.readers(300), [token(777, 'B')], "then QA's own bot");
+    assert.deepEqual(await d.settles([token(777, 'B')]), [token(777, 'B')], "then QA's own bot");
     assert.equal(d.fake.max, 1);
     // Pairing a new personal bot of the same bot: refused while QA's bot reads it, and its reads never run beside a poll.
     d.save('mine2', 'telegram', { botToken: token(777, 'E') });

@@ -6,7 +6,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
+import { SKIPPED, botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // One-time pairing code: only the chat that sends it to the bot can be linked, so a stranger who happens to press Start on the
@@ -134,19 +134,24 @@ export class TelegramBridge {
     // Read the queue a batch at a time, moving the offset past each batch, until the code turns up or the queue is empty.
     // Nothing is linked yet, so the skipped messages are never routed anywhere; a capped number of pages per press.
     // Each read waits for any other read of this bot to end first (readBot), so it never runs beside a poll that is still out.
+    // Once it holds the bot, the same connection must still be waiting to pair, with no other use reading the bot.
+    const still = () => { const now = telegramLink(this.store); return now?.link?.id === link.id && now.values.botToken === values.botToken && !now.values.chatId && !botReader(this.store, PERSONAL).readBy; };
     const once = (offset, bot) => readBot(this.store, bot, PERSONAL, new AbortController(), async signal => {
       try { const result = await this.callAbortable(values.botToken, 'getUpdates', { offset, timeout: 0, limit: 100 }, 10000, AbortSignal.any([signal, AbortSignal.timeout(10000)])); noteBotAnswer(this.store, PERSONAL, values.botToken); return result; }
       catch (error) { noteBotAnswer(this.store, PERSONAL, values.botToken, error); throw error; }
-    });
+    }, still);
     let offset = offsetFor(this.store, link.id);
     for (let page = 0; page < LINK_PAGES; page++) {
       const updates = await once(offset, botOf(values));
+      if (updates === SKIPPED) throw new Error('The Telegram connection changed while it was pairing. Tap Link again.');
       if (!updates.length) break;
-      const message = updates.map(update => update.message || update.edited_message)
-        .find(item => item?.chat?.type === 'private' && codeIn(item.text) === code);
-      offset = updates[updates.length - 1].update_id + 1;
+      const hit = updates.find(update => { const item = update.message || update.edited_message; return item?.chat?.type === 'private' && codeIn(item.text) === code; });
+      // Only up to the code is used up: what the person sent after it stays for the poll loop, so nothing right after
+      // pairing is lost. Before the code nothing is linked yet, so those messages are skipped.
+      offset = (hit || updates[updates.length - 1]).update_id + 1;
       saveOffset(this.store, link.id, offset);
-      if (message) {
+      if (hit) {
+        const message = hit.message || hit.edited_message;
         const name = this.pair(link.id, values, message.chat);
         this.kick();
         return { linked: true, name };
@@ -280,10 +285,13 @@ export class TelegramBridge {
       try {
         const offset = offsetFor(this.store, found.link.id);
         const abort = this.abort = new AbortController(), token = found.values.botToken;
+        // Once it holds the bot: still the same paired connection, and still this use's bot to read.
+        const still = () => { const now = telegramLink(this.store); return now?.link?.id === found.link.id && now.values.botToken === token && Boolean(now.values.chatId) && botReader(this.store, PERSONAL).reads; };
         const updates = await readBot(this.store, botOf(found.values), PERSONAL, abort, async signal => {
           try { const result = await this.callAbortable(token, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query'] }, 55000, AbortSignal.any([signal, AbortSignal.timeout(55000)])); noteBotAnswer(this.store, PERSONAL, token); return result; }
           catch (error) { if (!signal.aborted) noteBotAnswer(this.store, PERSONAL, token, error); throw error; }
-        });
+        }, still);
+        if (updates === SKIPPED) continue;
         for (const update of updates) {
           if (!this.running) break;
           // Read the link fresh for each update: a Relink code or a new linked chat may have been saved during the long poll.

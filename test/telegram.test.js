@@ -83,7 +83,7 @@ test('link: only the chat that sends the one-time pairing code is linked, and th
   const values = JSON.parse(store.decrypt(store.get('secret', 'connector:telegram-1')));
   assert.equal(values.chatId, 555); assert.equal(values.chatName, 'Rex');
   assert.equal(values.pairCode, undefined, 'the code is used up');
-  assert.equal(store.get('telegram', 'state').offset, 10, 'offset skips past the code');
+  assert.equal(store.get('telegram', 'state').offset, 8, 'only up to the code is used up; what came after stays for the poll loop');
 });
 
 test('link: no code match means no link; an expired code is replaced', async () => {
@@ -670,4 +670,70 @@ test('the hidden tag line is taken out of what the app chat shows, and nothing e
   assert.equal(hideTelegramTag(`[Telegram #${key}] Telegram, Rex (tg:3)\na\n[Telegram #${key}] Telegram, Rex (tg:3)\nb`), `[Telegram #${key}] a\n[Telegram #${key}] b`);
   assert.equal(hideTelegramTag('Telegram, Rex (tg:3)\nwritten in the app'), 'Telegram, Rex (tg:3)\nwritten in the app');
   assert.equal(hideTelegramTag(`[Telegram #${key}] plain`), `[Telegram #${key}] plain`);
+});
+
+// ---- review f5391ce2 ----
+import * as botUse from '../src/bot-use.js';
+const { readBot: holdBot, botReader: readerOf, noteBotAnswer: noteAnswer } = botUse;
+// A Telegram that records which token asked getUpdates.
+function tokenFetcher(updates = []) {
+  const asked = [];
+  const fetcher = async (urlString, options) => {
+    const url = new URL(urlString), [, token, method] = url.pathname.match(/\/bot([^/]+)\/(\w+)/) || [];
+    if (method === 'getUpdates') asked.push(decodeURIComponent(token));
+    return { ok: true, json: async () => ({ ok: true, result: method === 'getUpdates' ? updates : { message_id: 1 } }) };
+  };
+  return { asked, fetcher };
+}
+// Another use holds a read of bot 'T' until it is cancelled; then change() runs, and only then does that read end.
+function otherRead(store, change) {
+  const abort = new AbortController();
+  const done = holdBot(store, 'T', { connectorId: 'telegram-bugs' }, abort, signal => new Promise(resolve => signal.addEventListener('abort', () => { change(); resolve([]); })));
+  return done;
+}
+
+test('review f5391ce2 (1): a poll that waited for the bot reads nothing when its connection was removed meanwhile', async () => {
+  const { desk, store } = makeDesk(); linkedStore(store);
+  const other = otherRead(store, () => { store.delete('connector', 'telegram-1'); store.delete('secret', 'connector:telegram-1'); });
+  const { asked, fetcher } = tokenFetcher(); const bridge = new TelegramBridge(desk, { fetcher });
+  bridge.start(); await other; await new Promise(resolve => setTimeout(resolve, 50));
+  await bridge.stop();
+  assert.deepEqual(asked, [], 'the removed connection never polls with its old token');
+});
+
+test('review f5391ce2 (1): pairing that waited for the bot stops when the connection was replaced meanwhile', async () => {
+  const { desk, store } = makeDesk(); linkedStore(store, { botToken: 'T:tok', pairCode: 'ABC234', pairUntil: Date.now() + 60000 });
+  const other = otherRead(store, () => linkedStore(store, { botToken: 'T:new' }));
+  const { asked, fetcher } = tokenFetcher(); const bridge = new TelegramBridge(desk, { fetcher });
+  await assert.rejects(() => bridge.link(), /changed while it was pairing/); await other;
+  assert.deepEqual(asked, []);
+});
+
+test('review f5391ce2 (1): a read that waited is skipped when another use owns the bot by then', async () => {
+  const records = new Map(), store = { get: (k, id) => records.get(`${k}:${id}`) ?? null, put: (k, id, v) => records.set(`${k}:${id}`, v), delete: (k, id) => records.delete(`${k}:${id}`), list: () => [] };
+  let owner = 'a', read = 0;
+  const first = holdBot(store, 'B', { agentId: 'b' }, new AbortController(), signal => new Promise(resolve => signal.addEventListener('abort', () => { owner = 'b'; resolve(); })));
+  const second = await holdBot(store, 'B', { agentId: 'a' }, new AbortController(), async () => { read++; return []; }, () => owner === 'a');
+  await first;
+  assert.equal(read, 0, 'nothing is read for a use that no longer owns the bot'); assert.equal(second, botUse.SKIPPED);
+});
+
+test('review f5391ce2 (2): messages sent right after the pairing code are kept for the poll loop', async () => {
+  const { desk, store } = makeDesk(); linkedStore(store, { botToken: 'T:tok', pairCode: 'ABC234', pairUntil: Date.now() + 60000 });
+  const { fetcher } = tokenFetcher([
+    { update_id: 7, message: { message_id: 1, chat: { id: 555, type: 'private', first_name: 'Rex' }, text: '/start ABC234' } },
+    { update_id: 8, message: { message_id: 2, chat: { id: 555, type: 'private', first_name: 'Rex' }, text: 'hello right after pairing' } },
+  ]);
+  const bridge = new TelegramBridge(desk, { fetcher });
+  assert.equal((await bridge.link()).linked, true);
+  assert.equal(store.get('telegram', 'state').offset, 8, 'the next poll starts at the message after the code');
+});
+
+test('review f5391ce2 (3): an agent bot whose token cannot be read never wins the bot', () => {
+  const { store } = makeDesk(); linkedStore(store, { botToken: '42:tok', chatId: 555, chatName: 'Rex' });
+  store.put('agentbot', 'qa', { id: 'qa', botId: '42' }); store.put('secret', 'agentbot:qa', 'not json');
+  // The personal bot's token was turned down once; the unreadable agent token must still not take the bot over.
+  noteAnswer(store, { connectorId: 'telegram' }, '42:tok', { code: 401 });
+  assert.equal(readerOf(store, { agentId: 'qa' }).reads, false);
+  assert.equal(readerOf(store, { connectorId: 'telegram' }).reads, true);
 });

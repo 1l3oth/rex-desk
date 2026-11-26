@@ -4,7 +4,7 @@
 // in the Inbox, and the agent's final reply goes back to the chat it came from. The token stays encrypted on this computer.
 import { randomInt, randomUUID } from 'node:crypto';
 import { fromTelegram } from './telegram.js';
-import { assertBotFree, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
+import { SKIPPED, assertBotFree, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // What a person can send besides text. Telegram's own notices (someone joined, a message was pinned) are none of these.
@@ -110,7 +110,9 @@ export class AgentBots {
           // A 401 or 404 means Telegram turned this token down: the next saved use of the bot takes over (bot-use.js).
           noteBotAnswer(this.store, mine, token, answer.ok ? null : { code: answer.error_code });
           return answer;
-        });
+        }, () => this.running && this.loops.get(agentId) === loop && this.token(agentId) === token && String(this.record(agentId)?.botId) === String(record.botId) && botReader(this.store, mine).reads);
+        // The bot changed or another use took it while this one waited for the bot: look again from the top.
+        if (data === SKIPPED) continue;
         if (!data.ok) throw new Error('getUpdates failed');
         for (const update of data.result) {
           if (!this.running || this.loops.get(agentId) !== loop) return;
