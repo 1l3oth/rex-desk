@@ -1361,9 +1361,15 @@ const sharedState = readBy => readBy ? `<span class="cn-state"><span class="dot 
 const readerName = readBy => readBy.kind === 'personal' ? t`your personal Telegram bot` : readBy.kind === 'bugs' ? t`the bug report bot` : readBy.name ? t`${readBy.name}'s own bot` : t`another agent's own bot`;
 // The saved token is missing or cannot be read on this computer (a broken or foreign seal), so this bot gets nothing. Pasting the
 // same bot's token fixes it and keeps the owner and groups (agent-bots.js replaceToken); another bot's token is refused.
-const tokenFix = (bot, id, draft) => `<p class="cn-note">${bot.why === 'missing' ? t`This bot's token is no longer saved on this computer, so its messages don't reach this agent.` : t`Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent.`} ${t`Paste the token of @${esc(bot.botUsername)} from @BotFather. The owner and groups stay.`}</p>
-  <input class="cn-input" data-ab-token data-agent="${id}" type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
-  <button type="button" class="btn small primary cn-wide" data-action="ab-token" data-agent="${id}">${t`Save token`}</button>`;
+// refused: Telegram turned the saved token down (it was revoked or made again in @BotFather).
+const tokenWhy = why => why === 'missing' ? t`This bot's token is no longer saved on this computer, so its messages don't reach this agent.`
+  : why === 'refused' ? t`Telegram turned down this bot's token. It was probably revoked or made again in @BotFather, so its messages don't reach this agent.`
+  : t`Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent.`;
+const tokenFix = (bot, id, draft) => { const error = ui.agentBotError?.[ui.agentBotsFor] || ''; return `<p class="cn-note">${tokenWhy(bot.why)} ${t`Paste the token of @${esc(bot.botUsername)} from @BotFather. The owner and groups stay.`}</p>
+  <label class="cn-label" for="ab-token-${id}">${t`Bot token`}</label>
+  <input class="cn-input" id="ab-token-${id}" data-ab-token data-agent="${id}" type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}"${error ? ` aria-invalid="true" aria-describedby="ab-error-${id}"` : ''}>
+  ${error ? `<p class="cn-error" id="ab-error-${id}" role="alert">${esc(error)}</p>` : ''}
+  <button type="button" class="btn small primary cn-wide" data-action="ab-token" data-agent="${id}">${t`Save token`}</button>`; };
 const sharedNote = readBy => readBy ? `<p class="cn-note">${t`This bot is also saved as ${esc(readerName(readBy))}, which reads its messages. Disconnect one of them; this one takes over by itself.`}</p>` : '';
 // The bug-report bot lives in the App Agent's Connectors tab, since its approved reports become tasks for that agent. Its queue
 // of reports waiting for an OK is in Needs you.
@@ -1409,14 +1415,14 @@ document.addEventListener('click', async event => {
 }, true);
 // Coming back to the window while the Connectors tab is open: show what changed meanwhile, and the polling carries on.
 document.addEventListener('visibilitychange', () => { if (!document.hidden && ui.chatTab === 'connectors') { ui.agentBots = {}; ui.bugBot = null; renderAll(); } });
-document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; ui.agentBotsFor = event.target.dataset.agent || ui.agentBotsFor; });
+document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) { ui.agentBotDraft = { token: event.target.value }; if (ui.agentBotError) ui.agentBotError = {}; } ui.agentBotsFor = event.target.dataset.agent || ui.agentBotsFor; });
 document.addEventListener('click', async event => {
   const target = event.target.closest?.('[data-action^="ab-"]'); if (!target) return;
   event.stopPropagation();
   const agentId = target.dataset.agent, base = `/agents/${encodeURIComponent(agentId)}/telegram`, set = status => { ui.agentBots = { ...(ui.agentBots || {}), [agentId]: status }; renderAll(); };
   try {
     switch (target.dataset.action) {
-      case 'ab-token': { const token = document.querySelector('[data-ab-token]')?.value.trim() || ''; if (!token) return toast(t('Paste the bot token first.'), true); target.disabled = true; set(await api(`${base}/token`, { method: 'POST', data: { botToken: token } })); ui.agentBotDraft = {}; toast(t('Token saved.')); break; }
+      case 'ab-token': { const token = document.querySelector('[data-ab-token]')?.value.trim() || ''; if (!token) return toast(t('Paste the bot token first.'), true); target.disabled = true; try { set(await api(`${base}/token`, { method: 'POST', data: { botToken: token } })); } catch (error) { target.disabled = false; ui.agentBotError = { [agentId]: error.message }; renderAll(); document.querySelector('[data-ab-token]')?.focus(); break; } ui.agentBotDraft = {}; ui.agentBotError = {}; toast(t('Token saved.')); break; }
       case 'ab-connect': { const token = document.querySelector('[data-ab-token]')?.value.trim() || ''; if (!token) return toast(t('Paste the bot token first.'), true); target.disabled = true; set(await api(`${base}/connect`, { method: 'POST', data: { botToken: token } })); ui.agentBotDraft = {}; toast(t('Bot connected.')); break; }
       case 'ab-disconnect': if (await askConfirm(t`Disconnect this bot?
 

@@ -784,3 +784,24 @@ test('review 1d5b5e3b (2): a new token for the same bot keeps the owner and grou
   assert.equal(status.why, ''); assert.equal(status.ownerLinked, true); assert.deepEqual(status.groups, record.groups);
   assert.equal(store.get('agentbot', 'main').offset, 9);
 });
+
+// ---- review a186365d ----
+test('review a186365d: a token Telegram turned down (401 or 404) shows Not reading with Save token; an outage changes nothing', async () => {
+  const { desk, store } = makeDesk();
+  store.put('agentbot', 'main', { id: 'main', botId: 42424, botUsername: 'x_bot', ownerChatId: '555', groups: [{ id: '-100', title: 'Team' }], pending: [] });
+  store.put('secret', 'agentbot:main', store.encrypt(JSON.stringify({ botToken: '42424:OLDOLDOLDOLDOLDOLDOLDOLD' })));
+  const { AgentBots } = await import('../src/agent-bots.js');
+  const fetcher = async url => ({ ok: true, json: async () => ({ ok: true, result: /\/getMe$/.test(url) ? { id: 42424, username: 'x_bot' } : true }) });
+  const bots = new AgentBots(desk, { fetcher }), mine = { agentId: 'main' };
+  noteAnswer(store, mine, '42424:OLDOLDOLDOLDOLDOLDOLDOLD', { code: 502 });
+  noteAnswer(store, mine, '42424:OLDOLDOLDOLDOLDOLDOLDOLD', { code: 409 });
+  assert.equal(bots.status('main').why, '', 'a Telegram outage or a 409 is not a turned-down token');
+  for (const code of [401, 404]) {
+    noteAnswer(store, mine, '42424:OLDOLDOLDOLDOLDOLDOLDOLD', { code });
+    assert.equal(bots.status('main').why, 'refused', `${code} shows Not reading`);
+    noteAnswer(store, mine, '42424:OLDOLDOLDOLDOLDOLDOLDOLD', null);
+  }
+  noteAnswer(store, mine, '42424:OLDOLDOLDOLDOLDOLDOLDOLD', { code: 401 });
+  const status = await bots.replaceToken('main', '42424:NEWNEWNEWNEWNEWNEWNEWNEW');
+  assert.equal(status.why, '', 'a new token of the same bot clears it'); assert.equal(status.ownerLinked, true); assert.equal(status.groups.length, 1);
+});

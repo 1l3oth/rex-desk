@@ -2459,7 +2459,7 @@
  "Connected": "បានតភ្ជាប់",
  "Pick the app to link. Rex Desk checks that it really connects before anything is saved.": "ជ្រើសរើស app ដើម្បីភ្ជាប់។ Rex Desk ពិនិត្យថាវាតភ្ជាប់បានពិតមែន មុននឹងរក្សាទុកអ្វីៗ។",
  "Token": "Token",
- "Bot token": "Bot token",
+ "Bot token": "token របស់បូត",
  "Webhook address": "អាសយដ្ឋាន webhook",
  "Folder": "ថត",
  "optional": "មិនបាច់ក៏បាន",
@@ -2800,5 +2800,8 @@
  "Tap Install and create shortcut. Older Chrome calls it Add to home screen. If the menu shows Install app instead, tap that, then tap I tapped Install below.": "ចុច Install and create shortcut។ Chrome ចាស់ៗហៅវាថា Add to home screen។ បើម៉ឺនុយបង្ហាញ Install app ជំនួសវិញ សូមចុចវា រួចចុច ខ្ញុំបានចុច Install នៅខាងក្រោម។",
  "Tap Install and create shortcut. Older Chrome calls it Add to home screen.": "ចុច Install and create shortcut។ Chrome ចាស់ៗហៅវាថា Add to home screen។",
  "You can rename it first. Then tap Add.": "អ្នកអាចប្ដូរឈ្មោះវាមុនសិន។ រួចចុច Add។",
- "Install and create shortcut": "Install and create shortcut"
+ "Install and create shortcut": "Install and create shortcut",
+ "Telegram turned down this bot's token. It was probably revoked or made again in @BotFather, so its messages don't reach this agent.": "Telegram បានបដិសេធ token របស់បូតនេះ។ ប្រហែលជាវាត្រូវបានដកហូត ឬបង្កើតម្ដងទៀតនៅក្នុង @BotFather ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។",
+ "That token is for a different bot. Paste the token of this bot, or disconnect and connect the other bot.": "token នោះជារបស់បូតផ្សេង។ សូមបិទភ្ជាប់ token របស់បូតនេះ ឬផ្ដាច់ រួចភ្ជាប់បូតមួយទៀតនោះ។",
+ "That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...": "នោះមិនដូច token របស់បូតទេ។ សូមចម្លងវាពី @BotFather៖ វាមើលទៅដូច 123456:ABC-..."
 }

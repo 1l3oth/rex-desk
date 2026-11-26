@@ -77,7 +77,10 @@ export function botReader(store, mine) {
   if (!own.paired) return { reads: false, readBy: able.find(item => !item.failed)?.reader || null };
   const first = able.find(item => !item.failed) || able[0];
   if (!first) return { reads: false, readBy: null };
-  return same(first.use, mine) ? { reads: true, readBy: null } : { reads: false, readBy: first.reader };
+  // An agent bot whose token Telegram turned down (401 or 404, noteBotAnswer) shows Not reading (why: refused) and the Save token
+  // box, even while it still asks as the last use left; a network error, a 409 or a 5xx never marks it, so an outage never shows this.
+  const refused = own.failed && own.reader.kind === 'agent' ? { why: 'refused' } : {};
+  return same(first.use, mine) ? { reads: true, readBy: null, ...refused } : { reads: false, readBy: first.reader, ...refused };
 }
 // What a Telegram answer means for this use's token: 401 or 404 marks it failed (the next use takes over), a good answer
 // clears that. Anything else (a network error, a 409, a timeout) changes nothing.
