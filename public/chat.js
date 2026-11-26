@@ -1025,11 +1025,6 @@ async function openApp() {
   stream.addEventListener('partial', event => { try { const data = JSON.parse(event.data); speakLive(data, draftKey(), ctx.currentRunId()); showLive(data); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
 }
-try { await openApp(); } catch (error) {
-  app.innerHTML = `<div class="boot boot-failed" data-retrying="1"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`;
-  const again = async () => { try { await openApp(); } catch (failure) { const line = app.querySelector('.boot-failed p'); if (line) line.textContent = failure.message; setTimeout(again, 5000); } };
-  setTimeout(again, 5000);
-}
 
 // A question card with several questions shows one at a time. Back and Next move between them; picking an answer moves on by itself.
 function answered(slide) {
@@ -1945,3 +1940,9 @@ document.addEventListener('click', event => {
   document.body.append(back);
   back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
 }, true);
+// Opens the app last, once every top-level value above is set: anything openApp() reaches (like PF_CHEV in the profile menu) must not be read before its line runs.
+try { await openApp(); } catch (error) {
+  app.innerHTML = `<div class="boot boot-failed" data-retrying="1"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`;
+  const again = async () => { try { await openApp(); } catch (failure) { const line = app.querySelector('.boot-failed p'); if (line) line.textContent = failure.message; setTimeout(again, 5000); } };
+  setTimeout(again, 5000);
+}
