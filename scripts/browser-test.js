@@ -135,7 +135,8 @@ try {
   await page.goto(app.address, { timeout: 30000 });
   const settings = page.getByRole('form', { name: 'Settings' });
   const openSection = async name => {
-    if (!(await settings.count())) await page.locator('.rail-settings').click();
+    // Settings opens from the profile menu (the rail no longer has its own Settings button).
+    if (!(await settings.count())) { await page.locator('[data-action="profile-toggle"]:visible').first().click(); await page.locator('[data-action="settings-open"]:visible').first().click(); await settings.waitFor(); }
     const nav = { folders: 'storage', sources: 'connectors', signins: 'projects', schedule: 'connectors', accounts: 'ai', localai: 'ai', devices: 'backup', plan: 'backup' }[name] || name;
     await settings.locator(`[data-st-section="${nav}"]`).click();
   };
