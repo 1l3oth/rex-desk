@@ -56,7 +56,7 @@ function writeFileList() {
 async function bundle() {
   const { build } = await import('esbuild');
   // Every package specifier src/ imports. A new import that is missing here fails the check below, never at run time.
-  const specifiers = ['@libsql/client/web', '@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/streamableHttp.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/sse.js',
+  const specifiers = ['@libsql/client/web', '@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/auth.js', '@modelcontextprotocol/sdk/client/streamableHttp.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/sse.js',
     '@modelcontextprotocol/sdk/server/index.js', '@modelcontextprotocol/sdk/server/mcp.js', '@modelcontextprotocol/sdk/server/stdio.js',
     '@modelcontextprotocol/sdk/server/streamableHttp.js', '@modelcontextprotocol/sdk/types.js', 'mammoth', 'msedge-tts', 'prettier', 'qrcode', 'xlsx', 'zod', 'zod-to-json-schema'];
   const kept = /^(playwright|playwright-core|@anthropic-ai\/claude-agent-sdk|node:.*)$/;
