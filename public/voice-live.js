@@ -8,6 +8,11 @@
 // A "recording" here is just { rate, chunks, levels, liveFrom?, liveKept? }: chunks are Float32Array
 // frames of mic audio (4096 samples each, like the recorder's ScriptProcessor), levels[i] is that
 // chunk's RMS loudness (Math.sqrt(mean(sample^2)), the same number recorder.js stores).
+// The page asks the server to load the voice model again when the last ask is older than WARM_AGAIN_MS (or was for
+// another language), not only once per page: the server lets an unused model go, and a cold model holds back every
+// live piece until the person stops talking.
+export const WARM_AGAIN_MS = 60000;
+export const needsWarm = (last, now, language) => !last || last.language !== language || now - last.at >= WARM_AGAIN_MS;
 export const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5, VOICE_FLOOR = 0.012, PAUSE_S = 0.5, FRAME = 4096;
 
 // The on-computer engine has no live results, so the recording is turned into words piece by piece while

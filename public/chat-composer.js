@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from './confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS, needsWarm } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -380,11 +380,11 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
 // turning a recording into words. The on-computer engine can still be loading after a restart: the recording is kept and
 // sent again by itself until the engine is up, instead of an error. Voice mode only seemed to work better because its
 // greeting gave the engine time to load first.
-let warmed = '';
+let warmed = null;
 export function warmVoice(ctx) {
-  const language = voiceLanguage(ctx); if (warmed === language) return; warmed = language;
+  const language = voiceLanguage(ctx), now = Date.now(); if (!needsWarm(warmed, now, language)) return; warmed = { language, at: now };
   try { localStorage.setItem('rex-voice-used', '1'); } catch { /* private window */ }
-  void fetch(`/api/voice/prepare?language=${language}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => { warmed = ''; });
+  void fetch(`/api/voice/prepare?language=${language}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => { warmed = null; });
 }
 const STARTING_TRIES = 12, STARTING_WAIT_MS = 5000;
 // alive: false once the turn is cancelled (Voice mode closed), so a retry for a still-starting engine stops there.

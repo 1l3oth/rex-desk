@@ -65,7 +65,7 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   // The live loop records where the committed words end on the recording, so the final pass can start from there.
   assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
   // The path is chosen by the shared finalPass, so the app and the QA harness pick the same one.
-  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
+  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS, needsWarm \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
   assert.match(composer, /const pass = finalPass\(recording\);/, 'finishMic asks finalPass which path to take');
   // finalPass hears only the tail after the last cut, and reports the tail-only path when there is audio after it.
   assert.match(voiceLive, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');

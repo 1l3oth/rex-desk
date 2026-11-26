@@ -39,6 +39,9 @@ function findFile(directory, name) {
   return '';
 }
 
+// How long a voice model stays in memory after the last word. Five minutes let it go between two messages, so the next
+// press waited on a 1 GB load and no live words showed until the person stopped (#voice).
+export const VOICE_REST_MS = 30 * 60000;
 export class Voice {
   constructor(directory, { fetcher = fetch, platform = process.platform } = {}) {
     Object.assign(this, { directory, fetcher, platform });
@@ -121,10 +124,10 @@ export class Voice {
     entry.ready.catch(() => this.stop(key));
     return entry.ready;
   }
-  // Each model holds about 1 GB of memory, so it is let go when nobody has spoken for five minutes.
+  // Each model holds about 1 GB of memory, so it is let go when nobody has spoken for VOICE_REST_MS.
   rest(key) {
     const entry = this.servers.get(key); if (!entry) return;
-    clearTimeout(entry.idle); entry.idle = setTimeout(() => this.stop(key), 5 * 60000); entry.idle.unref?.();
+    clearTimeout(entry.idle); entry.idle = setTimeout(() => this.stop(key), VOICE_REST_MS); entry.idle.unref?.();
   }
   stop(key) { const entry = this.servers.get(key); if (!entry) return; clearTimeout(entry.idle); this.servers.delete(key); entry.stopped = true; entry.child?.kill(); }
   stopAll() { for (const key of [...this.servers.keys()]) this.stop(key); }
