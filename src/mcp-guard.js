@@ -28,13 +28,54 @@ export function headerSecrets(config) {
   });
 }
 
+// The least a pasted key can be and still be told apart from ordinary words (L30). A real secret shorter than this is
+// refused on the way in, so a wrong, cut-off or placeholder key is caught at once and hiding one in an answer never has to
+// fight normal text.
+export const KEY_FLOOR = 8;
+export const KEY_TOO_SHORT = 'That key looks too short. A key is at least 8 characters, so paste the whole key.';
+// The scheme word in front of an auth value ("Bearer ", "Basic ") is not part of the key.
+const bareKey = value => String(value).trim().replace(/^(bearer|basic|token|apikey)\s+/i, '');
+// Pull the real secret out of a KEY=value or "Header: value" pair when the name reads as a credential, '' otherwise, so an
+// ordinary setting (a port, a region, true/false) is never taken for a key.
+const pairSecret = (name, value) => (CREDENTIAL.test(String(name)) ? bareKey(value) : '');
+
+// Every real secret a server config carries, by whatever way a key gets in: the credentials in its headers, the password or
+// a credential in its address, and KEY=value settings in its environment or on its command line (NAME=value, --name=value,
+// --name value, -H "Header: value") whose name reads as a credential. Scheme words, usernames, ports, regions and plain
+// settings are left out, so an ordinary short value is never refused as a key.
+export function configSecrets(config) {
+  const out = [...headerSecrets(config)];
+  try {
+    const url = new URL(String(config?.url));
+    if (url.password) out.push(decodeURIComponent(url.password));
+    for (const [name, value] of url.searchParams) if (CREDENTIAL.test(name) && value) out.push(value);
+  } catch { /* no address, or not one that parses */ }
+  for (const [name, value] of Object.entries(config?.env && typeof config.env === 'object' ? config.env : {})) out.push(pairSecret(name, value));
+  const args = Array.isArray(config?.args) ? config.args.map(String) : [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i], next = args[i + 1];
+    if (/^(-H|--header)$/.test(arg) && next !== undefined) { const header = next.match(/^\s*([^:\s]+)\s*:\s*(.*)$/); if (header) out.push(pairSecret(header[1], header[2])); i += 1; continue; }
+    const pair = arg.match(/^--?([\w-]+)=(.*)$/) || arg.match(/^([A-Za-z_]\w*)=(.*)$/);
+    if (pair) { out.push(pairSecret(pair[1], pair[2])); continue; }
+    const flag = arg.match(/^--?([A-Za-z][\w-]*)$/);
+    if (flag && next !== undefined && !next.startsWith('-')) { const secret = pairSecret(flag[1], next); if (secret) { out.push(secret); i += 1; } }
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+
+// The first real secret too short to tell from ordinary text (1..KEY_FLOOR-1 characters), or '' when every key is long
+// enough or none was given. An empty field is no key, so it is never too short.
+export function shortKey(config) {
+  return configSecrets(config).find(secret => secret.length > 0 && secret.length < KEY_FLOOR) || '';
+}
+
 // An answer that would show a sign-in where it cannot be taken out without breaking the MCP message (a field name, a type,
 // an address, a number): Rex Desk holds the whole answer back instead.
 export const UNSAFE = 'The server sent back an answer that could show your sign-in, so Rex Desk held it back.';
 export class Unsafe extends Error { constructor() { super(UNSAFE); this.own = true; } }
 // Fields the MCP protocol reads (types, names, addresses, cursors): their values are never changed, only checked.
 const STRUCTURE = new Set(['type', 'mimeType', 'role', 'uri', 'uriTemplate', 'name', 'method', 'jsonrpc', 'id', 'nextCursor', 'cursor', 'progressToken', 'protocolVersion']);
-const SHORT = 8;
+const SHORT = KEY_FLOOR;
 const WITHHELD = '[Rex Desk held this file back: it could show your sign-in.]';
 
 // Takes secrets out of a decoded MCP answer and keeps its structure: free text has them replaced, a protocol field, field

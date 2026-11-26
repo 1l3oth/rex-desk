@@ -100,17 +100,27 @@ for (const [what, token] of CREDENTIALS) {
       const named = next; next = () => ({ ...named(), structuredContent: { [token]: 1 } });
       await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), { message: 'orbit: The server sent back an answer that could show your sign-in, so Rex Desk held it back.' }, what);
       next = named;
-      assert.ok(!shows(await toolbox.toolsOf('orbit', settings), token), `${what}: the tool list`);
-      assert.ok(!shows((await toolbox.run('orbit/whoami', {})).result, token), `${what}: desk_run`);
-      // Errors: the server's own protocol error is cleaned; a failed request never passes on what came back with it.
-      next = () => { throw rpcError(); };
-      await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), error => !shows(error.message, token) && !error.data && /bad \[hidden\]/.test(error.message), `${what}: a protocol error`);
-      const body = `{"seen":${JSON.stringify(`Bearer ${token}`).replaceAll('/', '\\/')}}`;
-      next = () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
-      await assert.rejects(() => toolbox.run('orbit/whoami', {}), { message: 'orbit: the server answered with an error (HTTP 500).' }, `${what}: a failed request`);
-      toolbox.lists.clear(); toolbox.connectWith = async () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
-      await toolbox.closeAll(); await toolbox.toolsOf('orbit', settings);
-      assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason on the connector`);
+      // A server's own configured key must be at least 8 characters (L30). A long one still lists and runs with its
+      // sign-in hidden; a key too short to tell from ordinary text is refused before it connects, with the plain reason
+      // and no key in it. The echoed sign-in redaction above is tested for every length, short ones included.
+      if (token.length >= 8) {
+        assert.ok(!shows(await toolbox.toolsOf('orbit', settings), token), `${what}: the tool list`);
+        assert.ok(!shows((await toolbox.run('orbit/whoami', {})).result, token), `${what}: desk_run`);
+        // Errors: the server's own protocol error is cleaned; a failed request never passes on what came back with it.
+        next = () => { throw rpcError(); };
+        await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), error => !shows(error.message, token) && !error.data && /bad \[hidden\]/.test(error.message), `${what}: a protocol error`);
+        const body = `{"seen":${JSON.stringify(`Bearer ${token}`).replaceAll('/', '\\/')}}`;
+        next = () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
+        await assert.rejects(() => toolbox.run('orbit/whoami', {}), { message: 'orbit: the server answered with an error (HTTP 500).' }, `${what}: a failed request`);
+        toolbox.lists.clear(); toolbox.connectWith = async () => { throw Object.assign(new Error(`Error POSTing to endpoint: ${body}`), { code: 500 }); };
+        await toolbox.closeAll(); await toolbox.toolsOf('orbit', settings);
+        assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason on the connector`);
+      } else {
+        toolbox.lists.clear(); await toolbox.closeAll();
+        assert.deepEqual(await toolbox.toolsOf('orbit', settings), [], `${what}: a short configured key is not listed`);
+        assert.match(toolbox.failed.get('orbit').error, /at least 8/, `${what}: the plain too-short reason`);
+        assert.ok(!shows(toolbox.failed.get('orbit').error, token), `${what}: the reason never shows the key`);
+      }
     }
   });
 }

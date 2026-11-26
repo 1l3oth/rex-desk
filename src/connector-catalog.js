@@ -5,6 +5,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connectServer, plainError } from './toolbox.js';
+import { KEY_FLOOR, KEY_TOO_SHORT } from './mcp-guard.js';
+
+// A field that holds a secret, so a value too short to tell from ordinary text is refused (L30). An address, a folder or a
+// webhook is not a key, so it is never length-checked.
+const SECRET_FIELD = /key|token|secret|passw/i;
 
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'connectors', 'catalog.json');
 let cached = null;
@@ -22,6 +27,7 @@ export function readValues(item, input = {}) {
     if (!FIELD.test(name)) continue;
     const key = bare(name), value = String(input[key] ?? '').trim();
     if (!value && !optional(name) && key !== 'host') throw new Error(`Fill in ${LABELS[key] || key}.`);
+    if (value && SECRET_FIELD.test(key) && value.length < KEY_FLOOR) throw new Error(KEY_TOO_SHORT);
     values[key] = value;
   }
   return values;

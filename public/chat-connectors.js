@@ -148,7 +148,7 @@ function catalogFormHtml({ esc }, state, data) {
   const line = busy ? `<p class="cx-probe muted" role="status">${t`Checking…`}</p>`
     : !probe ? ''
     : probe.ok ? `<p class="cx-probe ok" role="status">${esc(okLine())}</p>`
-    : `<p class="cx-probe error-text" role="alert">${esc(probe.error || t('It did not connect.'))}</p>`;
+    : `<p class="cx-probe error-text" role="alert">${esc(probe.error ? t(probe.error) : t('It did not connect.'))}</p>`;
   const button = probe?.ok ? `<button type="button" class="btn small primary" data-cn-save ${busy ? 'disabled' : ''}>${t`Add`}</button>` : `<button type="button" class="btn small primary" data-cn-probe ${busy ? 'disabled' : ''}>${probe ? t('Check again') : t('Check')}</button>`;
   const help = [item.connect.helpUrl && fields ? `<a href="${esc(item.connect.helpUrl)}" target="_blank" rel="noopener noreferrer">${t`Where to find it`}</a>` : '', item.connect.source && (item.connect.source !== item.connect.helpUrl || !fields) ? `<a href="${esc(item.connect.source)}" target="_blank" rel="noopener noreferrer">${t`${item.name} docs`}</a>` : ''].filter(Boolean).join(' · ');
   return `<h2>${t`Connect ${esc(item.name)}`}</h2><p class="muted">${esc(howLine(item))}.${item.note ? ` ${esc(item.note)}` : ''}</p>

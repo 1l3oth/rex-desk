@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
 import { SIGN_IN_HELP, addressOf, carriesCredential } from './mcp-signin.js';
-import { headerSecrets, pinnedFetch, redactor, safeError, Unsafe } from './mcp-guard.js';
+import { headerSecrets, pinnedFetch, redactor, safeError, Unsafe, shortKey, KEY_TOO_SHORT } from './mcp-guard.js';
 
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
@@ -156,6 +156,10 @@ export class Toolbox {
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
   async toolsOf(name, config, again = true) {
+    // However this server's key got here (typed, pasted, a command flag, an agent, an old saved config or a synced one), a
+    // key too short to tell from ordinary words is refused: it never connects, shows the same plain reason, and can be
+    // replaced. Nothing half-trusted is listed or cached as working.
+    if (shortKey(config)) { this.lists.delete(name); this.failed.set(name, { at: Date.now(), error: KEY_TOO_SHORT }); return []; }
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
     const secrets = this.secretsInto(new Set(), config);
@@ -205,6 +209,8 @@ export class Toolbox {
     const id = String(name || '').trim();
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) throw new Error('A name is letters, numbers, - or _.');
     if (!command.trim() && !/^https?:\/\//.test(url.trim())) throw new Error('Give the command that starts it, or its https address.');
+    // A key too short to tell from ordinary words is refused before anything is saved (L30), so what was typed is not lost.
+    if (shortKey(url.trim() ? { url: url.trim() } : { args: splitCommand(command) })) throw new Error(KEY_TOO_SHORT);
     const args = url.trim() ? ['mcp', 'add', '--scope', 'user', '--transport', 'http', id, url.trim()] : ['mcp', 'add', '--scope', 'user', id, '--', ...splitCommand(command)];
     await this.cli(args); this.lists.delete(id); await this.close(id);
     return { added: id };
@@ -421,6 +427,7 @@ export function parseInstall(text) {
     if (!map || typeof map !== 'object') throw new Error('Paste the block with its name, like {"mcpServers": {"slack": {...}}}.');
     const entries = Object.entries(map).filter(([name, config]) => config && (config.command || config.url) && /^[A-Za-z0-9_-]{1,40}$/.test(name));
     if (!entries.length) throw new Error('No server in that JSON has a name and a command or url.');
+    for (const [, config] of entries) if (shortKey(config)) throw new Error(KEY_TOO_SHORT);
     return { kind: 'server', names: entries.map(([name]) => name), calls: entries.map(([name, config]) => ['mcp', 'add-json', '--scope', 'user', name, JSON.stringify(config)]) };
   }
   const parts = splitCommand(line);
