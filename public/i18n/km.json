@@ -2783,7 +2783,6 @@
  "Create shortcut": "Create shortcut",
  "Tap Install again to confirm.": "ចុច Install ម្ដងទៀតដើម្បីបញ្ជាក់។",
  "Tap Add.": "ចុច Add។",
- "Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent. Disconnect it, then paste the token from @BotFather again.": "Rex Desk មិនអាចអាន token ដែលបានរក្សាទុករបស់ bot នេះនៅលើកុំព្យូទ័រនេះបានទេ ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។ សូមផ្ដាច់វា រួចបិទភ្ជាប់ token ពី @BotFather ម្ដងទៀត។",
  "Open Rex Desk from your home screen. It is a shortcut to this page and needs a connection to your computer.": "បើក Rex Desk ពីអេក្រង់ដើមរបស់អ្នក។ វាជាផ្លូវកាត់ទៅទំព័រនេះ ហើយត្រូវការការតភ្ជាប់ទៅកុំព្យូទ័ររបស់អ្នក។",
  "Open Rex Desk from your home screen. It is a shortcut, so it opens in Chrome.": "បើក Rex Desk ពីអេក្រង់ដើមរបស់អ្នក។ វាជាផ្លូវកាត់ ដូច្នេះវាបើកក្នុង Chrome។",
  "Tap More (•••) at the bottom of Safari. If you see Share in the bar at the bottom or top instead, tap Share, then tap I tapped Share below.": "ចុច More (•••) នៅខាងក្រោម Safari។ បើអ្នកឃើញ Share នៅរបារខាងក្រោម ឬខាងលើជំនួសវិញ សូមចុច Share រួចចុច ខ្ញុំបានចុច Share នៅខាងក្រោម។",
@@ -2795,5 +2794,10 @@
  "Tap Add to home screen.": "ចុច Add to home screen។",
  "I tapped Install": "ខ្ញុំបានចុច Install",
  "Tap Install. It adds Rex Desk as an app that opens in its own window. If there is no Install, tap Create shortcut instead.": "ចុច Install។ វាបន្ថែម Rex Desk ជាកម្មវិធីដែលបើកក្នុងផ្ទាំងផ្ទាល់ខ្លួន។ បើគ្មាន Install ទេ សូមចុច Create shortcut ជំនួសវិញ។",
- "I tapped Create shortcut": "ខ្ញុំបានចុច Create shortcut"
+ "I tapped Create shortcut": "ខ្ញុំបានចុច Create shortcut",
+ "This bot's token is no longer saved on this computer, so its messages don't reach this agent.": "token របស់បូតនេះលែងបានរក្សាទុកនៅលើកុំព្យូទ័រនេះទៀតហើយ ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។",
+ "Rex Desk can't read this bot's saved token on this computer, so its messages don't reach this agent.": "Rex Desk មិនអាចអាន token ដែលបានរក្សាទុករបស់បូតនេះនៅលើកុំព្យូទ័រនេះបានទេ ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។",
+ "Paste the token of @{0} from @BotFather. The owner and groups stay.": "បិទភ្ជាប់ token របស់ @{0} ពី @BotFather។ ម្ចាស់ និងក្រុមនៅដដែល។",
+ "Save token": "រក្សាទុក token",
+ "Token saved.": "បានរក្សាទុក token។"
 }

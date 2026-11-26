@@ -760,3 +760,27 @@ test('review 25ebc3b0 (2): an agent bot whose token cannot be read says Not read
   assert.equal(status.connected, true, 'it can still be disconnected');
   assert.equal(status.why, 'unreadable');
 });
+
+// ---- review 1d5b5e3b ----
+test('review 1d5b5e3b (1): an agent bot whose token is missing says Not reading with the reason, not Connected', async () => {
+  const { desk, store } = makeDesk();
+  store.put('agentbot', 'main', { id: 'main', botId: '42', botUsername: 'x_bot', groups: [], pending: [] });
+  assert.deepEqual(readerOf(store, { agentId: 'main' }), { reads: false, readBy: null, why: 'missing' });
+  const { AgentBots } = await import('../src/agent-bots.js');
+  assert.equal(new AgentBots(desk).status('main').why, 'missing');
+});
+
+test('review 1d5b5e3b (2): a new token for the same bot keeps the owner and groups; a token of another bot is refused', async () => {
+  const { desk, store } = makeDesk();
+  const record = { id: 'main', botId: 42424, botUsername: 'x_bot', ownerChatId: '555', ownerName: 'Rex', groups: [{ id: '-100', title: 'Team' }], pending: [], offset: 9 };
+  store.put('agentbot', 'main', record); store.put('secret', 'agentbot:main', 'not json');
+  const fetcher = async url => ({ ok: true, json: async () => ({ ok: true, result: /\/getMe$/.test(url) ? { id: Number(String(url).match(/bot(\d+):/)[1]), username: 'x_bot' } : true }) });
+  const { AgentBots } = await import('../src/agent-bots.js');
+  const bots = new AgentBots(desk, { fetcher });
+  await assert.rejects(bots.replaceToken('main', '99999:BBBBBBBBBBBBBBBBBBBBBBBBB'), /different bot/);
+  assert.equal(store.get('secret', 'agentbot:main'), 'not json', 'another bot never takes this pairing');
+  const status = await bots.replaceToken('main', '42424:AAAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(bots.token('main'), '42424:AAAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(status.why, ''); assert.equal(status.ownerLinked, true); assert.deepEqual(status.groups, record.groups);
+  assert.equal(store.get('agentbot', 'main').offset, 9);
+});

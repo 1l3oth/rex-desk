@@ -1124,14 +1124,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         catch (error) { return json(response, 400, { error: error.message }); }
       }
       // One Telegram bot per agent (src/agent-bots.js): the agent's Connectors tab connects it, links its owner and allows groups.
-      const agentBot = url.pathname.match(/^\/api\/agents\/([^/]+)\/telegram(?:\/(connect|disconnect|code|groups|groups\/remove))?$/);
+      const agentBot = url.pathname.match(/^\/api\/agents\/([^/]+)\/telegram(?:\/(connect|token|disconnect|code|groups|groups\/remove))?$/);
       if (agentBot) {
         const agentId = decodeURIComponent(agentBot[1]), action = agentBot[2] || '';
         if (!action && request.method === 'GET') return json(response, 200, desk.agentBots.status(agentId));
         if (request.method !== 'POST') return json(response, 405, { error: 'Not allowed.' });
         const input = await body(request).catch(() => ({}));
         try {
-          const result = action === 'connect' ? await desk.agentBots.connect(agentId, input.botToken) : action === 'disconnect' ? desk.agentBots.disconnect(agentId)
+          const result = action === 'connect' ? await desk.agentBots.connect(agentId, input.botToken) : action === 'token' ? await desk.agentBots.replaceToken(agentId, input.botToken) : action === 'disconnect' ? desk.agentBots.disconnect(agentId)
             : action === 'code' ? desk.agentBots.newCode(agentId) : action === 'groups' ? desk.agentBots.allowGroup(agentId, input.id, input.title) : desk.agentBots.removeGroup(agentId, input.id);
           notify(); return json(response, 200, result);
         } catch (error) { return json(response, 400, { error: error.message }); }

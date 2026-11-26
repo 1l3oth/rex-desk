@@ -63,6 +63,24 @@ export class AgentBots {
     this.ensureLoop(agentId);
     return this.status(agentId);
   }
+  // A new token for the bot this agent already has, when its saved one is missing or cannot be read (or was made again in
+  // @BotFather). The owner, groups and read position stay. A token of a different bot is refused: that bot never takes over
+  // this pairing; connecting a different bot is Disconnect, then Connect.
+  async replaceToken(agentId, botToken) {
+    const record = this.record(agentId); if (!record) throw new Error('Connect the bot first.');
+    const token = String(botToken || '').trim();
+    if (!TOKEN.test(token)) throw new Error('That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...');
+    const me = await this.call(token, 'getMe', {}, 10000).catch(error => { throw new Error(`Telegram did not accept that token: ${error.message}`); });
+    if (String(me.id) !== String(record.botId)) throw new Error(`That token is for a different bot${me.username ? ` (@${me.username})` : ''}. Paste the token of @${record.botUsername || 'this bot'}, or disconnect and connect the other bot.`);
+    assertBotFree(this.store, me.id, { agentId });
+    const now = this.record(agentId); if (!now || String(now.botId) !== String(me.id)) throw new Error('This bot changed meanwhile. Try again.');
+    this.store.put('secret', linkOf(agentId), this.store.encrypt(JSON.stringify({ botToken: token })));
+    this.store.put('agentbot', agentId, { ...now, botUsername: me.username || now.botUsername });
+    noteBotAnswer(this.store, { agentId }, token, null);
+    await this.call(token, 'deleteWebhook', {}, 10000).catch(() => {});
+    this.ensureLoop(agentId);
+    return this.status(agentId);
+  }
   // Its poll still out is cancelled at once; the next use of the same bot waits for it to end before it asks (bot-use.js readBot).
   disconnect(agentId) {
     this.loops.get(agentId)?.abort?.abort(); this.loops.delete(agentId);

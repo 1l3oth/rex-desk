@@ -51,13 +51,15 @@ const linkUse = (store, connectorId) => {
 };
 export function botUses(store) {
   const uses = ORDER.map(connectorId => linkUse(store, connectorId)).filter(Boolean);
-  const agents = store.list('agentbot').filter(item => store.get('secret', `agentbot:${item.id}`)).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const agents = store.list('agentbot').sort((a, b) => String(a.id).localeCompare(String(b.id)));
   for (const item of agents) {
-    let token = ''; try { token = JSON.parse(store.decrypt(store.get('secret', `agentbot:${item.id}`))).botToken || ''; } catch { /* unreadable */ }
+    const secret = store.get('secret', `agentbot:${item.id}`);
+    let token = ''; try { token = secret ? JSON.parse(store.decrypt(secret)).botToken || '' : ''; } catch { /* unreadable */ }
     const botId = String(item.botId || botIdOf(token)); if (!botId) continue;
     const use = { agentId: item.id };
-    // A token that cannot be read (a broken or foreign seal) cannot poll, so it never wins the bot: it waits like an unpaired use.
-    uses.push({ use, botId, paired: Boolean(token), failed: Boolean(token) && failed(store, use, token), reader: { kind: 'agent', name: item.id === 'main' ? 'Rex Agent' : store.get('specialist', item.id)?.name || '' } });
+    // A token that is missing or cannot be read (a broken or foreign seal) cannot poll, so it never wins the bot: it waits like
+    // an unpaired use, and lack says why for its card.
+    uses.push({ use, botId, paired: Boolean(token), lack: token ? '' : secret ? 'unreadable' : 'missing', failed: Boolean(token) && failed(store, use, token), reader: { kind: 'agent', name: item.id === 'main' ? 'Rex Agent' : store.get('specialist', item.id)?.name || '' } });
   }
   return uses;
 }
@@ -68,8 +70,9 @@ export function botReader(store, mine) {
   const uses = botUses(store), own = uses.find(item => same(item.use, mine));
   if (!own) return { reads: true, readBy: null };
   const able = uses.filter(item => item.botId === own.botId && item.paired);
-  // An agent bot whose saved token cannot be read on this computer never reads: why says so, so its card never shows Connected.
-  if (!own.paired && own.reader.kind === 'agent') return { reads: false, readBy: null, why: 'unreadable' };
+  // An agent bot whose token is missing or cannot be read on this computer never reads: why says so (missing | unreadable), so
+  // its card never shows Connected.
+  if (!own.paired && own.reader.kind === 'agent') return { reads: false, readBy: null, why: own.lack };
   // A personal bot not paired yet never reads; it pairs once no working use reads the bot (TelegramBridge.link).
   if (!own.paired) return { reads: false, readBy: able.find(item => !item.failed)?.reader || null };
   const first = able.find(item => !item.failed) || able[0];
