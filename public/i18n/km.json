@@ -2795,7 +2795,7 @@
  "Paste the token of @{0} from @BotFather. The owner and groups stay.": "បិទភ្ជាប់ token របស់ @{0} ពី @BotFather។ ម្ចាស់ និងក្រុមនៅដដែល។",
  "Save token": "រក្សាទុក token",
  "Token saved.": "បានរក្សាទុក token។",
- "Scroll down and tap Add to Home Screen. If it is not there, tap Edit Actions at the bottom of the list, then tap the add button next to Add to Home Screen.": "រំកិលចុះ ហើយចុច Add to Home Screen។ បើមិនឃើញទេ សូមចុច Edit Actions នៅខាងក្រោមបញ្ជី រួចចុចប៊ូតុងបន្ថែមនៅជាប់ Add to Home Screen។",
+ "Scroll down and tap Add to Home Screen. If it is not there, tap Edit Actions at the bottom of the list, tap the add button next to Add to Home Screen, then tap Done to go back to the list and tap Add to Home Screen there.": "រំកិលចុះ ហើយចុច Add to Home Screen។ បើមិនឃើញទេ សូមចុច Edit Actions នៅខាងក្រោមបញ្ជី ចុចប៊ូតុងបន្ថែមនៅជាប់ Add to Home Screen រួចចុច Done ដើម្បីត្រឡប់ទៅបញ្ជីវិញ ហើយចុច Add to Home Screen នៅទីនោះ។",
  "If you see Open as Web App, turn it on. Then tap Add at the top right.": "បើអ្នកឃើញ Open as Web App សូមបើកវា។ រួចចុច Add នៅខាងលើស្ដាំ។",
  "Tap Install and create shortcut. Older Chrome calls it Add to home screen. If the menu shows Install app instead, tap that, then tap I tapped Install below.": "ចុច Install and create shortcut។ Chrome ចាស់ៗហៅវាថា Add to home screen។ បើម៉ឺនុយបង្ហាញ Install app ជំនួសវិញ សូមចុចវា រួចចុច ខ្ញុំបានចុច Install នៅខាងក្រោម។",
  "Tap Install and create shortcut. Older Chrome calls it Add to home screen.": "ចុច Install and create shortcut។ Chrome ចាស់ៗហៅវាថា Add to home screen។",
