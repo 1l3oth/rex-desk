@@ -122,7 +122,7 @@ function appAssets() {
   if (appAssetList) return appAssetList;
   const files = new Set(['/offline.html', '/manifest.webmanifest', '/favicon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png',
     '/vendor/three/three.module.js', '/vendor/three/three.core.js', '/vendor/driver/driver.js.mjs', '/vendor/driver/driver.css']);
-  try { for (const name of readdirSync(path.join(root, 'public'))) if (/\.(?:js|css)$/.test(name)) files.add('/' + name); } catch {}
+  try { for (const name of readdirSync(path.join(root, 'public'))) if (/\.(?:js|css)$/.test(name) && name !== 'sw.js') files.add('/' + name); } catch {}
   try { for (const name of readdirSync(path.join(root, 'public', 'guides'))) if (/\.(?:js|css)$/.test(name)) files.add('/guides/' + name); } catch {}
   try { for (const name of readdirSync(path.join(root, 'public', 'fonts'))) if (name.endsWith('.woff2')) files.add('/fonts/' + name); } catch {}
   appAssetList = [...files];
@@ -166,6 +166,8 @@ export function serveFile(request, response, file, { sandbox = false, download =
   else if (sandbox) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self';";
   // The file window shows PDFs and media in a frame of this page; the dashboard's own pages may not be framed.
   else if (frame) headers['Content-Security-Policy'] = "frame-ancestors 'self'";
+  // The app's own pages say which build they are, so the phone's saved files are used only with a page of the same build (public/sw.js).
+  if (!sandbox && type.startsWith('text/html')) headers['X-Rex-Build'] = buildToken();
   if (download) headers['Content-Disposition'] = `attachment; filename="${path.basename(file).replaceAll('"', '')}"`;
   const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
   if (range) {
