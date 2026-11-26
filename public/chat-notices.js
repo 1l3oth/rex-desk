@@ -1,6 +1,7 @@
 import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { avatarHtml } from './chat-rooms.js';
+import { webPushHtml, checkWebPush, turnOnWebPush, testWebPush, webPushState } from './chat-webpush.js';
 // Notifications: everything agents said or asked while you were elsewhere, newest first, with unread counts on each chat.
 // A new one pops up at the bottom right with a sound (both can be turned off), and you can open it or answer it from there.
 // The settings decide what counts, how it reaches you, and when Rex Desk stays quiet.
@@ -104,15 +105,20 @@ export function noticeSettingsHtml(ctx) {
   // Phone pushes through the ntfy app: subscribe once to this computer's private topic.
   const push = prefs.push || {};
   if (!ui.pushQr && !ui.pushQrLoading && push.topic) { ui.pushQrLoading = true; ctx.api('/notices/push-qr').then(result => { ui.pushQr = result; ui.pushQrLoading = false; window.__rexNoticeSettingsRedraw?.(); }).catch(() => { ui.pushQrLoading = false; }); }
+  // Phone notifications are turned on from the phone itself (chat-webpush.js); ntfy stays under Other ways.
+  const wpCtx = { api: ctx.api, redraw: () => window.__rexNoticeSettingsRedraw?.() };
+  if (!webPushState.checked) void checkWebPush(wpCtx);
   const phone = `<section class="card nt-card nt-phone"><h3>${t`Phone`}</h3>
+      ${webPushHtml(esc, prefs.webPushError || '')}
+      ${['', 'off', 'on', 'error', 'computer'].includes(webPushState.name) ? toggle('push.always', push.always, t('Also while I am at this computer'), t('Off: the phone gets it only when Rex Desk is not the window in front.')) : ''}
+      <details class="nt-adv nt-other"><summary>${t`Other ways: the ntfy app`}</summary>
       ${toggle('push.on', push.on, t('Push to my phone'), t('Through the free ntfy app. Arrives even when Rex Desk is closed on the phone.'))}
       <ol class="nt-steps"><li>${t`Install ${'<b>ntfy</b>'} from the App Store or Google Play.`}</li><li>${t`In ntfy press ${'<b>+</b>'}, then scan this code or paste the topic.`}</li><li>${t`Press ${`<b>${t`Send a test push`}</b>`}.`}</li></ol>
       <div class="nt-qr">${ui.pushQr?.svg || `<span class="muted small">${t`Making the code…`}</span>`}</div>
       <div class="nt-topic"><code>${esc(push.topic || '')}</code><button type="button" class="btn small" data-action="nt-copy-topic">${t`Copy`}</button></div>
-      ${toggle('push.always', push.always, t('Also while I am at this computer'), t('Off: the phone gets it only when Rex Desk is not the window in front.'))}
       <div class="nt-chips"><button type="button" class="btn small primary" data-action="nt-push-test">${t`Send a test push`}</button><button type="button" class="btn small quiet" data-action="nt-new-topic" title="${t`Use if someone else got this topic`}">${t`New private topic`}</button></div>
       ${prefs.pushError ? `<p class="small warn-text">${t`Last push failed: ${esc(prefs.pushError)}`}</p>` : ''}
-      <details class="nt-adv"><summary>${t`Own ntfy server`}</summary><input type="url" data-nt-pref="push.server" value="${esc(push.server || 'https://ntfy.sh')}" aria-label="${t`ntfy server address`}"><small class="muted">${t`Anyone with the topic name can read the pushes on ntfy.sh. Turn off "Show the message in pop-ups" to send only who wrote.`}</small></details></section>`;
+      <details class="nt-adv"><summary>${t`Own ntfy server`}</summary><input type="url" data-nt-pref="push.server" value="${esc(push.server || 'https://ntfy.sh')}" aria-label="${t`ntfy server address`}"><small class="muted">${t`Anyone with the topic name can read the pushes on ntfy.sh. Turn off "Show the message in pop-ups" to send only who wrote.`}</small></details></details></section>`;
   return `<div class="nt-settings">
     ${phone}
     <section class="card nt-card"><h3>${t`Do not disturb`}</h3>
@@ -153,6 +159,11 @@ export async function noticesAction(ctx, action, target) {
   if (action === 'nt-mute') { await api('/notices/mute', { method: 'POST', data: { key: target.dataset.key, on: target.dataset.on === '1' } }); await refresh(); return; }
   if (action === 'nt-dnd') { await api('/notices/prefs', { method: 'POST', data: { dndMinutes: Number(target.dataset.minutes) } }); await refresh(); return; }
   if (action === 'nt-hear') { playTone(prefs.tone, 'reply', prefs.volume ?? 0.6); return; }
+  if (action === 'nt-wp-on' || action === 'nt-wp-test' || action === 'nt-wp-check') {
+    const wpCtx = { api, redraw: () => window.__rexNoticeSettingsRedraw?.() };
+    if (action === 'nt-wp-on') await turnOnWebPush(wpCtx); else if (action === 'nt-wp-test') await testWebPush(wpCtx); else { webPushState.checked = false; webPushState.note = ''; await checkWebPush(wpCtx); }
+    return;
+  }
   if (action === 'nt-push-test') { try { await api('/notices/push-test', { method: 'POST', data: {} }); ctx.toast(t('Test push sent. Check your phone.')); } catch (error) { ctx.toast(error.message, true); } await refresh(); return; }
   if (action === 'nt-copy-topic') { await navigator.clipboard.writeText(prefs.push?.topic || ''); ctx.toast(t('Topic copied.')); return; }
   if (action === 'nt-new-topic') { if (!await askConfirm(t('Make a new private topic? Your phone stops getting pushes until you subscribe to the new one.'))) return; await api('/notices/prefs', { method: 'POST', data: { push: { newTopic: true } } }); ui.pushQr = null; await refresh(); return; }

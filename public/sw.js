@@ -47,3 +47,37 @@ self.addEventListener('fetch', event => {
     return response;
   })));
 });
+
+// ---------- phone notifications (web push) ----------
+// The computer locks each notice for this phone; the browser unlocks it and hands it here. Every push shows a notice (a
+// phone that gets a push and shows nothing is cut off by Apple and Google), tagged by message so a repeat or the same
+// message from another computer replaces the old one. If that chat is already open and in front, the notice is quiet.
+const SCREENS = new Set(['main', 'inbox', 'room', 'run']);
+function hashOf(target) {
+  const type = SCREENS.has(target?.type) ? target.type : 'main', id = type === 'main' || type === 'inbox' ? '' : String(target?.id || '');
+  return `#/${type}${id ? `/${encodeURIComponent(id)}` : ''}`;
+}
+function readPush(data) {
+  try { const notice = data ? data.json() : null; if (notice && typeof notice === 'object') return notice; } catch { /* falls through */ }
+  return { title: 'Rex Desk', body: 'Open Rex Desk to read it.' };
+}
+self.addEventListener('push', event => {
+  const notice = readPush(event.data), hash = hashOf(notice.target);
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
+    const onScreen = windows.some(win => win.visibilityState === 'visible' && new URL(win.url).hash === hash);
+    return self.registration.showNotification(String(notice.title || 'Rex Desk').slice(0, 120), {
+      body: String(notice.body || ''), tag: String(notice.tag || hash), icon: '/icon-192.png', badge: '/icon-192.png',
+      data: { hash }, silent: onScreen, renotify: false,
+    });
+  }));
+});
+// A tap brings an open Rex Desk to the front on that chat, or opens it there.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const hash = event.notification.data?.hash || '#/main';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windows => {
+    const win = windows.find(item => new URL(item.url).origin === self.location.origin);
+    if (win) { await win.focus(); win.postMessage({ type: 'rex-open', hash }); return; }
+    return self.clients.openWindow(`/${hash}`);
+  }));
+});

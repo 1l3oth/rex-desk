@@ -79,11 +79,19 @@ export class WebPush {
     }).finally(() => { this.busy = null; });
     return this.busy;
   }
+  // The account's public key, for a phone page to subscribe with. Asked once, it never changes.
+  async key() { if (!this.publicKey) this.publicKey = (await this.call('GET', '/v1/push/key')).publicKey || ''; return this.publicKey; }
+  // A phone turned on from its own page: saved with the account, so every computer of the account can reach it.
+  async savePhone({ subscription, name }) {
+    const sub = subscription || {}, phone = await this.call('POST', '/v1/push/phones', { endpoint: sub.endpoint, keys: sub.keys, name });
+    this.forget(); this.status = ''; return phone;
+  }
   // Sends one notice to every phone of the account. Never throws and never retries: the result and status say what happened.
-  async send({ source, kind = 'reply', title = 'Rex Desk', body = '', target = null, preview = true }) {
+  async send({ source, kind = 'reply', title = 'Rex Desk', body = '', target = null, preview = true, only = '' }) {
     if (!this.token()) { this.status = SIGN_IN_FIRST; return { sent: 0, reason: 'signed_out' }; }
     try {
-      const phones = await this.list();
+      const phones = (await this.list()).filter(phone => !only || phone.id === only);
+      if (only && !phones.length) { this.forget(); return { sent: 0, reason: 'phone_not_found' }; }
       if (!phones.length) { this.status = ''; return { sent: 0, reason: 'no_phones' }; }
       const tag = noticeTag(source || `${kind}\n${title}\n${body}`);
       const payload = fitPayload({ title: String(title || 'Rex Desk'), body: preview ? String(body || '') : HIDDEN_TEXT, tag, kind, ...(target ? { target } : {}) });

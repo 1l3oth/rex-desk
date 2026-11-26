@@ -162,6 +162,8 @@ export class Notifier {
     return { sent: !this.pushError };
   }
   testPush() { return this.push({ kind: 'reply', title: 'Rex Desk', body: 'Phone notifications work. You will get one when an agent replies, asks or stops.', test: true }); }
+  // A test to one phone that was just turned on, through web push. Never repeated by itself.
+  testWebPush(phone) { return this.webPush ? this.webPush.send({ source: `test:${phone}:${Date.now()}`, kind: 'reply', title: 'Rex Desk', body: 'Phone notifications work. You will get one when an agent replies or needs you.', target: { type: 'main', id: '' }, only: phone }) : Promise.resolve({ sent: 0, reason: 'off' }); }
   test() { return this.notify({ kind: 'reply', title: 'Rex Desk', body: 'This is how a notification looks and sounds.', target: { type: 'notices', id: '' } }); }
   prune() { const all = this.store.list('notice').sort((a, b) => String(b.at).localeCompare(String(a.at))); for (const old of all.slice(KEEP)) this.store.delete('notice', old.id); }
   read({ key = '', all = false } = {}) {
