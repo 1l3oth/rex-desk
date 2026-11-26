@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, autoUnsupported, parseAgyModels, ensureAntigravityMcp, antigravityMcpInstalled, antigravityMcpPath, antigravityMcpEntry } from '../src/antigravity.js';
+import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, autoUnsupported, parseAgyModels, ensureAntigravityMcp, antigravityMcpInstalled, antigravityMcpPath, antigravityMcpEntry, installedPayload } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
 import { modesFor, effortsFor, runOptions, defaultModeFor } from '../src/choices.js';
 import { antigravityTool } from '../src/antigravity.js';
@@ -172,15 +172,66 @@ test('adding rex_desk keeps every other MCP server and backs up the old file', (
   assert.deepEqual(JSON.parse(readFileSync(antigravityMcpPath(home) + '.bak', 'utf8')), before, 'the old file is backed up');
 });
 
-test('a broken MCP file is replaced, not left broken, and the write is idempotent', () => {
+test('the write is idempotent: no rewrite when the entry already matches', () => {
   const home = tempHome();
-  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
-  writeFileSync(antigravityMcpPath(home), '{ this is not json');
   assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
   assert.equal(antigravityMcpInstalled(home), true);
   const first = readFileSync(antigravityMcpPath(home), 'utf8');
   assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true, 'already-right entry returns true');
   assert.equal(readFileSync(antigravityMcpPath(home), 'utf8'), first, 'no rewrite when the entry already matches');
+});
+
+// Review 8db54fc5 (1): the person's file is their own. A broken or unreadable file is never treated as empty and wiped.
+test('a broken MCP file is kept untouched, not wiped, because its unparseable servers would be lost', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  const broken = '{ "mcpServers": { "other": { "command": "x" }'; // user data, but truncated/invalid JSON
+  writeFileSync(antigravityMcpPath(home), broken);
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), false, 'reports not installed instead of destroying the file');
+  assert.equal(readFileSync(antigravityMcpPath(home), 'utf8'), broken, 'the broken file is left exactly as it was');
+});
+
+test('the recovery backup is written once and never clobbered by a later run', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  const before = { mcpServers: { other: { command: 'x', args: ['y'] } } };
+  writeFileSync(antigravityMcpPath(home), JSON.stringify(before));
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  const bak = readFileSync(antigravityMcpPath(home) + '.bak', 'utf8');
+  assert.deepEqual(JSON.parse(bak), before, 'first run saves the original as the recovery copy');
+  // A later run writes a different entry but must not overwrite the known-good recovery copy.
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/other' }), true);
+  assert.equal(readFileSync(antigravityMcpPath(home) + '.bak', 'utf8'), bak, 'the recovery copy is unchanged');
+});
+
+test('an unreadable config (a directory in its place) is never wiped', () => {
+  const home = tempHome();
+  mkdirSync(antigravityMcpPath(home), { recursive: true }); // a directory where the file should be: reading throws
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), false, 'reports not installed instead of destroying it');
+  assert.equal(existsSync(antigravityMcpPath(home)), true, 'what was there is left in place');
+});
+
+// Review 8db54fc5 (2): the entry must survive updates and work when agy runs it on its own.
+test('the entry carries the stable data folder so the proxy finds the sign-in key outside Rex Desk', () => {
+  const entry = antigravityMcpEntry({ node: 'node', root: 'D:/rex', env: { REX_DATA_DIR: 'D:/data' } });
+  assert.deepEqual(entry.env, { REX_DATA_DIR: 'D:/data' });
+  assert.equal(entry.args[0], path.join('D:/rex', 'src', 'stdio.js'));
+});
+
+test('installedPayload points at the stable install, not the running runtime copy, only when the files are really there', () => {
+  const tmp = tempHome();
+  // No REX_DESK_EXE: fall back to the running copy's paths.
+  assert.equal(installedPayload({}, 'node'), null);
+  // A faked flat install dir with a node binary and src/stdio.js beside the program.
+  const install = path.join(tmp, 'install');
+  mkdirSync(path.join(install, 'src'), { recursive: true });
+  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node';
+  writeFileSync(path.join(install, nodeName), '');
+  writeFileSync(path.join(install, 'src', 'stdio.js'), '');
+  const found = installedPayload({ REX_DESK_EXE: path.join(install, 'Rex Desk.exe') }, path.join('C:/runtime/node', nodeName));
+  assert.deepEqual(found, { node: path.join(install, nodeName), root: install });
+  // A wrong guess (no stdio.js there) returns null, so the caller keeps the running copy's path.
+  assert.equal(installedPayload({ REX_DESK_EXE: path.join(tmp, 'empty', 'Rex Desk.exe') }, 'node'), null);
 });
 
 test('ensureAntigravityMcp creates the config folder when it does not exist', () => {

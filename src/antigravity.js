@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -32,28 +32,62 @@ export function antigravityMcpPath(home = os.homedir()) { return path.join(home,
 export function antigravityMcpInstalled(home = os.homedir()) {
   try { return Boolean(JSON.parse(readFileSync(antigravityMcpPath(home), 'utf8')).mcpServers?.rex_desk); } catch { return false; }
 }
-// The rex_desk stdio entry: run this Rex Desk's proxy, which finds its own local connection key, so no token is written here.
-export function antigravityMcpEntry({ node = process.execPath, root = packageRoot } = {}) {
-  return { command: node, args: [path.join(root, 'src', 'stdio.js')] };
+// The installed app's own payload. Its path stays put across updates (the Windows installer and the Mac in-place swap keep
+// the same folder), while the agents' private runtime copy this server may be running from lives in a version-named folder
+// that is removed after the next update. So the persistent entry must point at the installed payload, not that copy, or a
+// standalone agy run breaks the moment the copy is cleaned up. Returns the stable node binary and payload root only when
+// both are really on disk, so a wrong guess never writes a dead path; otherwise the caller keeps the running copy's paths,
+// which Rex Desk rewrites on the next Gemini run anyway.
+export function installedPayload(env = process.env, execPath = process.execPath) {
+  const exe = env.REX_DESK_EXE;
+  if (!exe) return null;
+  let install = path.dirname(path.resolve(exe));
+  if (path.basename(install) === 'MacOS' && path.basename(path.dirname(install)) === 'Contents') install = path.dirname(path.dirname(install));
+  const base = path.basename(execPath);
+  for (const root of [install, path.join(install, 'app'), path.join(install, 'resources', 'app'), path.join(install, 'Contents', 'Resources', 'app')]) {
+    if (!existsSync(path.join(root, 'src', 'stdio.js'))) continue;
+    const node = [path.join(root, base), path.join(install, base), path.join(install, 'node', base)].find(existsSync);
+    if (node) return { node, root };
+  }
+  return null;
+}
+// The rex_desk stdio entry: run this Rex Desk's proxy. No token is written here (the proxy reads the encrypted vault at run
+// time); only the stable data folder is carried, so the proxy still finds the local sign-in key when agy runs the entry on
+// its own, outside Rex Desk and after an update.
+export function antigravityMcpEntry({ node = process.execPath, root = packageRoot, env = process.env } = {}) {
+  const stable = installedPayload(env, node);
+  const entry = { command: stable ? stable.node : node, args: [path.join(stable ? stable.root : root, 'src', 'stdio.js')] };
+  if (env.REX_DATA_DIR) entry.env = { REX_DATA_DIR: env.REX_DATA_DIR };
+  return entry;
 }
 // Put the rex_desk entry into agy's own MCP list, so a Gemini run has the desk tools instead of none (the agent then tells
-// the person to switch to Claude). It is merged in: every other server and every other key is kept, an empty or broken
-// file is replaced with a fresh one, and the previous file is copied to mcp_config.json.bak first. Returns whether the
-// entry is in place afterwards.
-export function ensureAntigravityMcp({ home = os.homedir(), node = process.execPath, root = packageRoot } = {}) {
-  const file = antigravityMcpPath(home), entry = antigravityMcpEntry({ node, root });
-  let data = {}, current = null;
-  try { const raw = readFileSync(file, 'utf8').trim(); if (raw) data = JSON.parse(raw); } catch {}
-  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+// the person to switch to Claude). It is merged in, keeping every other server and every other key. The person's file is
+// never destroyed: an unreadable or unparseable file is left exactly as it is (never treated as empty and overwritten), a
+// valid file is backed up to mcp_config.json.bak once (an existing backup is never clobbered) before it is replaced, and if
+// that backup cannot be written the original is kept untouched. The replacement itself is written to a temp file and renamed
+// into place, so agy never reads a half-written file. Returns whether the entry is in place afterwards.
+export function ensureAntigravityMcp({ home = os.homedir(), node = process.execPath, root = packageRoot, env = process.env } = {}) {
+  const file = antigravityMcpPath(home), entry = antigravityMcpEntry({ node, root, env });
+  const exists = existsSync(file);
+  let raw = null;
+  if (exists) { try { raw = readFileSync(file, 'utf8'); } catch { return false; } } // unreadable: never wipe what we cannot read
+  let data = {};
+  if (raw !== null && raw.trim()) {
+    try { data = JSON.parse(raw); } catch { return false; } // broken JSON: not empty; keep the user's file, do not overwrite
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  }
   if (!data.mcpServers || typeof data.mcpServers !== 'object' || Array.isArray(data.mcpServers)) data.mcpServers = {};
-  current = data.mcpServers.rex_desk;
-  if (current && current.command === entry.command && Array.isArray(current.args) && current.args[0] === entry.args[0]) return true;
-  // Keep any extra fields someone added to the entry (env, cwd), only correct the command and args.
+  const current = data.mcpServers.rex_desk;
+  if (current && typeof current === 'object' && current.command === entry.command && Array.isArray(current.args) && current.args[0] === entry.args[0]
+    && JSON.stringify(current.env ?? null) === JSON.stringify(entry.env ?? null)) return true;
+  // Keep any extra fields someone added (cwd, timeout), only set command, args and our data-dir env.
   data.mcpServers.rex_desk = { ...(current && typeof current === 'object' ? current : {}), ...entry };
   try {
     mkdirSync(path.dirname(file), { recursive: true });
-    try { const old = readFileSync(file, 'utf8'); if (old.trim()) writeFileSync(file + '.bak', old); } catch {}
-    writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+    if (exists && raw && raw.trim() && !existsSync(file + '.bak')) { try { writeFileSync(file + '.bak', raw); } catch { return false; } }
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+    renameSync(tmp, file);
     return antigravityMcpInstalled(home);
   } catch { return false; }
 }
