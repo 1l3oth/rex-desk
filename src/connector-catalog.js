@@ -125,7 +125,7 @@ export async function saveConnector(item, input, { toolbox, store, probed }) {
 // The connections the catalog added: MCP servers found in Claude Code's list under a catalog id, and saved token links.
 export function catalogConnections({ toolbox, store }, catalog = loadCatalog()) {
   let servers = {}; try { servers = toolbox.servers(); } catch { /* no config */ }
-  const mcp = catalog.items.filter(item => item.tier === 'mcp' && servers[item.id]).map(item => ({ id: item.id, connectorId: item.id, name: item.name, kind: 'mcp', server: item.id, error: toolbox.failed.get(item.id)?.error || '' }));
+  const mcp = catalog.items.filter(item => item.tier === 'mcp' && servers[item.id]).map(item => ({ id: item.id, connectorId: item.id, name: item.name, kind: 'mcp', server: item.id, error: toolbox.shownError?.(item.id) ?? (toolbox.failed.get(item.id)?.error || '') }));
   const links = (store.list('connector') || []).map(({ id, connectorId, name, kind }) => {
     const link = { id, connectorId, name, kind };
     // Telegram carries whether a chat is linked yet and that chat's display name, so the card can show "Linked to <name>".

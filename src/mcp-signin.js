@@ -70,8 +70,24 @@ function pinnedTo(address, what, { fetcher, loopback, ms = ASK_MS }) {
     return response;
   };
 }
-// Discovery sends no secret, but each request it makes is bounded too.
-const timed = (fetcher, ms = ASK_MS) => (target, init = {}) => fetcher(target, { ...init, signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms) });
+// Discovery sends no secret, but the addresses it reads come from the server: each one, and each redirect, is checked (secure,
+// no key in it) before Rex Desk asks there, every request is bounded, and a chain of redirects stops after a few.
+const REDIRECTS = 3;
+function checkedFetch(fetcher, check, ms = ASK_MS) {
+  return async (target, init = {}) => {
+    let to = String(target);
+    for (let hop = 0; ; hop++) {
+      check(to);
+      const limit = AbortSignal.timeout(ms), signal = init.signal ? AbortSignal.any([init.signal, limit]) : limit;
+      const response = await fetcher(to, { ...init, redirect: 'manual', signal });
+      const next = response.status >= 300 && response.status < 400 && response.headers?.get?.('location');
+      if (!next) return response;
+      await response.body?.cancel?.().catch(() => {});
+      if (hop >= REDIRECTS || String(init.method || 'GET').toUpperCase() !== 'GET') throw new Plain(MOVED_SIGN_IN);
+      to = new URL(next, to).href;
+    }
+  };
+}
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
@@ -102,10 +118,11 @@ export class McpSignIn {
     // The server's 401 may name where its metadata is; without that the well-known addresses are tried (the SDK does both).
     let challenge = {};
     try {
+      this.endpoint(url, 'server address');
       const response = await this.fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }), signal: AbortSignal.timeout(15000), redirect: 'manual' });
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
-    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: timed(this.fetcher, this.ms) });
+    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, address => this.endpoint(address, 'sign-in information address'), this.ms) });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
     // Every address the server named is checked like the one the person added: secure, and with no key or password in it.

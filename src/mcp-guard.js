@@ -34,6 +34,7 @@ export const UNSAFE = 'The server sent back an answer that could show your sign-
 export class Unsafe extends Error { constructor() { super(UNSAFE); this.own = true; } }
 // Fields the MCP protocol reads (types, names, addresses, cursors): their values are never changed, only checked.
 const STRUCTURE = new Set(['type', 'mimeType', 'role', 'uri', 'uriTemplate', 'name', 'method', 'jsonrpc', 'id', 'nextCursor', 'cursor', 'progressToken', 'protocolVersion']);
+const SHORT = 8;
 const WITHHELD = '[Rex Desk held this file back: it could show your sign-in.]';
 
 // Takes secrets out of a decoded MCP answer and keeps its structure: free text has them replaced, a protocol field, field
@@ -41,25 +42,46 @@ const WITHHELD = '[Rex Desk held this file back: it could show your sign-in.]';
 // is withheld as a short text part. A string that is itself JSON is decoded too, so escapes cannot carry a secret through.
 export function redactor(secrets) {
   const raw = [...new Set([...secrets].filter(Boolean).map(String))];
-  const forms = [...new Set(raw.flatMap(secret => {
+  // A short credential (under SHORT characters) blocks an answer only as a whole word: "x" in the field "text" or the
+  // type "text" does not, so a normal answer still arrives, while "x" on its own, or encoded on its own, still is held back.
+  const short = secret => secret.length < SHORT;
+  const formsOf = secret => {
     const escaped = JSON.stringify(secret).slice(1, -1);
     const hex = Buffer.from(secret).toString('hex');
     return [secret, escaped, escaped.replaceAll('/', '\\/'), encodeURIComponent(secret.toWellFormed()), hex, hex.toUpperCase()];
-  }))].sort((left, right) => right.length - left.length);
+  };
+  const listed = [...new Map(raw.flatMap(secret => formsOf(secret).map(form => [form, short(secret)]))).entries()].sort(([left], [right]) => right.length - left.length);
+  const forms = listed.map(([form]) => form);
   if (!forms.length) return value => value;
   // One pass, longest first, so a short secret never cuts up a longer one or the word put in its place.
-  const source = forms.map(form => form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const pattern = new RegExp(source, 'g'), shows = value => new RegExp(source).test(value);
+  const quote = form => form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Free text has every form taken out wherever it stands (replacing never blocks an answer). A field the protocol reads, a
+  // field name or a number blocks the whole answer, so there a short form counts only as a whole word.
+  const pattern = new RegExp(forms.map(quote).join('|'), 'g');
+  const exact = new RegExp(listed.map(([form, alone]) => alone ? `(?<![A-Za-z0-9])${quote(form)}(?![A-Za-z0-9])` : quote(form)).join('|'));
+  const shows = value => exact.test(value);
   const bytes = raw.map(secret => Buffer.from(secret));
+  const word = byte => (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+  // Decoded bytes hold a secret: anywhere for a long one. A short one counts only in a run that decodes, from its start, to
+  // readable text in which it stands with no letter or digit beside it, so random decoded bytes never match by chance.
+  const readable = decoded => decoded.length > 0 && decoded.every(byte => (byte >= 32 && byte < 127) || byte === 9 || byte === 10 || byte === 13);
+  const holds = (decoded, offset) => bytes.some(secret => {
+    if (secret.length >= SHORT) return decoded.includes(secret);
+    if (offset || !readable(decoded)) return false;
+    for (let at = decoded.indexOf(secret); at !== -1; at = decoded.indexOf(secret, at + 1))
+      if (!word(decoded[at - 1] ?? 0) && !word(decoded[at + secret.length] ?? 0)) return true;
+    return false;
+  });
   // Base64 of the shortest secret, without padding, is the shortest run worth decoding: a short secret is never missed.
   const shortest = Math.max(2, Math.min(...bytes.map(item => Math.ceil(item.length * 4 / 3))));
   const BASE64 = new RegExp(`[A-Za-z0-9+/_-]{${shortest},}={0,2}`, 'g');
   // Base64 (either alphabet) that decodes to bytes holding a secret, read from every starting offset.
   const decodes = chunk => {
     for (let offset = 0; offset < 4 && offset < chunk.length; offset++) {
-      const decoded = Buffer.from(chunk.slice(offset), 'base64');
-      if (bytes.some(secret => decoded.includes(secret))) return true;
+      if (holds(Buffer.from(chunk.slice(offset), 'base64'), offset)) return true;
     }
+    // A short secret's base64 may sit between slashes or dashes, which the run above takes in: each piece is read on its own.
+    if (bytes.some(secret => secret.length < SHORT)) for (const piece of chunk.split(/[+/_-]+/)) if (piece !== chunk && piece.length > 1 && holds(Buffer.from(piece, 'base64'), 0)) return true;
     return false;
   };
   const plain = value => value.replace(pattern, '[hidden]').replace(BASE64, chunk => decodes(chunk) ? '[hidden]' : chunk);
@@ -74,7 +96,7 @@ export function redactor(secrets) {
   };
   // Inside a string that is JSON: only words, so anything may be replaced.
   const loose = value => typeof value === 'string' ? text(value)
-    : typeof value === 'number' ? (forms.includes(String(value)) ? '[hidden]' : value)
+    : typeof value === 'number' ? (shows(String(value)) ? '[hidden]' : value)
     : Array.isArray(value) ? value.map(loose)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [text(key), loose(item)]))
     : value;
@@ -86,7 +108,7 @@ export function redactor(secrets) {
   // The MCP answer itself.
   const walk = (value, key = '') => {
     if (typeof value === 'string') { if (!STRUCTURE.has(key)) return text(value); if (hides(value)) throw new Unsafe(); return value; }
-    if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') { if (forms.includes(String(value))) throw new Unsafe(); return value; }
+    if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') { if (shows(String(value))) throw new Unsafe(); return value; }
     if (Array.isArray(value)) return value.map(item => walk(item, key));
     if (!value || typeof value !== 'object') return value;
     for (const name of Object.keys(value)) if (hides(name)) throw new Unsafe();

@@ -33,9 +33,12 @@ const b64 = text => Buffer.from(text).toString('base64');
 test('review a36eb522 (1): a short secret encoded in text, and any encoded secret in an address field, never pass', () => {
   const secret = 'Zq9', clean = guard.redactor([secret]);
   assert.equal(clean({ content: [{ type: 'text', text: `seen ${b64(secret)} ok` }] }).content[0].text, 'seen [hidden] ok', 'base64 shorter than 8 characters');
-  for (const uri of [`file:///x/${b64(`a${secret}`)}`, `https://x.test/?q=${Buffer.from(secret).toString('hex')}`, `data:text/plain;base64,${encodeURIComponent(b64(secret))}`])
+  for (const uri of [`file:///x/${b64(secret)}`, `https://x.test/?q=${Buffer.from(secret).toString('hex')}`, `data:text/plain;base64,${encodeURIComponent(b64(secret))}`])
     assert.throws(() => clean({ contents: [{ uri, text: 'a' }] }), /held it back/, uri);
   assert.deepEqual(clean({ contents: [{ uri: 'file:///notes/today.md', text: 'a' }] }).contents[0].uri, 'file:///notes/today.md', 'a plain address is left alone');
+  // A long secret is found inside other encoded bytes too.
+  const long = 'tok-Zq9-long-secret';
+  assert.throws(() => guard.redactor([long])({ contents: [{ uri: `file:///x/${b64(`a${long}b`)}`, text: 'a' }] }), /held it back/);
 });
 
 test('review a36eb522 (2): an address the server names with a key in it stops the sign-in before any page is shown', async () => {
@@ -79,6 +82,6 @@ test('a remote server that wants a sign-in (like Notion) says so in plain words,
   assert.equal(toolbox.shownError('notion'), 'Needs sign-in. Press Sign in for it in Settings, Connectors.');
   const overview = await toolbox.overview();
   assert.equal(overview.servers.find(item => item.name === 'notion').error, 'Needs sign-in. Press Sign in for it in Settings, Connectors.');
-  assert.equal(overview.servers.find(item => item.name === 'keyed').how, 'https://tool.example.test/mcp');
+  assert.equal(overview.servers.find(item => item.name === 'keyed').how, 'https://tool.example.test');
   await toolbox.closeAll();
 });

@@ -24,7 +24,12 @@ const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|
 const signsIn = (signIn, config) => { const url = addressOf(config); return Boolean(url && !carriesCredential(new URL(url)) && (signIn?.record(url) || !Object.keys(config.headers || {}).length)); };
 // What the person reads for a server that wants a sign-in (agents get SIGN_IN_HELP instead).
 // A server's address as the screen shows it: no user, password, query or fragment, which may hold a key.
-const shownAddress = value => { try { const url = new URL(String(value)); return `${url.origin}${url.pathname}`; } catch { return ''; } };
+export const shownAddress = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
+// A command as the screen shows it: the program and its plain arguments; no flags, no value given to a key-like flag, and
+// nothing that looks like a key or a value (name=value).
+export const shownCommand = (command, args = []) => [command, ...args.filter((item, index) => !String(item).startsWith('-') && !/^-.*(key|token|secret|passw|auth|cred)/i.test(String(args[index - 1] ?? '')) && !/[=:@]|key|token|secret|passw/i.test(String(item).replace(/^@[\w.-]+\//, '')))].join(' ').slice(0, 200);
+// Addresses inside a message the screen shows are cut to their origin, so a key in a path or query never shows.
+export const withoutAddresses = text => String(text || '').replace(/https?:\/\/[^\s"'<>)]+/g, found => shownAddress(found) || '[address]');
 export const SIGN_IN_SHOWN = 'Needs sign-in. Press Sign in for it in Settings, Connectors.';
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
@@ -98,7 +103,7 @@ export class Toolbox {
     const skillLines = all.slice(0, skills).map(skill => `- ${skill.name}${skill.description ? `: ${clip(skill.description)}` : ''}`);
     // The same items as data, for the agent's profile (the panel shows exactly what the instructions name, L53).
     const items = {
-      servers: Object.keys(servers).sort().map(name => ({ name, tools: (this.lists.get(name)?.tools || []).map(tool => tool.name), error: this.failed.get(name)?.error || '' })),
+      servers: Object.keys(servers).sort().map(name => ({ name, tools: (this.lists.get(name)?.tools || []).map(tool => tool.name), error: withoutAddresses(this.failed.get(name)?.error) })),
       skills: all.slice(0, skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
       more: all.slice(skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
     };
@@ -147,7 +152,7 @@ export class Toolbox {
     return secrets;
   }
   // A server's problem in the person's words: one that wants a sign-in says where to press Sign in.
-  shownError(name) { const failed = this.failed.get(name); return failed?.signIn ? SIGN_IN_SHOWN : failed?.error || ''; }
+  shownError(name) { const failed = this.failed.get(name); return failed?.signIn ? SIGN_IN_SHOWN : withoutAddresses(failed?.error); }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
   async toolsOf(name, config, again = true) {
@@ -190,7 +195,7 @@ export class Toolbox {
     const hooks = this.listHooks();
     return {
       computer: this.computer?.() || '',
-      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : shownAddress(config.url), tools: tools.length, error: this.shownError(name), removable: !user || Boolean(user[name]) })),
+      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? shownCommand(config.command, config.args || []) : shownAddress(config.url), tools: tools.length, error: this.shownError(name), removable: !user || Boolean(user[name]) })),
       skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome), ...(skill.error ? { error: skill.error } : {}) })),
       commands, hooks,
     };
