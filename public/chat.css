@@ -3195,3 +3195,14 @@ html:has(.iv[open]){overflow:hidden}
   .nt-settings .nt-card + .nt-card{border-top:1px solid var(--line)!important}
 }
 @keyframes nt-drop{from{transform:translateY(-16px);opacity:0}}
+/* iPhone draws time and date pickers at its own size, so they pushed past their column. On a phone they use the app's own box,
+   shrink to their column and read left-aligned; tapping still opens iPhone's own wheel, and an empty one keeps its height. */
+@media (max-width:760px){
+  input[type=time],input[type=date]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;box-sizing:border-box;text-align:left}
+  input[type=time]::-webkit-date-and-time-value,input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0;min-height:1.3em}
+  .agp-time{min-width:0}.agp-time input[type=time]{flex:1 1 0;width:0}
+  .agp-formrow input[type=time]{flex:0 1 112px;width:112px}
+  .nt-row2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.nt-row2 label{min-width:0}
+  .st-field,.lt-field{min-width:0}.st-field input[type=time],.lt-field input[type=date]{width:100%}
+  .aps-row .cn-time{width:112px}
+}
