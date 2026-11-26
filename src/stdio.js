@@ -26,11 +26,20 @@ function localToken() {
     return Buffer.concat([cipher.update(encrypted), cipher.final()]).toString('utf8');
   } finally { db.close(); }
 }
-// The caller may hand the token under a per-run, unguessable variable name (named by REX_DESK_TOKEN_VAR) so it
-// is never exposed under a fixed name other tools or MCP servers could read; REX_DESK_TOKEN and the local vault
-// stay as fallbacks for the Setup entry and other launchers.
-const indirectToken = process.env.REX_DESK_TOKEN_VAR ? process.env[process.env.REX_DESK_TOKEN_VAR] : '';
-const token = process.env.REX_DESK_TOKEN || indirectToken || localToken();
+// When the caller names a per-run credential (REX_DESK_TOKEN_VAR, an unguessable variable no other tool can read),
+// the token must come from that variable alone: if it is missing or empty we fail closed with a clear error and
+// never fall back, so a run can never silently connect with a wider, shared credential. Only when no per-run
+// variable is named do REX_DESK_TOKEN and the local vault stay as fallbacks, for the Setup entry and Antigravity.
+function resolveToken() {
+  const named = process.env.REX_DESK_TOKEN_VAR;
+  if (named) {
+    const value = process.env[named];
+    if (!value) throw new Error("This run's Rex Desk sign-in is missing. Restart the run from Rex Desk; the agent will not connect with another credential.");
+    return value;
+  }
+  return process.env.REX_DESK_TOKEN || localToken();
+}
+const token = resolveToken();
 const server = new Server({ name: 'rex-desk', version: '0.1.0' }, { capabilities: { tools: {} } });
 const client = new Client({ name: 'rex-desk-stdio-proxy', version: '0.1.0' }, { capabilities: { elicitation: { form: {}, url: {} } } });
 let activeRequestId;

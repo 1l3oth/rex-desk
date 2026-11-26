@@ -116,6 +116,47 @@ for (const [label, toml] of Object.entries(FORMS)) {
   });
 }
 
+// Launch the real proxy with a controlled environment and capture how it resolves (or refuses) a token. A dead
+// REX_DESK_URL (connection refused) makes it exit fast once a token is resolved; a fail-closed path throws first.
+function runProxy(env) {
+  const dataDir = mkdtempSync(path.join(base, 'proxy-data-')); // empty: no desk.sqlite, so a vault fallback would error distinctly
+  const clean = { ...process.env };
+  for (const key of ['REX_DESK_TOKEN', 'REX_DESK_TOKEN_VAR', 'REX_DESK_URL']) delete clean[key];
+  try {
+    const result = spawnSync(process.execPath, [stdioProxy],
+      { env: { ...clean, REX_DESK_URL: 'http://127.0.0.1:1/mcp', REX_DATA_DIR: dataDir, ...env }, encoding: 'utf8', timeout: 20000, windowsHide: true });
+    return { status: result.status, out: `${result.stdout || ''}${result.stderr || ''}` };
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+}
+const MISSING = /This run's Rex Desk sign-in is missing/;
+
+test('fail closed: a named run credential that is MISSING refuses, never falling back to another token', () => {
+  const { status, out } = runProxy({ REX_DESK_TOKEN_VAR: 'REX_DESK_TOKEN_NOPE', REX_DESK_TOKEN: 'decoy-wider-credential' });
+  assert.notEqual(status, 0, out);
+  assert.match(out, MISSING);
+  assert.ok(!out.includes('decoy-wider-credential'), 'never falls back to REX_DESK_TOKEN');
+  assert.doesNotMatch(out, /Start Rex Desk first|connection key is missing/, 'never falls back to the local vault');
+});
+
+test('fail closed: a named run credential that is EMPTY refuses the same way', () => {
+  const { status, out } = runProxy({ REX_DESK_TOKEN_VAR: 'REX_DESK_TOKEN_EMPTY', REX_DESK_TOKEN_EMPTY: '', REX_DESK_TOKEN: 'decoy-wider-credential' });
+  assert.notEqual(status, 0, out);
+  assert.match(out, MISSING);
+  assert.ok(!out.includes('decoy-wider-credential'));
+  assert.doesNotMatch(out, /Start Rex Desk first|connection key is missing/);
+});
+
+test('not expected: with no REX_DESK_TOKEN_VAR, REX_DESK_TOKEN is still used (Setup/Antigravity unaffected)', () => {
+  const { out } = runProxy({ REX_DESK_TOKEN: 'a-real-token' });
+  assert.doesNotMatch(out, MISSING, 'the token resolved and the proxy moved on to connect (then the dead URL fails, not the token)');
+});
+
+test('not expected: with nothing named and no REX_DESK_TOKEN, the local vault is still the fallback', () => {
+  const { out } = runProxy({});
+  assert.doesNotMatch(out, MISSING, 'no fail-closed error here');
+  assert.match(out, /Start Rex Desk first|connection key is missing/, 'it tried the local vault, as before');
+});
+
 test('the stdio proxy reaches a desk tool using the token from the per-run var (required round-trip, no REX_DESK_TOKEN)', async () => {
   const TOKEN = `test-token-${randomUUID()}`;
   const sessions = new Map();
