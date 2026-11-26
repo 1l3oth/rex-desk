@@ -159,7 +159,7 @@ export class Toolbox {
     // However this server's key got here (typed, pasted, a command flag, an agent, an old saved config or a synced one), a
     // key too short to tell from ordinary words is refused: it never connects, shows the same plain reason, and can be
     // replaced. Nothing half-trusted is listed or cached as working.
-    if (shortKey(config)) { this.lists.delete(name); this.failed.set(name, { at: Date.now(), error: KEY_TOO_SHORT }); return []; }
+    if (shortKey(expand(config))) { this.lists.delete(name); this.failed.set(name, { at: Date.now(), error: KEY_TOO_SHORT }); return []; }
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
     const secrets = this.secretsInto(new Set(), config);

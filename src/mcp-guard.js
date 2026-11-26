@@ -18,10 +18,14 @@ export function pinnedFetch(address, { sse = false, fetcher = fetch } = {}) {
   };
 }
 
-// Every credential in a server's headers, without its scheme word (an answer may repeat it with or without). Any length.
-const CREDENTIAL = /auth|cookie|token|key|secret|passw|credential/i;
+// A header, query, environment or flag name reads as a credential when one of its words is a credential word. Splitting on
+// separators and camelCase means a real name (api_key, GITHUB_TOKEN, X-Api-Key, apiKey) matches, while an ordinary setting
+// whose word merely begins the same (TOKENIZERS_PARALLELISM, monkey) does not, so it is left alone.
+const CREDENTIAL_WORDS = new Set(['auth', 'authorization', 'cookie', 'token', 'tokens', 'key', 'keys', 'apikey', 'secret', 'secrets', 'password', 'passwd', 'pwd', 'credential', 'credentials']);
+const wordsOf = name => String(name).replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/[^A-Za-z0-9]+/).filter(Boolean).map(word => word.toLowerCase());
+export const isCredential = name => wordsOf(name).some(word => CREDENTIAL_WORDS.has(word));
 export function headerSecrets(config) {
-  return Object.entries(config?.headers || {}).filter(([name]) => CREDENTIAL.test(name)).flatMap(([name, text]) => {
+  return Object.entries(config?.headers || {}).filter(([name]) => isCredential(name)).flatMap(([name, text]) => {
     const value = String(text).trim(), bare = value.replace(/^(bearer|basic|token|apikey)(\s+|$)/i, '');
     const parts = /cookie/i.test(name) ? value.split(';').map(part => part.slice(part.indexOf('=') + 1).trim()) : [];
     return [bare, ...parts].filter(Boolean);
@@ -37,7 +41,7 @@ export const KEY_TOO_SHORT = 'That key looks too short. A key is at least 8 char
 const bareKey = value => String(value).trim().replace(/^(bearer|basic|token|apikey)\s+/i, '');
 // Pull the real secret out of a KEY=value or "Header: value" pair when the name reads as a credential, '' otherwise, so an
 // ordinary setting (a port, a region, true/false) is never taken for a key.
-const pairSecret = (name, value) => (CREDENTIAL.test(String(name)) ? bareKey(value) : '');
+const pairSecret = (name, value) => (isCredential(name) ? bareKey(value) : '');
 
 // Every real secret a server config carries, by whatever way a key gets in: the credentials in its headers, the password or
 // a credential in its address, and KEY=value settings in its environment or on its command line (NAME=value, --name=value,
@@ -48,7 +52,7 @@ export function configSecrets(config) {
   try {
     const url = new URL(String(config?.url));
     if (url.password) out.push(decodeURIComponent(url.password));
-    for (const [name, value] of url.searchParams) if (CREDENTIAL.test(name) && value) out.push(value);
+    for (const [name, value] of url.searchParams) if (isCredential(name) && value) out.push(value);
   } catch { /* no address, or not one that parses */ }
   for (const [name, value] of Object.entries(config?.env && typeof config.env === 'object' ? config.env : {})) out.push(pairSecret(name, value));
   const args = Array.isArray(config?.args) ? config.args.map(String) : [];

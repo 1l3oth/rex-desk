@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { McpSignIn, nodeFetch } from '../src/mcp-signin.js';
 import { Toolbox } from '../src/toolbox.js';
+import { isCredential, shortKey } from '../src/mcp-guard.js';
 
 function memoryStore() {
   const records = new Map();
@@ -62,4 +63,30 @@ test('review 81b72441 (2): a full key in a bare URL passes the check and is writ
   const written = []; box.cli = async args => { written.push(args); };
   await box.install('https://h.test/mcp?token=abcdefgh');
   assert.equal(written.length, 1, 'a full key is written');
+});
+
+// L30 review 81b72441 (3): a config's credential is checked after variable expansion, and a credential name is matched by
+// whole word, so a reference that resolves to a short key is caught and an ordinary setting like TOKENIZERS_PARALLELISM=false
+// is left alone.
+test('review 81b72441 (3): the credential-name match is by word, so ordinary settings pass and real keys are caught', () => {
+  assert.equal(isCredential('TOKENIZERS_PARALLELISM'), false);
+  assert.equal(isCredential('monkey'), false);
+  for (const name of ['GITHUB_TOKEN', 'apiKey', 'X-Api-Key', 'Authorization', 'api_key', 'OPENAI_SECRET']) assert.equal(isCredential(name), true, name);
+  assert.equal(shortKey({ env: { TOKENIZERS_PARALLELISM: 'false' } }), '', 'an ordinary short env setting is not a key');
+  assert.equal(shortKey({ args: ['-e', 'TOKENIZERS_PARALLELISM=false'] }), '', 'nor one as a command flag');
+  assert.ok(shortKey({ env: { GITHUB_TOKEN: 'abc' } }), 'a real short env key is caught');
+});
+
+test('review 81b72441 (3): a reference that expands to a short key is refused at connect, a full one connects', async () => {
+  process.env.REX_SHORTKEY_TEST = 'abc';
+  try {
+    const box = new Toolbox({ home: '.', mcpConfig: () => ({}), bundled: '' });
+    let connects = 0; box.connectWith = async () => { connects += 1; return { listTools: async () => ({ tools: [{ name: 't' }] }), close: async () => {} }; };
+    const config = { type: 'http', url: 'http://x', headers: { Authorization: 'Bearer ${REX_SHORTKEY_TEST}' } };
+    assert.deepEqual(await box.toolsOf('ref', config), [], 'a reference that resolves to a short key is not listed');
+    assert.equal(connects, 0, 'and never connects');
+    process.env.REX_SHORTKEY_TEST = 'abcdefgh';
+    const tools = await box.toolsOf('ref', config);
+    assert.equal(tools.length, 1); assert.equal(connects, 1);
+  } finally { delete process.env.REX_SHORTKEY_TEST; }
 });
