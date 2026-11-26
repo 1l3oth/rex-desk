@@ -1,5 +1,6 @@
 ﻿import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveCommand, stopTree } from './processes.js';
@@ -19,23 +20,53 @@ export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : value === 
 
 export function codexEnvironment(env = process.env) {
   const clean = { ...env };
-  for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN']) delete clean[key];
+  // Strip the account keys and any desk sign-in inherited from the parent: the run's own token is placed back
+  // below under an unguessable per-run name, never these guessable ones, so nothing in a profile can grab it.
+  for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN', 'REX_DESK_TOKEN', 'REX_AGENT_TOKEN', 'REX_DESK_TOKEN_VAR']) delete clean[key];
   return clean;
 }
 
-// The run's own connection to this Rex Desk: a stdio server Codex launches (node src/stdio.js, which proxies
-// to this desk). It is given a reserved name of its own, never 'rex_desk', so it can never merge with - and
-// clash against - whatever the person already has under 'rex_desk' in their Codex profile. Codex deep-merges
-// same-named server tables by key, so a command entry laid over their url entry (or the reverse) becomes an
-// invalid command+url table it rejects with "url is not supported for stdio"; a separate name sidesteps that
-// in every case and whatever TOML form their entry takes, and leaves their profile untouched. The run always
-// gets a required connection to this desk. The sign-in is forwarded from Codex's own environment by name
-// (env_vars), so the token value is never written into the thread configuration, a file, a log or a command
-// line; REX_DESK_URL and REX_DESK_TOKEN are set on the Codex process env below.
-export const CODEX_DESK_SERVER = 'rex_desk_host';
-export function codexDeskServer({ mcpUrl, node = process.execPath, root = packageRoot } = {}) {
-  if (!mcpUrl) return null;
-  return { command: node, args: [path.join(root, 'src', 'stdio.js')], env_vars: ['REX_DESK_URL', 'REX_DESK_TOKEN'], required: true };
+const uniqueId = () => randomBytes(9).toString('hex');
+
+// The run's own connection to this Rex Desk, built fresh for each run so nothing in the person's Codex profile
+// (or in extraMcp) can read, redirect or replace it:
+//  - The desk proxy is launched as a stdio server (node src/stdio.js) under a per-run unguessable name, never
+//    'rex_desk' or any fixed name. Codex deep-merges same-named server tables by key, so a fixed name could be
+//    merged into - or overwritten by - a profile/extraMcp entry (a url laid over a command becomes an invalid
+//    command+url table, rejected as "url is not supported for stdio"); a per-run name no profile can predict
+//    sidesteps every such clash and leaves the profile untouched. The entry is added last, so extraMcp cannot
+//    overwrite it. required: true, so the run always has its connection to this desk.
+//  - The run token lives in Codex's environment only under a per-run unguessable name (never REX_DESK_TOKEN /
+//    REX_AGENT_TOKEN), forwarded to the proxy by name via env_vars. So: the token value is never in the thread
+//    configuration (env_vars lists names, not values), the command line or a log; a profile url server's
+//    bearer_token_env_var / env_http_headers cannot name a variable it cannot guess; and shell_environment_policy
+//    keeps it out of the environment of shell/exec tools Codex runs. stdio.js reads the var named by
+//    REX_DESK_TOKEN_VAR, so no raw token crosses in the server table.
+export function codexDeskConnection({ agentEnv = {}, token = '', mcpUrl = '', node = process.execPath, root = packageRoot } = {}) {
+  const tokenVar = `REX_DESK_TOKEN_${uniqueId().toUpperCase()}`;
+  const serverName = `rex_desk_${uniqueId()}`;
+  const env = { ...codexEnvironment(agentEnv), REX_DESK_URL: mcpUrl || '', REX_DESK_TOKEN_VAR: tokenVar, [tokenVar]: token || '' };
+  const server = mcpUrl ? { command: node, args: [path.join(root, 'src', 'stdio.js')], env_vars: ['REX_DESK_URL', 'REX_DESK_TOKEN_VAR', tokenVar], required: true } : null;
+  // Only our own proxy may carry the token; shell/exec tools and any other subprocess never inherit it.
+  const shellEnvironmentPolicy = { exclude: ['REX_DESK_TOKEN*', 'REX_AGENT_TOKEN', tokenVar] };
+  return { tokenVar, serverName, server, env, shellEnvironmentPolicy };
+}
+
+// Build the Codex mcp_servers map: the person's extra servers first, then the run's desk server added last under
+// its per-run name, so nothing in extraMcp can take that name or overwrite the desk connection. HTTP header
+// secrets from extra servers are placed on `env` under throwaway names, as before.
+export function codexMcpServers({ serverName, server }, extraMcp = {}, env = {}) {
+  const servers = {};
+  for (const [name, item] of Object.entries(extraMcp || {})) {
+    if (name === serverName) continue;
+    if (item.url) {
+      const headers = {};
+      for (const [header, value] of Object.entries(item.headers || {})) { const key = `REX_CODEX_MCP_${Object.keys(env).length}`; env[key] = value; headers[header] = key; }
+      servers[name] = { url: item.url, env_http_headers: headers };
+    } else if (item.command) servers[name] = { command: item.command, args: item.args || [], env: item.env || {} };
+  }
+  if (server) servers[serverName] = server;
+  return servers;
 }
 
 // One app-server per caller keeps account, MCP credentials, and pending approvals isolated.
@@ -200,17 +231,9 @@ export class CodexRunner {
   async start(prompt) {
     this.nudges = 0; this.turnTools = 0; this.lastMessage = '';
     if (this.signal?.aborted) throw new Error('Codex was stopped.');
-    const env = { ...codexEnvironment(this.agentEnv), REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
-    const servers = {};
-    const deskServer = codexDeskServer({ mcpUrl: this.mcpUrl });
-    if (deskServer) servers[CODEX_DESK_SERVER] = deskServer;
-    for (const [name, server] of Object.entries(this.extraMcp || {})) {
-      if (server.url) {
-        const headers = {};
-        for (const [header, value] of Object.entries(server.headers || {})) { const key = `REX_CODEX_MCP_${Object.keys(env).length}`; env[key] = value; headers[header] = key; }
-        servers[name] = { url: server.url, env_http_headers: headers };
-      } else if (server.command) servers[name] = { command: server.command, args: server.args || [], env: server.env || {} };
-    }
+    const desk = codexDeskConnection({ agentEnv: this.agentEnv, token: this.token, mcpUrl: this.mcpUrl });
+    const env = desk.env;
+    const servers = codexMcpServers(desk, this.extraMcp, env);
     const permissions = codexPermissions(this.run.permissionMode, [this.cwd, this.projectDirectory, this.artifactDirectory, this.uploadsDirectory].filter(Boolean));
     const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
     completed.catch(() => {});
@@ -221,7 +244,7 @@ export class CodexRunner {
       await this.client.open();
       const auth = await this.client.request('account/read', { refreshToken: false });
       if (auth.account?.type !== 'chatgpt') throw new Error('Codex needs you to sign in with your ChatGPT plan. Connect Codex in Settings.');
-      const config = { model_provider: 'openai', forced_login_method: 'chatgpt', mcp_servers: servers };
+      const config = { model_provider: 'openai', forced_login_method: 'chatgpt', mcp_servers: servers, shell_environment_policy: desk.shellEnvironmentPolicy };
       const common = { cwd: this.cwd, approvalPolicy: permissions.approvalPolicy, approvalsReviewer: 'user', sandbox: permissions.sandbox, config, developerInstructions: CODEX_RULE, ...(this.model ? { model: this.model } : {}) };
       const session = this.run.sessionId;
       const result = await this.client.request(session ? 'thread/resume' : 'thread/start', { ...common, ...(session ? { threadId: session, excludeTurns: true } : {}) });

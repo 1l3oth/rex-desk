@@ -26,7 +26,11 @@ function localToken() {
     return Buffer.concat([cipher.update(encrypted), cipher.final()]).toString('utf8');
   } finally { db.close(); }
 }
-const token = process.env.REX_DESK_TOKEN || localToken();
+// The caller may hand the token under a per-run, unguessable variable name (named by REX_DESK_TOKEN_VAR) so it
+// is never exposed under a fixed name other tools or MCP servers could read; REX_DESK_TOKEN and the local vault
+// stay as fallbacks for the Setup entry and other launchers.
+const indirectToken = process.env.REX_DESK_TOKEN_VAR ? process.env[process.env.REX_DESK_TOKEN_VAR] : '';
+const token = process.env.REX_DESK_TOKEN || indirectToken || localToken();
 const server = new Server({ name: 'rex-desk', version: '0.1.0' }, { capabilities: { tools: {} } });
 const client = new Client({ name: 'rex-desk-stdio-proxy', version: '0.1.0' }, { capabilities: { elicitation: { form: {}, url: {} } } });
 let activeRequestId;
