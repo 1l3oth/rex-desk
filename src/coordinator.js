@@ -20,6 +20,7 @@ import { Specialists, EVIDENCE_RULE, ELI5_RULE, NOTICE_RULE, LEARN_RULE, WORKFLO
 import { PROTECT_RULE, APP_GUIDE } from './app-guard.js';
 import { ClaudeRunner, existingMcpConnections } from './runners.js';
 import { Notifier } from './notify.js';
+import { WebPush } from './webpush.js';
 import { EFFORTS, MODES, modesFor, effortsFor, defaultModeFor, runOptions, modelList, pickerModels } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
@@ -211,6 +212,7 @@ export class Desk {
     this.notes = new AgentNotes(this);
     this.handover = new Handover(this);
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
+    this.notifier.webPush = new WebPush({ token: () => this.net.token(), base: () => this.net.base, fetcher: (...args) => this.net.fetcher(...args) });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.

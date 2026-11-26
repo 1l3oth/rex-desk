@@ -101,7 +101,7 @@ export class Notifier {
       const item = this.store.get('interaction', id);
       if (!item || item.state !== 'pending' || this.seen.has(id)) return;
       this.seen.add(id);
-      this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(item.kind) ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' } });
+      this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(item.kind) ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' }, source: `ask:${item.id}` });
     } else if (kind === 'chatcopy') {
       // An agent on another computer asks: its question comes here only inside the synced copy of its chat, never as an
       // interaction of this computer, so it needs its own pop-up and sound. Only a copy that wins over the local chat counts, the
@@ -112,16 +112,16 @@ export class Notifier {
         if (!ask?.id || this.seen.has(ask.id) || (ask.state && ask.state !== 'pending') || this.store.get('interaction', ask.id)) continue;
         this.seen.add(ask.id);
         const agent = (copy.agentId && this.store.get('specialist', copy.agentId)?.name) || copy.run?.title || 'An agent';
-        this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(ask.kind) ? 'Needs your OK' : 'Needs your answer'} · ${agent}`, body: ask.title || 'An agent is waiting for you.', target: { type: 'inbox', id: '' }, from: agent });
+        this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(ask.kind) ? 'Needs your OK' : 'Needs your answer'} · ${agent}`, body: ask.title || 'An agent is waiting for you.', target: { type: 'inbox', id: '' }, from: agent, source: `ask:${ask.id}` });
       }
     } else if (kind === 'run') {
       const run = this.store.get('run', id); if (!run) return;
       const before = this.states.get(id); this.states.set(id, run.state);
       if (!before || !working.has(before) || !settled.has(run.state)) return;
       if (run.roomAgent) return; // a group chat turn is told by its messages
-      if (run.state === 'failed') return this.notify({ kind: 'failed', title: `${this.runTitle(run)} stopped`, body: run.error || 'The run failed.', target: this.targetOfRun(run) });
+      if (run.state === 'failed') return this.notify({ kind: 'failed', title: `${this.runTitle(run)} stopped`, body: run.error || 'The run failed.', target: this.targetOfRun(run), source: `run:${run.id}:failed:${run.updatedAt || ''}` });
       const last = this.store.events(id, { visible: true, limit: 20 }).filter(event => ['agent-text', 'message'].includes(event.kind)).at(-1);
-      this.notify({ kind: 'reply', title: `${this.runTitle(run)} replied`, body: last?.text || last?.message || 'It finished its turn.', target: this.targetOfRun(run) });
+      this.notify({ kind: 'reply', title: `${this.runTitle(run)} replied`, body: last?.text || last?.message || 'It finished its turn.', target: this.targetOfRun(run), source: `run:${run.id}:${last?.id || run.updatedAt || ''}` });
     } else if (kind === 'roommsg') {
       const message = this.store.get('roommsg', id);
       if (!message || this.seen.has(`msg:${id}`)) return; this.seen.add(`msg:${id}`);
@@ -130,13 +130,13 @@ export class Notifier {
       // In a busy room, one pop-up per chosen gap; every message still counts as unread. A message to you always pops up.
       const gap = this.prefs().roomGap * 1000, quiet = !toYou && gap > 0 && Date.now() - (this.roomToast.get(message.roomId) || 0) < gap;
       if (!quiet) this.roomToast.set(message.roomId, Date.now());
-      this.notify({ kind: toYou ? 'mention' : 'room', title: toYou ? `${message.from.label} asked you in ${room?.name || 'a room'}` : `${message.from.label} in ${room?.name || 'a room'}`, body: message.text, target: { type: 'room', id: message.roomId }, toast: !quiet, from: message.from.label });
+      this.notify({ kind: toYou ? 'mention' : 'room', title: toYou ? `${message.from.label} asked you in ${room?.name || 'a room'}` : `${message.from.label} in ${room?.name || 'a room'}`, body: message.text, target: { type: 'room', id: message.roomId }, toast: !quiet, from: message.from.label, source: `msg:${message.id}` });
     }
   }
   keyOf(target) { return `${target.type}:${target.id || ''}`; }
   // Whether this kind of notification is turned on. Group chat messages can be all, only the ones to you, or none.
   wanted(kind) { const kinds = this.prefs().kinds; if (kind === 'room') return kinds.room === 'all'; if (kind === 'mention') return kinds.room !== 'off'; return kinds[kind] !== false; }
-  notify({ kind = 'reply', title, body, target = { type: 'inbox', id: '' }, toast = true, from = '' }) {
+  notify({ kind = 'reply', title, body, target = { type: 'inbox', id: '' }, toast = true, from = '', source = '' }) {
     const prefs = this.prefs(), key = this.keyOf(target), looking = this.focused() && this.viewing() === key, muted = this.muted(key), wanted = this.wanted(kind), quiet = this.quietNow();
     // alert: the in-app pop-up and its sound may show it; toast: a Windows pop-up too.
     const alert = toast && wanted && !muted && !quiet && !looking;
@@ -144,6 +144,9 @@ export class Notifier {
     this.store.put('notice', notice.id, notice); this.prune();
     // A push to the phone (ntfy) when the person is away from this window, or always if they chose that.
     if (alert && prefs.push.on && (prefs.push.always || !this.focused()) && this.enabled()) void this.push({ kind, title, body: prefs.preview ? body : 'Open Rex Desk to read it.' });
+    // The same notice to the account's phones through web push, locked here for each phone (webpush.js). The open chat
+    // never sends (alert is off while it is looked at), and a failed send never touches ntfy or the list above.
+    if (alert && this.webPush && (prefs.push.always || !this.focused()) && this.enabled()) void this.webPush.send({ source, kind, title, body, target, preview: prefs.preview }).catch(() => {});
     if (!alert || !prefs.windows || !this.enabled() || this.focused()) return notice;
     const now = Date.now(); if (now - this.lastAt < this.minGapMs) return notice; this.lastAt = now;
     this.show(title, prefs.preview ? body : 'Open Rex Desk to read it.', { sound: prefs.sound ? (kind === 'ask' || kind === 'mention' ? 'Reminder' : kind === 'failed' ? 'Default' : 'IM') : '' }); return notice;
@@ -169,6 +172,6 @@ export class Notifier {
   summary() {
     const all = this.store.list('notice').sort((a, b) => String(b.at).localeCompare(String(a.at))), unread = all.filter(item => !item.read);
     const byKey = {}; for (const item of unread) byKey[item.key] = (byKey[item.key] || 0) + 1;
-    const prefs = this.prefs(); return { unread: unread.length, byKey, recent: all.slice(0, 60), mutes: prefs.mutes, prefs: { ...prefs, quietNow: this.quietNow(), pushError: this.pushError || '' } };
+    const prefs = this.prefs(); return { unread: unread.length, byKey, recent: all.slice(0, 60), mutes: prefs.mutes, prefs: { ...prefs, quietNow: this.quietNow(), pushError: this.pushError || '', webPushError: this.webPush?.status || '' } };
   }
 }
