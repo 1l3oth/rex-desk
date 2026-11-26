@@ -1,0 +1,94 @@
+/* Install guide (public/install-guide.js). A plain sheet with a small drawn phone; the finger moves to each tap. */
+/* The glass theme's panel colour is see-through; a solid base under it keeps the app's tab bar from showing through the sheet. */
+.ig{--ig-base:#fff}html[data-theme=dark] .ig{--ig-base:#1b1e24}
+.ig{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.42);animation:ig-fade .2s ease-out}
+.ig.ig-out{animation:ig-fade .2s ease-in reverse forwards}
+.ig-box{width:100%;max-width:400px;background:linear-gradient(var(--panel,#fff),var(--panel,#fff)),var(--ig-base);color:var(--ink,#1f2328);border:1px solid var(--line,#d6dce2);border-bottom:0;border-radius:14px 14px 0 0;padding:14px 16px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.18);animation:ig-up .32s cubic-bezier(.2,.8,.2,1)}
+.ig.ig-out .ig-box{animation:ig-up .2s ease-in reverse forwards}
+@media (min-width:640px){.ig{align-items:center}.ig-box{border-radius:12px;border-bottom:1px solid var(--line,#d6dce2);padding-bottom:14px}}
+.ig-top-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.ig-title{font-size:15px;font-weight:600}
+.ig-x{display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--muted,#59636e);cursor:pointer}
+.ig-x:hover{background:var(--raised,#eef1f4)}
+.ig svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ig-and-menu .ig-tap svg,.ig-and-list .ig-top svg{fill:currentColor;stroke:none}
+.ig-seg{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:2px;border-radius:7px;background:var(--raised,#eef1f4);margin-bottom:12px}
+.ig-seg button{border:0;border-radius:5px;padding:5px 0;font:inherit;font-size:12.5px;background:none;color:var(--muted,#59636e);cursor:pointer}
+.ig-seg button.on{background:var(--panel,#fff);color:var(--ink,#1f2328);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.ig-quick{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-bottom:12px;padding:8px;border:1px solid var(--accent,#0969da);border-radius:7px;background:var(--accent,#0969da);color:var(--accent-ink,#fff);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+
+/* The drawn phone */
+.ig-stage{display:flex;justify-content:center;padding:14px 0;border-radius:10px;background:var(--raised,#eef1f4)}
+.ig-phone{position:relative;width:168px;height:280px;border-radius:22px;border:5px solid #2a2e35;background:#fff;color:#1f2328;overflow:hidden;font-size:9.5px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.ig-scene{position:absolute;inset:0;display:flex;flex-direction:column}
+.ig-page{flex:1;display:flex;flex-direction:column;gap:7px;padding:16px 12px}
+.ig-page i{display:block;height:6px;border-radius:3px;background:#e6e9ed}
+.ig-bar{display:flex;align-items:center;justify-content:space-around;height:30px;background:#f4f5f7;color:#0a64d8}
+.ig-bar.ig-bottom{border-top:1px solid #e1e4e8}
+.ig-bar.ig-top{justify-content:space-between;gap:6px;padding:0 6px;border-bottom:1px solid #e1e4e8;color:#3c4043}
+.ig-url{flex:1;padding:4px 8px;border-radius:10px;background:#e8eaed;color:#5f6368;font-size:9px}
+.ig-tap{display:inline-flex;align-items:center;justify-content:center;border-radius:6px}
+.ig-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #eceef1;color:#1f2328}
+.ig-row:first-child{border-top:0}
+.ig-row.ig-tap{display:flex;justify-content:flex-start;border-radius:0}
+.ig-row svg{width:13px;height:13px;color:#59636e}
+.ig-sheet{position:absolute;left:0;right:0;bottom:0;background:#f4f5f7;border-radius:12px 12px 0 0;padding:6px 6px 14px;box-shadow:0 -4px 14px rgba(0,0,0,.14);animation:ig-sheet 3.2s cubic-bezier(.2,.8,.2,1) infinite}
+.ig-sheet .ig-row{background:#fff;border-top-color:#eef0f2}
+.ig-sheet .ig-row:first-child{border-radius:8px 8px 0 0}.ig-sheet .ig-row:last-child{border-radius:0 0 8px 8px}
+.ig-menu{position:absolute;top:26px;right:6px;width:112px;background:#fff;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.2);transform-origin:top right;animation:ig-menu 3.2s cubic-bezier(.2,.8,.2,1) infinite}
+.ig-pick{animation:ig-pick 3.2s ease infinite}
+.ig-head{display:flex;align-items:center;justify-content:space-between;padding:10px 8px;border-bottom:1px solid #e1e4e8;background:#f4f5f7;font-size:9px}
+.ig-head span{color:#0a64d8}.ig-head b{font-weight:600}
+.ig-card{display:flex;align-items:center;gap:8px;margin:12px 10px;padding:8px;border-radius:8px;background:#f4f5f7}
+.ig-card img{width:30px;height:30px;border-radius:7px}
+.ig-card b{display:block;font-size:10px}.ig-card small{color:#6e7781;font-size:8.5px}
+.ig-link{color:#0a64d8;font-weight:600;padding:2px 4px}
+.ig-ios-add .ig-link{animation:ig-pick 3.2s ease infinite}
+.ig-dialog{position:absolute;left:10px;right:10px;top:78px;padding:12px 4px 8px;border-radius:12px;background:#fff;box-shadow:0 8px 28px rgba(0,0,0,.25);animation:ig-pop 3.2s cubic-bezier(.2,.8,.2,1) infinite}
+.ig-dialog>b{display:block;padding:0 10px;font-size:11px;font-weight:600}
+.ig-dialog .ig-card{margin:10px 6px}
+.ig-acts{display:flex;justify-content:flex-end;gap:12px;padding:0 10px;color:#0a64d8;font-weight:600}
+.ig-and-install .ig-page,.ig-and-list .ig-page,.ig-ios-sheet .ig-page{opacity:.55}
+.ig-home{background:linear-gradient(160deg,#3b4452,#1f242c)}
+.ig-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px;padding:30px 14px}
+.ig-grid span{aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.16)}
+.ig-grid .ig-new{position:relative;background:none;animation:ig-icon 3.2s cubic-bezier(.3,1.4,.5,1) infinite}
+.ig-new img{width:100%;height:100%;border-radius:8px;display:block}
+.ig-new b{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;color:#fff;font-size:7.5px;font-weight:500;white-space:nowrap}
+
+/* The finger: travels from below to the tap target, presses, and lifts away. */
+.ig-finger{position:absolute;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:rgba(9,105,218,.28);border:2px solid rgba(9,105,218,.9);pointer-events:none;animation:ig-finger 3.2s cubic-bezier(.4,0,.2,1) infinite}
+.ig-finger::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid rgba(9,105,218,.7);opacity:0;animation:ig-ripple 3.2s ease-out infinite}
+.ig-ios-sheet .ig-finger,.ig-and-list .ig-finger,.ig-and-install .ig-finger{animation-name:ig-finger-late}
+.ig-ios-sheet .ig-finger::after,.ig-and-list .ig-finger::after,.ig-and-install .ig-finger::after{animation-name:ig-ripple-late}
+
+.ig-step{min-height:84px;padding:12px 2px 4px}
+.ig-step small{color:var(--muted,#59636e);font-size:11.5px}
+.ig-step p{margin:2px 0 0;font-size:14px;line-height:1.45;font-weight:500;animation:ig-text .3s ease-out}
+.ig-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:6px}
+.ig-dots{display:flex;gap:5px}
+.ig-dots i{width:6px;height:6px;border-radius:50%;background:var(--line,#d6dce2);transition:width .25s,background .25s}
+.ig-dots i.done{background:var(--muted,#59636e)}
+.ig-dots i.on{width:16px;border-radius:3px;background:var(--accent,#0969da)}
+.ig-btns{display:flex;gap:6px}
+.ig-btns .btn{min-width:64px}
+
+@keyframes ig-fade{from{opacity:0}}
+@keyframes ig-up{from{transform:translateY(24px);opacity:0}}
+@keyframes ig-text{from{transform:translateY(4px);opacity:0}}
+@keyframes ig-finger{0%{transform:translate(var(--x),calc(var(--y) + 90px));opacity:0}18%{opacity:1}40%{transform:translate(var(--x),var(--y)) scale(1)}48%{transform:translate(var(--x),var(--y)) scale(.78)}56%{transform:translate(var(--x),var(--y)) scale(1);opacity:1}80%,100%{transform:translate(var(--x),var(--y));opacity:0}}
+@keyframes ig-finger-late{0%,22%{transform:translate(var(--x),calc(var(--y) + 70px));opacity:0}34%{opacity:1}52%{transform:translate(var(--x),var(--y)) scale(1)}60%{transform:translate(var(--x),var(--y)) scale(.78)}68%{transform:translate(var(--x),var(--y)) scale(1);opacity:1}86%,100%{transform:translate(var(--x),var(--y));opacity:0}}
+@keyframes ig-ripple{0%,47%{opacity:0;transform:scale(1)}50%{opacity:1}75%,100%{opacity:0;transform:scale(2.2)}}
+@keyframes ig-ripple-late{0%,59%{opacity:0;transform:scale(1)}62%{opacity:1}86%,100%{opacity:0;transform:scale(2.2)}}
+@keyframes ig-sheet{0%{transform:translateY(100%)}20%,92%{transform:translateY(0)}100%{transform:translateY(100%)}}
+@keyframes ig-menu{0%{transform:scale(.6);opacity:0}16%,92%{transform:scale(1);opacity:1}100%{transform:scale(.6);opacity:0}}
+@keyframes ig-pop{0%{transform:scale(.9);opacity:0}16%,92%{transform:scale(1);opacity:1}100%{transform:scale(.96);opacity:0}}
+@keyframes ig-pick{0%,52%{background:transparent}60%,84%{background:rgba(9,105,218,.14)}100%{background:transparent}}
+@keyframes ig-icon{0%,10%{transform:scale(0);opacity:0}30%{transform:scale(1.08);opacity:1}40%,90%{transform:scale(1)}100%{transform:scale(1);opacity:1}}
+
+@media (prefers-reduced-motion:reduce){
+  .ig,.ig-box,.ig-step p,.ig-sheet,.ig-menu,.ig-dialog,.ig-grid .ig-new{animation:none}
+  .ig-finger{animation:none;transform:translate(var(--x),var(--y))}
+  .ig-finger::after{animation:none}
+  .ig-pick,.ig-ios-add .ig-link{animation:none;background:rgba(9,105,218,.14)}
+}

@@ -24,6 +24,7 @@ import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices
 import { inboxStage, wireInbox } from '/chat-inbox.js';
 import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
 import { maybeStartTour, startTour } from '/chat-tour.js';
+import { maybeInstallGuide } from '/install-guide.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
@@ -664,7 +665,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
-    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages${historyQuery(view.id)}`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } if (!window.__pinWatch) { window.__pinWatch = true; watchMessagePins(ctx); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages${historyQuery(view.id)}`)) : null); renderAll(full); maybeStartTour(ctx); maybeInstallGuide(); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } if (!window.__pinWatch) { window.__pinWatch = true; watchMessagePins(ctx); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { const wasFull = againFull; again = false; againFull = false; void refresh({ full: wasFull }); } }
 }
 // A chat opened is drawn at once from what the page already holds (its messages from the last visit), and brought up to
