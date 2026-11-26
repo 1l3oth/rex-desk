@@ -72,7 +72,7 @@ const echo = token => ({
   content: [{ type: 'text', text: `you sent ${token} (${token})` }, { type: 'text', text: JSON.stringify({ auth: `Bearer ${token}` }) },
     // The same value written with JSON escapes only.
     { type: 'text', text: `{"auth":"${[...token].map(char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join('')}"}` }],
-  structuredContent: { nested: [{ [token]: token, deeper: { again: `x${token}y` } }] },
+  structuredContent: { nested: [{ seen: token, deeper: { again: `x${token}y` } }] },
 });
 // Every string an agent could read in a value, with JSON written inside a string read too.
 const readable = value => {
@@ -89,13 +89,17 @@ for (const [what, token] of CREDENTIALS) {
     for (const signed of [false, true]) {
       const settings = signed ? { type: 'http', url: 'https://flow.example.test/mcp' } : config('https://orbit.example.test/mcp', token);
       let next = () => echo(token);
-      const connect = async () => ({ listTools: async () => ({ tools: [{ name: 'whoami', description: `sent ${token}`, inputSchema: { type: 'object', properties: { [token]: { type: 'string', default: token } } } }] }), callTool: async () => next(), close: async () => {} });
+      const connect = async () => ({ listTools: async () => ({ tools: [{ name: 'whoami', description: `sent ${token}`, inputSchema: { type: 'object', properties: { q: { type: 'string', default: token } } } }] }), callTool: async () => next(), close: async () => {} });
       const toolbox = new Toolbox({ connect, mcpConfig: () => ({ orbit: settings }) });
       if (signed) { let held = [token]; toolbox.signIn = { record: () => ({}), authorize: async raw => ({ ...raw, headers: { 'X-Kept': '1' } }), secrets: () => { const now = held; return now; }, refused: async () => false }; const read = next; next = () => { held = ['renewed-secret']; return read(); }; }
       const answer = await toolbox.signed('orbit', settings, client => client.callTool());
       assert.ok(!shows(answer, token), `${what}: an answer`);
       assert.equal(answer.content[0].text, 'you sent [hidden] ([hidden])', what);
       if (signed) continue;
+      // A field name cannot be changed without breaking the answer, so the whole answer is held back.
+      const named = next; next = () => ({ ...named(), structuredContent: { [token]: 1 } });
+      await assert.rejects(() => toolbox.signed('orbit', settings, client => client.callTool()), { message: 'orbit: The server sent back an answer that could show your sign-in, so Rex Desk held it back.' }, what);
+      next = named;
       assert.ok(!shows(await toolbox.toolsOf('orbit', settings), token), `${what}: the tool list`);
       assert.ok(!shows((await toolbox.run('orbit/whoami', {})).result, token), `${what}: desk_run`);
       // Errors: the server's own protocol error is cleaned; a failed request never passes on what came back with it.

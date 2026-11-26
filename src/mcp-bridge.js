@@ -5,6 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { SIGN_IN_HELP } from './mcp-signin.js';
+import { UNSAFE } from './mcp-guard.js';
 
 export const BRIDGE_PATH = '/mcp-signed/';
 // What an agent is given instead of the server itself.
@@ -26,7 +27,7 @@ const FORWARD = [
 export async function handleBridge(use, name, request, response, body) {
   if (request.method !== 'POST') { response.writeHead(405, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'Use POST.' })); return; }
   // The words an agent gets when it fails: ours, never what the server sent back with the failed request.
-  const failed = error => new McpError(ErrorCode.InternalError, String(error?.message || '').includes(SIGN_IN_HELP) ? `${name}: ${SIGN_IN_HELP}` : `${name}: the server did not answer this request.`);
+  const failed = error => new McpError(ErrorCode.InternalError, String(error?.message || '').includes(SIGN_IN_HELP) ? `${name}: ${SIGN_IN_HELP}` : String(error?.message || '').includes(UNSAFE) ? `${name}: ${UNSAFE}` : `${name}: the server did not answer this request.`);
   const reach = work => use(work).catch(error => { throw failed(error); });
   let offers = { tools: {}, resources: {}, prompts: {} };
   if (body?.method === 'initialize') {

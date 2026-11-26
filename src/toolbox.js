@@ -13,15 +13,15 @@ import { resolveCommand } from './processes.js';
 import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
-import { SIGN_IN_HELP, addressOf } from './mcp-signin.js';
-import { headerSecrets, pinnedFetch, redactor, safeError } from './mcp-guard.js';
+import { SIGN_IN_HELP, addressOf, carriesCredential } from './mcp-signin.js';
+import { headerSecrets, pinnedFetch, redactor, safeError, Unsafe } from './mcp-guard.js';
 
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
 // A server that wants a sign-in (or no longer takes this one), not one that is broken.
 const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|invalid_token|missing_bearer/i.test(String(error?.message || ''));
 // An address with a typed key of its own is the person's to fix; every other refused address needs a sign-in.
-const signsIn = (signIn, config) => Boolean(config?.url && (signIn?.record(addressOf(config)) || !Object.keys(config.headers || {}).length));
+const signsIn = (signIn, config) => { const url = addressOf(config); return Boolean(url && !carriesCredential(new URL(url)) && (signIn?.record(url) || !Object.keys(config.headers || {}).length)); };
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
 const words = text => String(text || '').toLowerCase().normalize('NFKD').split(/[^a-z0-9ក-៿가-힯]+/).filter(word => word.length > 1);
@@ -153,7 +153,9 @@ export class Toolbox {
       this.secretsInto(secrets, config, this.clients.get(name)?.config);
       let cursor;
       do { const page = await client.listTools(cursor ? { cursor } : {}); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor && tools.length < 1000);
-      const list = redactor(this.secretsInto(secrets, config))(tools).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
+      const clean = redactor(this.secretsInto(secrets, config));
+      // A tool that shows a sign-in where it cannot be taken out (its name, a field name) is left out of the list.
+      const list = tools.flatMap(tool => { try { return [clean(tool)]; } catch (error) { if (error instanceof Unsafe) return []; throw error; } }).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
     } catch (error) {

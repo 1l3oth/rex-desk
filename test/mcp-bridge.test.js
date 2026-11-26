@@ -148,7 +148,7 @@ async function signInServer({ register, token } = {}) {
 
 test('sign-in errors show fixed words chosen by the OAuth error code, never what the server wrote', async () => {
   const { McpSignIn } = await import('../src/mcp-signin.js');
-  const records = new Map(), signIn = new McpSignIn({ get: (kind, id) => records.get(id) ?? null, put: (kind, id, value) => records.set(id, value), delete: (kind, id) => records.delete(id), list: () => [...records.values()], encrypt: text => text, decrypt: text => text });
+  const records = new Map(), signIn = new McpSignIn({ get: (kind, id) => records.get(id) ?? null, put: (kind, id, value) => records.set(id, value), delete: (kind, id) => records.delete(id), list: () => [...records.values()], encrypt: text => text, decrypt: text => text }, { loopback: true });
   const secret = 'SECRET-code-123 https://example.test/?key=abc';
   const back = async (link, params) => { const asked = new URL(link).searchParams, url = new URL(asked.get('redirect_uri')); for (const [key, value] of Object.entries({ state: asked.get('state'), ...params })) url.searchParams.set(key, value); return (await fetch(url)).text(); };
   const cases = [

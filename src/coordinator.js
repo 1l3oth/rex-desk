@@ -4,7 +4,7 @@ import { AntigravityRunner, antigravityModels } from './antigravity.js';
 import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
-import { McpSignIn, addressOf } from './mcp-signin.js';
+import { McpSignIn, addressOf, carriesCredential } from './mcp-signin.js';
 import { bridged } from './mcp-bridge.js';
 import { catalogItem } from './connector-catalog.js';
 import { Team } from './team.js';
@@ -398,14 +398,14 @@ export class Desk {
     const servers = this.signedServers(run);
     return Object.hasOwn(servers, name) ? servers[name] : null;
   }
-  // The remote servers on this computer that Rex Desk can sign in to, and how each stands.
+  // The remote servers on this computer that Rex Desk can sign in to, and how each stands: by name, never their address.
   mcpSignIns() {
     let servers = {}; try { servers = this.toolbox.servers(); } catch { /* no config */ }
     return Object.entries(servers).flatMap(([name, config]) => {
-      const url = addressOf(config); if (!url) return [];
+      const url = addressOf(config); if (!url || carriesCredential(new URL(url))) return [];
       const state = this.mcpSignIn.state(url), refused = Boolean(this.toolbox.failed.get(name)?.signIn);
       if (!state.state && !state.waiting && !refused) return [];
-      return [{ name, url, ...state, state: state.state === 'expired' || (state.state && refused) ? 'expired' : state.state || 'needed' }];
+      return [{ name, ...state, state: state.state === 'expired' || (state.state && refused) ? 'expired' : state.state || 'needed' }];
     });
   }
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }

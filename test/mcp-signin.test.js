@@ -46,7 +46,7 @@ async function browser(fake, link, { state } = {}) {
 
 test('sign in: discovery, self-registration, PKCE and resource, a one-time local callback, tokens kept sealed', async () => {
   const fake = await fakeServer(), store = memoryStore(), changed = [];
-  const signIn = new McpSignIn(store, { changed: url => changed.push(url) });
+  const signIn = new McpSignIn(store, { changed: url => changed.push(url), loopback: true });
   try {
     const { url, done } = await signIn.start('flow-mcp', fake.url);
     const wrong = await browser(fake, url, { state: 'not-ours' });
@@ -67,7 +67,7 @@ test('sign in: discovery, self-registration, PKCE and resource, a one-time local
 });
 
 test('refresh: before it runs out, once even when asked twice; a refused refresh shows as expired', async () => {
-  const fake = await fakeServer({ expiresIn: 300 }), signIn = new McpSignIn(memoryStore());
+  const fake = await fakeServer({ expiresIn: 300 }), signIn = new McpSignIn(memoryStore(), { loopback: true });
   const refreshes = () => fake.seen.tokenCalls.filter(call => call.grant_type === 'refresh_token').length;
   try {
     const { url, done } = await signIn.start('flow-mcp', fake.url); await browser(fake, url); await done;
@@ -96,7 +96,7 @@ test('the toolbox opens the server with the sign-in, and a refused one asks for 
 });
 
 test('a server that refuses even a renewed token shows as expired, so Needs you asks for Sign in again', async () => {
-  const fake = await fakeServer(), signIn = new McpSignIn(memoryStore());
+  const fake = await fakeServer(), signIn = new McpSignIn(memoryStore(), { loopback: true });
   const connect = async () => { throw Object.assign(new Error('HTTP 401'), { code: 401 }); };
   try {
     const { url, done } = await signIn.start('flow-mcp', fake.url); await browser(fake, url); await done;
