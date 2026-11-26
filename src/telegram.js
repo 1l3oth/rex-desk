@@ -6,7 +6,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { botReader } from './bot-use.js';
+import { botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // One-time pairing code: only the chat that sends it to the bot can be linked, so a stranger who happens to press Start on the
@@ -87,6 +87,10 @@ function saveValues(store, linkId, values) {
 // the new bot starts from what Telegram still holds for it, and nothing queued for the old bot is ever read again.
 const offsetFor = (store, linkId) => { const state = store.get('telegram', 'state'); return state?.linkId === linkId ? Number(state.offset) || 0 : 0; };
 const saveOffset = (store, linkId, offset) => store.put('telegram', 'state', { id: 'state', linkId, offset });
+const PERSONAL = { connectorId: 'telegram' };
+const botOf = values => String(values.botId || botIdOf(values.botToken));
+// Telegram's own error code goes with the error, so a turned-down token (401, 404) is told apart from a network error.
+const failure = (data, method) => Object.assign(new Error(data.description || `Telegram ${method} failed`), { code: Number(data.error_code) || 0 });
 
 export class TelegramBridge {
   // desk: the coordinator (desk.store, desk.answer, desk.specialistTurn, desk.specialists...). options.fetcher and
@@ -103,7 +107,7 @@ export class TelegramBridge {
       signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await response.json().catch(() => ({}));
-    if (!data.ok) throw new Error(data.description || `Telegram ${method} failed`);
+    if (!data.ok) throw failure(data, method);
     return data.result;
   }
 
@@ -116,6 +120,9 @@ export class TelegramBridge {
     if (!found) throw new Error('Connect the bot token first.');
     const { link } = found; let { values } = found;
     if (linkId && link.id !== linkId) throw new Error('That Telegram connection is gone.');
+    // The bot is read by another saved use (bot-use.js): its poll would take the code, so pairing waits for that one to go.
+    const { readBy } = botReader(this.store, PERSONAL);
+    if (readBy) throw new Error(`This bot is also saved as ${readBy.kind === 'bugs' ? 'the bug report bot' : readBy.name ? `${readBy.name}'s own bot` : "another agent's own bot"}, which reads its messages. Disconnect it there, or make a separate bot in @BotFather.`);
     let code = pendingPairCode(values);
     const waiting = current => ({ linked: false, code: current, hint: `Send ${current} to your bot in Telegram, then tap Link again.` });
     if (!code) {
@@ -126,9 +133,14 @@ export class TelegramBridge {
     if (values.chatId) return waiting(code);
     // Read the queue a batch at a time, moving the offset past each batch, until the code turns up or the queue is empty.
     // Nothing is linked yet, so the skipped messages are never routed anywhere; a capped number of pages per press.
+    // Each read waits for any other read of this bot to end first (readBot), so it never runs beside a poll that is still out.
+    const once = (offset, bot) => readBot(this.store, bot, PERSONAL, new AbortController(), async signal => {
+      try { const result = await this.callAbortable(values.botToken, 'getUpdates', { offset, timeout: 0, limit: 100 }, 10000, AbortSignal.any([signal, AbortSignal.timeout(10000)])); noteBotAnswer(this.store, PERSONAL, values.botToken); return result; }
+      catch (error) { noteBotAnswer(this.store, PERSONAL, values.botToken, error); throw error; }
+    });
     let offset = offsetFor(this.store, link.id);
     for (let page = 0; page < LINK_PAGES; page++) {
-      const updates = await this.call(values.botToken, 'getUpdates', { offset, timeout: 0, limit: 100 }, { timeoutMs: 10000 });
+      const updates = await once(offset, botOf(values));
       if (!updates.length) break;
       const message = updates.map(update => update.message || update.edited_message)
         .find(item => item?.chat?.type === 'private' && codeIn(item.text) === code);
@@ -253,6 +265,9 @@ export class TelegramBridge {
   // Stops polling and resolves once the loop has ended, so the store can be closed safely afterwards.
   async stop() { this.running = false; this.abort?.abort(); this.wake?.(); await this.loopDone; this.loopDone = null; }
   kick() { /* wake an idling loop promptly after a link */ this.wake?.(); }
+  // The connection was removed or replaced: a poll still out on its token is cancelled, and this resolves once it has ended,
+  // so a use that reads the same bot next never asks beside it.
+  async interrupt() { await endBotRead(this.store, PERSONAL); this.wake?.(); }
 
   async loop() {
     while (this.running) {
@@ -260,12 +275,15 @@ export class TelegramBridge {
       // Idle (no getUpdates) until a chat is linked, so the Link button's one-shot getUpdates never hits a 409 conflict.
       if (!found?.values?.chatId) { await this.sleep(8000); continue; }
       // Another use of the same bot reads it (bot-use.js botReader): wait, and read it once that one is disconnected.
-      if (!botReader(this.store, { connectorId: 'telegram' }).reads) { await this.sleep(this.waitMs ?? 3000); continue; }
+      if (!botReader(this.store, PERSONAL).reads) { await this.sleep(this.waitMs ?? 3000); continue; }
       await this.ensureCommands(found);
       try {
         const offset = offsetFor(this.store, found.link.id);
-        this.abort = new AbortController();
-        const updates = await this.callAbortable(found.values.botToken, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query'] }, 55000, this.abort.signal);
+        const abort = this.abort = new AbortController(), token = found.values.botToken;
+        const updates = await readBot(this.store, botOf(found.values), PERSONAL, abort, async signal => {
+          try { const result = await this.callAbortable(token, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query'] }, 55000, AbortSignal.any([signal, AbortSignal.timeout(55000)])); noteBotAnswer(this.store, PERSONAL, token); return result; }
+          catch (error) { if (!signal.aborted) noteBotAnswer(this.store, PERSONAL, token, error); throw error; }
+        });
         for (const update of updates) {
           if (!this.running) break;
           // Read the link fresh for each update: a Relink code or a new linked chat may have been saved during the long poll.
@@ -297,7 +315,7 @@ export class TelegramBridge {
   async callAbortable(token, method, params, timeoutMs, signal) {
     const response = await this.fetcher(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params), signal: signal || AbortSignal.timeout(timeoutMs) });
     const data = await response.json().catch(() => ({}));
-    if (!data.ok) throw new Error(data.description || `Telegram ${method} failed`);
+    if (!data.ok) throw failure(data, method);
     return data.result;
   }
 

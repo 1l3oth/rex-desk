@@ -1152,7 +1152,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         } catch (error) { return json(response, 400, { error: error.message }); }
       }
       const linkMatch = url.pathname.match(/^\/api\/connectors\/links\/([a-z0-9-]+)$/);
-      if (linkMatch && request.method === 'DELETE') { const removed = await removeCatalogConnection(linkMatch[1], { toolbox: desk.toolbox, store }); notify(); return json(response, 200, removed); }
+      if (linkMatch && request.method === 'DELETE') {
+        const kind = store.get('connector', linkMatch[1])?.connectorId, removed = await removeCatalogConnection(linkMatch[1], { toolbox: desk.toolbox, store });
+        // A Telegram bot's poll still out on the removed token is cancelled and waited for, so the next reader of that bot starts alone.
+        if (kind === 'telegram') await desk.telegram?.interrupt?.();
+        if (kind === 'telegram-bugs') desk.bugBot?.disconnect?.();
+        notify(); return json(response, 200, removed);
+      }
       const connectionMatch = url.pathname.match(/^\/api\/connectors\/([^/]+)(\/sync)?$/);
       if (connectionMatch && !connectorOf(decodeURIComponent(connectionMatch[1]))) {
         const connectionId = decodeURIComponent(connectionMatch[1]), config = store.publicConfig(), source = config.sources.find(item => item.id === connectionId);

@@ -10,7 +10,7 @@
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
 import { createHash, randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
-import { assertBotFree, botIdOf, botReader } from './bot-use.js';
+import { assertBotFree, botIdOf, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 const CONNECTOR = 'telegram-bugs';
@@ -185,7 +185,7 @@ export class BugBot {
       signal: signal || AbortSignal.timeout(timeoutMs),
     });
     const data = await response.json().catch(() => ({}));
-    if (!data.ok) throw new Error(data.description || `Telegram ${method} failed`);
+    if (!data.ok) throw Object.assign(new Error(data.description || `Telegram ${method} failed`), { code: Number(data.error_code) || 0 });
     return data.result;
   }
 
@@ -230,6 +230,8 @@ export class BugBot {
     const found = bugBotLink(this.store); if (!found) return { removed: false };
     this.store.delete('connector', found.link.id); this.store.delete('secret', `connector:${found.link.id}`);
     this.store.emit?.('change', { kind: 'connector' });
+    // Its poll still out is cancelled at once; the next use of the same bot waits for it to end before it asks (bot-use.js).
+    this.abort?.abort(); void endBotRead(this.store, { connectorId: CONNECTOR }); this.wake?.();
     return { removed: true };
   }
 
@@ -271,10 +273,11 @@ export class BugBot {
       if (!botReader(this.store, { connectorId: CONNECTOR }).reads) { await this.sleep(this.waitMs ?? 3000); continue; }
       try {
         const offset = this.offsetFor(found);
-        this.abort = new AbortController();
-        const updates = await this.call(found.values.botToken, 'getUpdates',
-          { offset, timeout: 45, allowed_updates: ['message', 'callback_query', 'my_chat_member'] },
-          { timeoutMs: 55000, signal: this.abort.signal });
+        const abort = this.abort = new AbortController(), token = found.values.botToken, mine = { connectorId: CONNECTOR };
+        const updates = await readBot(this.store, String(found.values.botId), mine, abort, async signal => {
+          try { const result = await this.call(token, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query', 'my_chat_member'] }, { signal: AbortSignal.any([signal, AbortSignal.timeout(55000)]) }); noteBotAnswer(this.store, mine, token); return result; }
+          catch (error) { if (!signal.aborted) noteBotAnswer(this.store, mine, token, error); throw error; }
+        });
         for (const update of updates) {
           if (!this.running) break;
           // The bot changed while this batch was in flight (another token, or a removed link): drop the rest of it.

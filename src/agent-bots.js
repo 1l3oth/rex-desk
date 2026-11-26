@@ -4,7 +4,7 @@
 // in the Inbox, and the agent's final reply goes back to the chat it came from. The token stays encrypted on this computer.
 import { randomInt, randomUUID } from 'node:crypto';
 import { fromTelegram } from './telegram.js';
-import { assertBotFree, botReader } from './bot-use.js';
+import { assertBotFree, botReader, endBotRead, noteBotAnswer, readBot } from './bot-use.js';
 
 const API = 'https://api.telegram.org';
 // What a person can send besides text. Telegram's own notices (someone joined, a message was pinned) are none of these.
@@ -62,9 +62,11 @@ export class AgentBots {
     this.ensureLoop(agentId);
     return this.status(agentId);
   }
+  // Its poll still out is cancelled at once; the next use of the same bot waits for it to end before it asks (bot-use.js readBot).
   disconnect(agentId) {
     this.loops.get(agentId)?.abort?.abort(); this.loops.delete(agentId);
     this.store.delete('agentbot', agentId); this.store.delete('secret', linkOf(agentId));
+    void endBotRead(this.store, { agentId });
     return { connected: false };
   }
   // A new code, to link another person's chat as the owner.
@@ -101,9 +103,15 @@ export class AgentBots {
       // Another use of the same bot reads it (bot-use.js botReader): wait, and read it once that one is disconnected.
       if (!botReader(this.store, { agentId }).reads) { await new Promise(resolve => { const timer = setTimeout(resolve, this.waitMs ?? 3000); timer.unref?.(); }); continue; }
       try {
-        loop.abort = new AbortController();
-        const response = await this.fetcher(`${API}/bot${token}/getUpdates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offset: record.offset || 0, timeout: 30, allowed_updates: ['message', 'my_chat_member'] }), signal: loop.abort.signal });
-        const data = await response.json().catch(() => ({})); if (!data.ok) throw new Error(data.description || 'getUpdates failed');
+        const abort = loop.abort = new AbortController(), mine = { agentId };
+        const data = await readBot(this.store, String(record.botId), mine, abort, async signal => {
+          const response = await this.fetcher(`${API}/bot${token}/getUpdates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offset: record.offset || 0, timeout: 30, allowed_updates: ['message', 'my_chat_member'] }), signal });
+          const answer = await response.json().catch(() => ({}));
+          // A 401 or 404 means Telegram turned this token down: the next saved use of the bot takes over (bot-use.js).
+          noteBotAnswer(this.store, mine, token, answer.ok ? null : { code: answer.error_code });
+          return answer;
+        });
+        if (!data.ok) throw new Error('getUpdates failed');
         for (const update of data.result) {
           if (!this.running || this.loops.get(agentId) !== loop) return;
           try { await this.handle(agentId, update); } catch (error) { this.store.event?.('', 'telegram-error', { message: `agent bot: ${error.message}` }, true); }

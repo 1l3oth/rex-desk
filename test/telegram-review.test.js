@@ -156,3 +156,103 @@ test('a bot saved in two places is read by one of them only, the same one on eve
     assert.equal(app.desk.agentBots.status('qa').readBy, null);
   } finally { await stop(); await close(); }
 });
+
+// A fake Telegram for the reader tests. how: token text -> 'ok' (a short poll), 'hang' (a long poll that ends only when it is
+// cancelled), 'revoked' (401 to everything) or 'offline' (the network fails). It counts getUpdates in flight per bot.
+function fakeBots(how) {
+  const live = new Map(), state = { max: 0, polls: [], aborted: [] };
+  state.fetch = async (url, options) => {
+    const [, bot, method] = String(url).match(/bot([^/]+)\/(\w+)/), text = decodeURIComponent(bot), id = Number(text.split(':')[0]), kind = how[text] || 'ok';
+    if (kind === 'revoked') return Response.json({ ok: false, error_code: 401, description: 'Unauthorized' });
+    if (method === 'getMe') return Response.json({ ok: true, result: { id, username: `fake${id}_bot` } });
+    if (method !== 'getUpdates') return Response.json({ ok: true, result: { message_id: 1 } });
+    if (kind === 'offline') throw new TypeError('fetch failed');
+    state.polls.push(text); live.set(id, (live.get(id) || 0) + 1); state.max = Math.max(state.max, live.get(id));
+    const wait = JSON.parse(options?.body || '{}').timeout === 0 ? 5 : kind === 'hang' ? 5000 : 40;
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, wait);
+        options?.signal?.addEventListener('abort', () => { clearTimeout(timer); state.aborted.push(text); reject(new DOMException('cancelled', 'AbortError')); });
+      });
+    } finally { live.set(id, live.get(id) - 1); }
+    return Response.json({ ok: true, result: [] });
+  };
+  return state;
+}
+async function readerDesk(name, how) {
+  const made = await desk(name), store = made.app.desk.store, fake = fakeBots(how), parts = [made.app.desk.telegram, made.app.desk.bugBot, made.app.desk.agentBots];
+  for (const part of parts) { part.fetcher = fake.fetch; part.waitMs = 40; }
+  const save = (id, connectorId, values) => { store.put('connector', id, { id, connectorId, at: new Date().toISOString() }); store.put('secret', `connector:${id}`, store.encrypt(JSON.stringify(values))); };
+  const agent = (id, value) => { store.put('agentbot', id, { id, botId: 777, botUsername: 'fake777_bot', ownerChatId: '', groups: [], pending: [], offset: 0 }); store.put('secret', `agentbot:${id}`, store.encrypt(JSON.stringify({ botToken: value }))); };
+  const readers = async (ms = 600) => { fake.polls.length = 0; await new Promise(resolve => setTimeout(resolve, ms)); return [...new Set(fake.polls)].sort(); };
+  const start = () => { for (const part of parts) part.start(); };
+  const close = async () => { await Promise.all(parts.map(part => part.stop())); await made.close(); };
+  return { ...made, store, fake, save, agent, readers, start, close };
+}
+const bugValues = value => ({ botToken: value, botUsername: 'fake777_bot', botId: 777 });
+
+test('a personal bot not paired yet, or a token Telegram turned down, never keeps a working use from reading the bot; a network error hands nothing over (L105 review)', async () => {
+  // Not paired: the personal bot never polls, so the bug report bot reads the bot.
+  let d = await readerDesk('unpaired', {});
+  try {
+    d.save('mine', 'telegram', { botToken: token(777, 'A') });
+    d.save('bugs', 'telegram-bugs', bugValues(token(777, 'C')));
+    d.start();
+    assert.deepEqual(await d.readers(), [token(777, 'C')], 'the bug report bot reads while the personal bot is not paired');
+    assert.equal(d.app.desk.bugBot.status().readBy, null);
+  } finally { await d.close(); }
+  // Revoked: the personal bot's token gets 401, so the bug report bot takes over; once that one is turned down too, QA's bot.
+  const how = { [token(777, 'A')]: 'revoked' };
+  d = await readerDesk('revoked', how);
+  try {
+    d.save('mine', 'telegram', { botToken: token(777, 'A'), chatId: '42' });
+    d.save('bugs', 'telegram-bugs', bugValues(token(777, 'C')));
+    d.agent('qa', token(777, 'B'));
+    d.start();
+    assert.deepEqual(await d.readers(), [token(777, 'C')], 'the bug report bot reads once the personal token is turned down');
+    assert.equal(d.app.desk.agentBots.status('qa').readBy.kind, 'bugs');
+    how[token(777, 'C')] = 'revoked';
+    assert.deepEqual(await d.readers(), [token(777, 'B')], "then QA's own bot");
+    // A new token for the personal bot is not the failed one: it reads again.
+    d.save('mine', 'telegram', { botToken: token(777, 'D'), chatId: '42' }); d.app.desk.telegram.kick();
+    assert.deepEqual(await d.readers(), [token(777, 'D')], 'a new personal token reads again');
+  } finally { await d.close(); }
+  // Offline: the personal bot cannot reach Telegram for a moment. That says nothing about its token: nobody else takes over.
+  d = await readerDesk('offline', { [token(777, 'A')]: 'offline' });
+  try {
+    d.save('mine', 'telegram', { botToken: token(777, 'A'), chatId: '42' });
+    d.save('bugs', 'telegram-bugs', bugValues(token(777, 'C')));
+    d.start();
+    assert.deepEqual(await d.readers(), [], 'no other use reads the bot on a network error');
+    assert.equal(d.app.desk.bugBot.status().readBy.kind, 'personal');
+  } finally { await d.close(); }
+});
+
+test('a reader that is disconnected ends its poll before the next one asks, for every use and for pairing (L105 review)', async () => {
+  const d = await readerDesk('handover', { [token(777, 'A')]: 'hang', [token(777, 'C')]: 'hang', [token(777, 'B')]: 'hang' });
+  const call = async (method, route) => (await fetch(`http://127.0.0.1:${d.app.server.address().port}${route}`, { method, headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: method === 'DELETE' ? undefined : '{}' })).status;
+  try {
+    d.save('mine', 'telegram', { botToken: token(777, 'A'), chatId: '42' });
+    d.save('bugs', 'telegram-bugs', bugValues(token(777, 'C')));
+    d.agent('qa', token(777, 'B'));
+    d.start();
+    assert.deepEqual(await d.readers(300), [token(777, 'A')]);
+    // The personal bot is removed in Settings while its long poll is out.
+    assert.equal(await call('DELETE', '/api/connectors/links/mine'), 200);
+    assert.deepEqual(await d.readers(300), [token(777, 'C')], 'the bug report bot reads next');
+    assert.ok(d.fake.aborted.includes(token(777, 'A')), "the personal bot's poll was cancelled");
+    assert.equal(d.fake.max, 1, 'never two polls of one bot at once');
+    assert.equal(await call('POST', '/api/bugbot/disconnect'), 200);
+    assert.deepEqual(await d.readers(300), [token(777, 'B')], "then QA's own bot");
+    assert.equal(d.fake.max, 1);
+    // Pairing a new personal bot of the same bot: refused while QA's bot reads it, and its reads never run beside a poll.
+    d.save('mine2', 'telegram', { botToken: token(777, 'E') });
+    await assert.rejects(d.app.desk.telegram.link(), /also saved as QA's own bot/);
+    d.app.desk.agentBots.disconnect('qa');
+    const first = await d.app.desk.telegram.link();
+    assert.equal(first.linked, false);
+    await d.app.desk.telegram.link();
+    assert.ok(d.fake.polls.includes(token(777, 'E')), 'the Link button read the bot');
+    assert.equal(d.fake.max, 1, 'pairing waited for the old poll to end');
+  } finally { await d.close(); }
+});
