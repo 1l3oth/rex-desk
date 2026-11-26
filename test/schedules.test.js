@@ -717,10 +717,13 @@ test('a Telegram turn that fails, then a resume from the app: the app reply stay
   await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
   assert.equal(t.runOf().state, 'failed', 'the Telegram turn failed');
   assert.ok(!t.store.get('tgturn', t.runOf().id) && !t.runOf().replyTo, 'its destination went with it');
+  // Telegram is told there is no answer, in fixed words, never the error.
+  const sorry = "Desky\nI couldn't answer just now. Please send your message again in a little while.";
+  assert.deepEqual(sent, [sorry]);
   await t.desk.resume(t.runOf().id, { prompt: 'try again' }); await t.settled(); await new Promise(done => setTimeout(done, 30));
-  assert.deepEqual(sent, [], 'the app resume answers in the app');
+  assert.deepEqual(sent, [sorry], 'the app resume answers in the app');
   await t.desk.telegram.routeToAgent(t.agent.id, 'and now?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
-  assert.deepEqual(sent, ['Desky\nTelegram answer.']);
+  assert.deepEqual(sent, [sorry, 'Desky\nTelegram answer.']);
 });
 
 test('a Telegram turn cut off by a usage limit (its result reported before the error): the retry on the next account still answers on Telegram, and a message queued meanwhile is kept and answered', async () => {
