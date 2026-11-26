@@ -138,6 +138,8 @@ export class AgentBots {
     const message = update.message; if (!message?.chat) return;
     const chat = message.chat, text = String(message.text || '').trim(), agentName = this.agent(agentId)?.name || 'this agent';
     if (chat.type === 'private') {
+      // Media and notices from anyone but the owner get no reply at all. Until an owner is linked, nobody is the owner.
+      if (!text && String(chat.id) !== String(record.ownerChatId)) return;
       if (!record.ownerChatId) {
         if (record.pairCode && Number(record.pairUntil) > Date.now() && codeIn(text) === record.pairCode) {
           const name = nameOf(message.from) || 'you';

@@ -77,3 +77,18 @@ test('a Claude sign-in error never reaches Telegram, also from a chat that is op
     assert.deepEqual(await ask('Not logged in · Please run /login'), [SORRY]);
   } finally { await close(); }
 });
+
+test('media from anyone but the owner is ignored; a stranger\'s text still gets the owner-only reply', async () => {
+  const { app, sent, setUp, close } = await desk('stranger');
+  try {
+    await setUp.agent(token(900001));
+    const from = (id, extra) => app.desk.agentBots.handle('qa', { update_id: 1, message: { chat: { id, type: 'private' }, from: { first_name: 'Someone' }, ...extra } });
+    const said = async run => { const at = sent.length; await run(); return sent.slice(at).map(item => item.text); };
+    const media = [{ photo: [] }, { voice: {} }, { document: {} }, { sticker: {} }, { video: {}, caption: 'look' }, { photo: [], media_group_id: 'g' }, { pinned_message: {} }];
+    for (const item of media) assert.deepEqual(await said(() => from(99, item)), [], `before the owner is linked: ${Object.keys(item)}`);
+    await from(7, { text: app.desk.store.get('agentbot', 'qa').pairCode });
+    for (const item of media) assert.deepEqual(await said(() => from(99, item)), [], `a stranger: ${Object.keys(item)}`);
+    assert.deepEqual(await said(() => from(99, { text: 'hi' })), ['This agent only talks to its owner.']);
+    assert.deepEqual(await said(() => from(7, { photo: [] })), ['Only text works here for now. Please send your message as text.']);
+  } finally { await close(); }
+});

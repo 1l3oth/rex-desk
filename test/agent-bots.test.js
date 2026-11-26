@@ -128,7 +128,7 @@ test('media gets a reply that only text works for now, once for an album, and no
   for (const kind of ['photo', 'video', 'video_note', 'voice', 'audio', 'document', 'animation', 'sticker', 'contact', 'location', 'poll', 'dice']) assert.deepEqual(await said(() => from({ [kind]: {} })), only(7), kind);
   assert.deepEqual(await said(async () => { for (let i = 0; i < 3; i++) await from({ photo: [], media_group_id: 'album-1' }); }), only(7), 'one reply for an album');
   assert.deepEqual(await said(() => from({ pinned_message: {} })), []);
-  assert.deepEqual((await said(() => from({ photo: [] }, { id: 99, type: 'private' }))).map(item => item[1]), ['This agent only talks to its owner.']);
+  assert.deepEqual(await said(() => from({ photo: [] }, { id: 99, type: 'private' })), [], 'a stranger gets no reply to media');
   const group = { id: -100123, type: 'supergroup', title: 'Team' };
   assert.deepEqual(await said(() => from({ photo: [], caption: '@ann_bot look' }, group)), [], 'a group that is not allowed hears nothing');
   agentBots.allowGroup('a1', '-100123');
