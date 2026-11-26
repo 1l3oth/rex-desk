@@ -5,6 +5,7 @@
 // address they were made for, as an Authorization header on the connections Rex Desk itself makes. No agent gets them, and
 // no CLI file is touched.
 import http from 'node:http';
+import https from 'node:https';
 import dns from 'node:dns/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { discoverOAuthServerInfo, extractWWWAuthenticateParams, registerClient, startAuthorization, exchangeAuthorization, refreshAuthorization, selectResourceURL } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -81,9 +82,10 @@ function pinnedTo(address, what, { fetcher, loopback, ms = ASK_MS, guard }) {
   return async (target, init = {}) => {
     const to = new URL(String(target)); to.hash = '';
     if (to.href !== home.href) throw new Plain(MOVED_SIGN_IN);
-    if (guard) await guard(to, what); // validate the address this actually connects to, right before the token leaves
+    // Resolve and check the address right before the token leaves, and pin the connection to that same resolved address.
+    const pin = guard ? await guard(to, what) : null;
     const limit = AbortSignal.timeout(ms), signal = init.signal ? AbortSignal.any([init.signal, limit]) : limit;
-    const response = await fetcher(to.href, { ...init, redirect: 'manual', signal });
+    const response = await fetcher(to.href, { ...init, pin, redirect: 'manual', signal });
     if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) { await response.body?.cancel?.().catch(() => {}); throw new Plain(MOVED_SIGN_IN); }
     return response;
   };
@@ -95,9 +97,9 @@ function checkedFetch(fetcher, check, ms = ASK_MS) {
   return async (target, init = {}) => {
     let to = String(target);
     for (let hop = 0; ; hop++) {
-      await check(to);
+      const pin = await check(to);
       const limit = AbortSignal.timeout(ms), signal = init.signal ? AbortSignal.any([init.signal, limit]) : limit;
-      const response = await fetcher(to, { ...init, redirect: 'manual', signal });
+      const response = await fetcher(to, { ...init, pin, redirect: 'manual', signal });
       const next = response.status >= 300 && response.status < 400 && response.headers?.get?.('location');
       if (!next) return response;
       await response.body?.cancel?.().catch(() => {});
@@ -106,10 +108,51 @@ function checkedFetch(fetcher, check, ms = ASK_MS) {
     }
   };
 }
+// A small fetch over node:http/https that connects to an already-resolved, already-checked address (init.pin) while keeping
+// the host name for TLS (SNI) and the Host header. The one resolution that passed the private-address check is the one the
+// socket uses, so a name that answers public on the check and private on the connect (DNS rebinding) cannot slip through.
+// Only the simple sign-in shapes are needed: GET/POST, a string body, headers, an abort signal, and no redirect following.
+export function nodeFetch(target, init = {}) {
+  return new Promise((resolve, reject) => {
+    let url; try { url = new URL(String(target)); } catch (error) { reject(error); return; }
+    const mod = url.protocol === 'https:' ? https : http;
+    const pin = init.pin;
+    const options = { method: (init.method || 'GET').toUpperCase(), headers: { ...(init.headers || {}) } };
+    if (pin?.address) {
+      const family = pin.family || (pin.address.includes(':') ? 6 : 4);
+      // Node asks for either one address (cb(err, address, family)) or, with autoselect, all of them (cb(err, [{...}])).
+      options.lookup = (_host, opts, cb) => opts?.all ? cb(null, [{ address: pin.address, family }]) : cb(null, pin.address, family);
+      if (url.protocol === 'https:') options.servername = url.hostname; // TLS still sees the real host name, not the pinned IP
+    }
+    const request = mod.request(url, options, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        const get = name => { const value = response.headers[String(name).toLowerCase()]; return Array.isArray(value) ? value.join(', ') : (value ?? null); };
+        const make = () => ({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, statusText: response.statusMessage || '', url: url.href, type: 'basic', redirected: false,
+          headers: { get, has: name => get(name) !== null, forEach: fn => { for (const [key, value] of Object.entries(response.headers)) fn(Array.isArray(value) ? value.join(', ') : value, key); } },
+          async json() { return JSON.parse(text); }, async text() { return text; }, body: { cancel: async () => {} }, clone: () => make() });
+        resolve(make());
+      });
+    });
+    request.on('error', reject);
+    if (init.signal) {
+      if (init.signal.aborted) request.destroy(new Error('aborted'));
+      else init.signal.addEventListener('abort', () => request.destroy(new Error('aborted')), { once: true });
+    }
+    if (init.body != null) request.write(typeof init.body === 'string' ? init.body : Buffer.from(init.body));
+    request.end();
+  });
+}
+// The transport for every sign-in request: once a destination is resolved and checked (pin set), reach exactly that address;
+// the person's own loopback server (no pin) uses the platform fetch unchanged.
+const pinnedTransport = (target, init = {}) => init.pin ? nodeFetch(target, init) : fetch(target, init);
+
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
-  constructor(store, { fetcher = fetch, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }) } = {}) {
+  constructor(store, { fetcher = pinnedTransport, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }) } = {}) {
     this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
   }
   record(url) { return url ? this.store.get(KIND, idOf(url)) || null : null; }
@@ -142,7 +185,7 @@ export class McpSignIn {
       const response = await this.fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }), signal: AbortSignal.timeout(15000), redirect: 'manual' });
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
-    const check = async address => { this.endpoint(address, 'sign-in information address'); await this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
+    const check = async address => { this.endpoint(address, 'sign-in information address'); return this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
     const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, check, this.ms) });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
@@ -212,19 +255,25 @@ export class McpSignIn {
   }
   // A discovered address: secure, and with no credential of its own, so nothing the server named carries one onward.
   endpoint(value, what) { const url = safeAddress(value, what, this.loopback); if (carriesCredential(url)) throw new Plain(`The ${what} this server named has a key or password in it, so Rex Desk does not sign in there.`); return url; }
-  // A host is private if it is one literally, or if the injected resolver maps it to one (so a public name pointed at a
-  // private IP is caught too). A name that cannot be resolved is left to the fetch, which then fails on its own.
-  async isPrivate(host) {
-    if (privateHost(host)) return true;
-    try { return (await this.resolver(host)).some(entry => privateHost(entry.address)); } catch { return false; }
+  // Resolve a host once and refuse it if it is private: a literal private address, or a name the injected resolver maps to
+  // one (so a public name pointed at a private IP is caught too). Returns the resolved address to pin the connection to, so
+  // the address checked is the address reached; null when the name cannot be resolved (left to the fetch, which then fails
+  // on its own) or when the host is a private one the caller is allowed to reach (home / loopback, handled by ensurePublic).
+  async publicAddress(host, what) {
+    if (privateHost(host)) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    let addresses; try { addresses = await this.resolver(host); } catch { return null; }
+    if (!addresses?.length) return null;
+    if (addresses.some(entry => privateHost(entry.address))) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    return { address: addresses[0].address, family: addresses[0].family };
   }
-  // Refuse any request that would reach a private or loopback address, resolved and checked right before it is made so the
-  // address checked is the address connected to. The server the person configured (home) and its own same-origin endpoints
-  // may be private, so a private server they set up still signs in; every other destination the server names must be public.
+  // Check a request that would reach an address the server named, and give back the resolved address to pin the connection
+  // to so the one resolution that passed the check is the one the socket uses. The server the person configured (home) and
+  // its own same-origin endpoints may be private, so a private server they set up still signs in (no pin, reached as named);
+  // every other destination must resolve to a public address.
   async ensurePublic(url, what, home) {
-    if (this.loopback) return;
-    if (home && url.origin === home) return;
-    if (await this.isPrivate(url.hostname)) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    if (this.loopback) return null;
+    if (home && url.origin === home) return null;
+    return this.publicAddress(url.hostname, what);
   }
   // An address the SERVER named (a discovery address, a redirect, its sign-in, token or registration address): checked like
   // the one the person added (secure, no key), and then resolved and refused if it points at a private destination off the
