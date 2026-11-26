@@ -117,3 +117,24 @@ test('a bot the personal bot or the bug bot already uses is refused, even with a
     assert.equal((await agentBots.connect('a1', T1)).connected, true);
   }
 });
+
+test('media gets a reply that only text works for now, once for an album, and no reply to strangers, unaddressed groups or Telegram notices', async () => {
+  const { agentBots, turns, sent } = setup();
+  const { pairCode } = await agentBots.connect('a1', T1);
+  await agentBots.handle('a1', private1(`/start ${pairCode}`));
+  const from = (extra, chat = { id: 7, type: 'private' }, who = { first_name: 'Rex' }) => agentBots.handle('a1', { update_id: 3, message: { chat, from: who, ...extra } });
+  const said = async run => { const at = sent.length; await run(); return sent.slice(at).map(item => [item.chat_id, item.text]); };
+  const only = id => [[id, 'Only text works here for now. Please send your message as text.']];
+  for (const kind of ['photo', 'video', 'video_note', 'voice', 'audio', 'document', 'animation', 'sticker', 'contact', 'location', 'poll', 'dice']) assert.deepEqual(await said(() => from({ [kind]: {} })), only(7), kind);
+  assert.deepEqual(await said(async () => { for (let i = 0; i < 3; i++) await from({ photo: [], media_group_id: 'album-1' }); }), only(7), 'one reply for an album');
+  assert.deepEqual(await said(() => from({ pinned_message: {} })), []);
+  assert.deepEqual((await said(() => from({ photo: [] }, { id: 99, type: 'private' }))).map(item => item[1]), ['This agent only talks to its owner.']);
+  const group = { id: -100123, type: 'supergroup', title: 'Team' };
+  assert.deepEqual(await said(() => from({ photo: [], caption: '@ann_bot look' }, group)), [], 'a group that is not allowed hears nothing');
+  agentBots.allowGroup('a1', '-100123');
+  assert.deepEqual(await said(() => from({ photo: [] }, group)), []);
+  assert.deepEqual(await said(() => from({ new_chat_members: [], reply_to_message: { from: { id: 111111 } } }, group)), []);
+  assert.deepEqual(await said(() => from({ photo: [], caption: '@ann_bot look' }, group)), only(-100123));
+  assert.deepEqual(await said(() => from({ voice: {}, reply_to_message: { from: { id: 111111 } } }, group)), only(-100123));
+  assert.equal(turns.length, 0, 'no media reached the agent');
+});

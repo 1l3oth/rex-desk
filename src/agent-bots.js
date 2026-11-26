@@ -6,6 +6,9 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { fromTelegram } from './telegram.js';
 
 const API = 'https://api.telegram.org';
+// What a person can send besides text. Telegram's own notices (someone joined, a message was pinned) are none of these.
+const MEDIA = ['photo', 'video', 'video_note', 'voice', 'audio', 'document', 'animation', 'sticker', 'contact', 'location', 'poll', 'dice'];
+export const TEXT_ONLY = 'Only text works here for now. Please send your message as text.';
 const TOKEN = /^\d{5,}:[A-Za-z0-9_-]{20,}$/;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
@@ -145,17 +148,29 @@ export class AgentBots {
         return say(chat.id, 'This bot is not set up yet. Send the code shown in Rex Desk, in the agent\'s Connectors tab.');
       }
       if (String(chat.id) !== String(record.ownerChatId)) return say(chat.id, 'This agent only talks to its owner.');
-      if (!text) return;
+      if (!text) return this.textOnly(agentId, message, say);
       if (text.startsWith('/')) return say(chat.id, `You are talking with ${agentName}. Write a message and it goes to them.`);
       return this.route(agentId, chat, text, record.ownerName || 'the person');
     }
     if (!['group', 'supergroup'].includes(chat.type)) return;
     if (!(record.groups || []).some(item => String(item.id) === String(chat.id))) { this.noteGroup(agentId, chat); return; }
     const me = `@${record.botUsername}`.toLowerCase();
-    const addressed = text.toLowerCase().includes(me) || String(message.reply_to_message?.from?.id) === String(record.botId);
-    if (!text || !addressed) return;
+    // A photo or file is for the bot when its caption mentions it or it replies to the bot.
+    const addressed = (text || String(message.caption || '')).toLowerCase().includes(me) || String(message.reply_to_message?.from?.id) === String(record.botId);
+    if (!addressed) return;
+    if (!text) return this.textOnly(agentId, message, say);
     const stripped = text.replace(new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), '').trim() || text;
     return this.route(agentId, chat, stripped, `${nameOf(message.from) || 'Someone'} in ${chat.title || 'a group'}`);
+  }
+  // Media is not passed to the agent yet, and the person is told so, once for an album (each of its pictures is a message).
+  textOnly(agentId, message, say) {
+    if (!MEDIA.some(kind => message[kind])) return;
+    if (message.media_group_id) {
+      const album = `${agentId}:${message.chat.id}:${message.media_group_id}`;
+      if (this.album === album) return;
+      this.album = album;
+    }
+    return say(message.chat.id, TEXT_ONLY);
   }
   noteGroup(agentId, chat) {
     const record = this.record(agentId); if (!record) return;
