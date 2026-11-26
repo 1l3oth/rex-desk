@@ -103,3 +103,17 @@ test('a failing Telegram call shows only a fixed message, never the token or Tel
   await assert.rejects(() => leaking.connect('a1', T1), error => /could not be reached/.test(error.message) && !error.message.includes('AAAA'));
   await assert.rejects(() => agentBots.connect('a1', '999999:CCCCCCCCCCCCCCCCCCCCCCCC'), error => /refused getMe/.test(error.message) && !/Unauthorized|CCCC/.test(error.message));
 });
+
+test('a bot the personal bot or the bug bot already uses is refused, even with another token of it', async () => {
+  for (const [connectorId, words] of [['telegram', /already your personal Telegram bot/], ['telegram-bugs', /already the bug report bot/]]) {
+    const { agentBots, store } = setup();
+    store.put('secret', 'connector:other', JSON.stringify({ botToken: '111111:ZZZZZZZZZZZZZZZZZZZZZZZZ' }));
+    store.put('connector', 'other', { id: 'other', connectorId, at: new Date().toISOString() });
+    await assert.rejects(() => agentBots.connect('a1', T1), error => words.test(error.message) && !/AAAA|ZZZZ/.test(error.message));
+    assert.equal(agentBots.status('a1').connected, false); assert.equal(store.get('secret', 'agentbot:a1'), null, 'nothing was saved');
+    assert.equal((await agentBots.connect('a2', T2)).connected, true, 'a bot of its own still connects');
+    // Removed there (its saved token gone), it is free for an agent.
+    store.delete('secret', 'connector:other');
+    assert.equal((await agentBots.connect('a1', T1)).connected, true);
+  }
+});

@@ -12,6 +12,8 @@ const newCode = () => Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABE
 const clip = (text, size = 3800) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };
 const codeIn = text => String(text || '').trim().replace(/^\/start(@\w+)?\s*/i, '').trim().toUpperCase();
 const PAIR_MS = 30 * 60 * 1000;
+// Rex Desk's two other bots, saved as connections. One bot has one reader, so none of them can also be an agent's.
+const OTHER_BOTS = { telegram: 'your personal Telegram bot', 'telegram-bugs': 'the bug report bot' };
 export const linkOf = agentId => `agentbot:${agentId}`;
 const nameOf = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || '';
 
@@ -44,6 +46,16 @@ export class AgentBots {
     const fresh = record.pairCode && Number(record.pairUntil) > Date.now();
     return { connected: true, botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
   }
+  // Which of the other two already uses this bot, or ''. The number before ':' in a token is the bot's id, so a bot is
+  // found even when one side holds an older token of it.
+  usedElsewhere(botId) {
+    for (const link of this.store.list('connector').filter(item => OTHER_BOTS[item.connectorId])) {
+      const secret = this.store.get('secret', `connector:${link.id}`); if (!secret) continue;
+      let saved = ''; try { saved = String(JSON.parse(this.store.decrypt(secret)).botToken || ''); } catch { continue; }
+      if (saved.split(':')[0] === String(botId)) return OTHER_BOTS[link.connectorId];
+    }
+    return '';
+  }
   async connect(agentId, botToken) {
     const agent = this.agent(agentId); if (!agent) throw new Error('That agent is gone.');
     const token = String(botToken || '').trim();
@@ -51,6 +63,8 @@ export class AgentBots {
     const me = await this.call(token, 'getMe', {}, 10000).catch(error => { throw new Error(`Telegram did not accept that token: ${error.message}`); });
     const taken = this.store.list('agentbot').find(item => String(item.botId) === String(me.id) && item.id !== agentId);
     if (taken) throw new Error(`That bot already belongs to ${this.agent(taken.id)?.name || 'another agent'}. Make a separate bot for each agent in @BotFather.`);
+    const other = this.usedElsewhere(me.id);
+    if (other) throw new Error(`That bot is already ${other}. Make a separate bot for this agent in @BotFather.`);
     this.store.put('secret', linkOf(agentId), this.store.encrypt(JSON.stringify({ botToken: token })));
     this.store.put('agentbot', agentId, { id: agentId, botId: me.id, botUsername: me.username || '', ownerChatId: '', ownerName: '', groups: [], pending: [], offset: 0, pairCode: newCode(), pairUntil: Date.now() + PAIR_MS, at: new Date().toISOString() });
     await this.call(token, 'deleteWebhook', {}, 10000).catch(() => {});
