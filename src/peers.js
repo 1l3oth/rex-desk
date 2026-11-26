@@ -17,10 +17,22 @@ import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
 const STALE_CHAT_MS = 24 * 3600000;
-// The hourly second look at the last day of chat messages (Peers.pullChats).
-const CHAT_DEEP_MS = 3600000, CHAT_DEEP_SPAN = 24 * 3600000;
-// How often the other computers' agent states are read while one of them is on (a 2 s old "Replying..." is near enough).
-const LOOK_MS = 2000;
+// The second look at the last day of chat messages, done by a safety look at most this often (Peers.pullChats).
+const CHAT_DEEP_MS = 6 * 3600000, CHAT_DEEP_SPAN = 24 * 3600000;
+// Sync by note, not by polling (L88). Each change saved here is uploaded, then a small sealed note goes to the account's other
+// computers through the relay line; they read the cloud only then, and only the rows after the ones they have. Small changes
+// ride inside the note, so nothing is read for them at all. The cloud database stays the backup:
+// SAFETY_MS: with the line up, one safety look at the cloud this often (and once each time the line comes back).
+// FALLBACK_MS: with the line down (or another computer still on a version without notes), the cloud is looked at this often.
+// BEAT_MS: the note that says this computer is on, with what its agents do; a change goes at once.
+// CLOUD_BEAT_MS: this computer's heartbeat row in the cloud, for computers without the line; a change is written at once too.
+// NOTE_BYTES: a note bigger than this leaves its records and messages out, and the other computers read them instead.
+const SAFETY_MS = 5 * 60000, FALLBACK_MS = 20000, BEAT_MS = 60000, CLOUD_BEAT_MS = 5 * 60000, NOTE_BYTES = 16000;
+// How often the other computers' agent states are read while one of them is on but sends no notes.
+const LOOK_MS = FALLBACK_MS;
+const older = (left, right) => !left ? right || '' : !right ? left : left < right ? left : right;
+// The cursor just below a version, so a look "after" it brings that version too.
+const justBelow = version => Math.max(0, (parseInt(String(version).split('.')[0], 36) || 0) - 1).toString(36).padStart(9, '0');
 // What an agent is doing, without what changes on its own (warm-cache times), so only a real change counts.
 const statusKey = agents => JSON.stringify(Object.entries(agents || {}).sort(([left], [right]) => left.localeCompare(right)).map(([id, item]) => [id, item?.state || '', item?.label || '', item?.runId || '', item?.taskId || '']));
 const STEP_MS = 30000, ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
@@ -336,7 +348,9 @@ export class Peers {
   // ---------- agents' chats, the same on every computer (docs/design/cross-device-chat.md) ----------
   // Messages the other computers wrote, brought in by their ids. A short overlap re-reads what clocks that differ may
   // have stamped a little in the past; reading a message twice changes nothing.
-  async pullChats() {
+  // A safety look (no arguments) starts two minutes back, and now and then a day back. from: a note said messages from this
+  // version on were uploaded; the look then starts there (or at the last one read, if that is older) and reads nothing twice.
+  async pullChats({ from = '', overlap = 120000 } = {}) {
     if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return 0;
     // Each database call is named while it runs (step), so the freeze log names the one that is really running.
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
@@ -346,10 +360,12 @@ export class Peers {
     // or it uploaded late) would otherwise stay missing on this computer for good. Reading a message twice changes nothing.
     // A second look longer than one pull's 40 pages keeps its place (chatDeepFrom) and goes on from there next pull, until it
     // reaches the newest row; only then is it done for the hour, so rows past the page limit are never skipped.
-    const going = !again && settings.chatDeepFrom ? String(settings.chatDeepFrom) : '';
-    const deep = !again && (Boolean(going) || Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS);
+    const safety = overlap > 0, going = safety && !again && settings.chatDeepFrom ? String(settings.chatDeepFrom) : '';
+    const deep = safety && !again && (Boolean(going) || Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS);
     if (going) since = going;
-    else if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : 120000)).toString(36).padStart(9, '0'); }
+    else if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : overlap)).toString(36).padStart(9, '0'); }
+    // Uploaded late, or by a computer whose clock is behind: the note names the oldest one, so it is read now, not lost.
+    if (from && since && !going && from <= since) since = justBelow(from);
     let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
@@ -383,11 +399,13 @@ export class Peers {
   }
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
-  async pullTurso() {
+  // Like pullChats: a safety look starts two minutes back; one after a note starts where the note says (or at the last one read).
+  async pullTurso({ from = '', overlap = 120000 } = {}) {
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = step('sync shared: read peer settings', () => this.settings()), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
-    let since = `${Math.max(0, at - 120000).toString(36).padStart(9, '0')}`, newest = at;
+    let since = `${Math.max(0, at - overlap).toString(36).padStart(9, '0')}`, newest = at;
+    if (from && !again && from <= since) since = justBelow(from);
     try {
       // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
       // everything at once) would otherwise re-read the same first page on every poll and never get past it.
@@ -410,19 +428,21 @@ export class Peers {
   }
   // write: this computer's heartbeat and agents go up too (every 30 s, and at once when an agent starts or stops working).
   // Without it only the other computers' rows are read, which is how a reply starting over there shows here within seconds.
-  async presence({ write = true } = {}) {
+  // read: false writes this computer's row only; the other computers' rows then come with their notes (L88).
+  async presence({ write = true, read = true } = {}) {
     if (!this.store.cloud?.ready) return;
     try {
       const agents = write ? this.mineStatus() : null;
-      const rows = write ? await this.store.cloud.presence(this.self.name, agents) : await this.store.cloud.readPresence?.();
-      if (!rows) return;
+      const rows = write ? await this.store.cloud.presence(this.self.name, agents, { read }) : await this.store.cloud.readPresence?.();
       if (write) this.sentStatus = statusKey(agents);
+      if (!rows || (write && !read)) return;
       const before = new Set([...(this.cloudSeen || new Map())].filter(([node]) => this.seen(node)).map(([node]) => node));
       const was = new Map([...(this.cloudSeen || new Map())].map(([node, row]) => [node, statusKey(row.agents)]));
       // A heartbeat that changed since the last look means that computer is on now, whatever its clock says.
       // One that said it is closing (at 0) is off now.
       for (const row of rows || []) { const before = this.cloudSeen?.get(row.node); if (!Number(row.at)) { this.heard?.delete(row.node); continue; } if (before ? before.at !== row.at : Math.abs(Date.now() - row.at) < CLOUD_MS) this.hear(row.node); }
-      this.cloudSeen = new Map((rows || []).map(row => [row.node, row]));
+      // What a note said a moment ago is newer than the cloud row it also wrote: the note's copy stays.
+      this.cloudSeen = new Map((rows || []).map(row => { const noted = this.cloudSeen?.get(row.node); return [row.node, noted?.noted && noted.at >= Number(row.at) ? noted : row]; }));
       if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node)) || rows.some(row => was.get(row.node) !== statusKey(row.agents))) this.store.emit?.('change', { kind: 'peers' });
     } catch { /* Turso shows its own state in Settings */ }
   }
@@ -672,6 +692,65 @@ export class Peers {
     return { queued: true, message: this.online(copy.node) ? `Sent to ${name} on ${this.deviceName(copy.node)}. The reply shows here in a few seconds.` : `${this.deviceName(copy.node)} is off. ${name} gets this when it is back on.` };
   }
 
+  // ---------- notes between this account's computers, through the relay line (L88) ----------
+  // The line is up and the cloud database is in use: changes are told by note, and the cloud is only looked at now and then.
+  linked() { return Boolean(this.store.cloud?.ready && this.desk.phoneRelay?.online); }
+  // A note is sealed with the account's own key, so the relay and anyone else on the way can only pass it on.
+  note(extra = {}) {
+    const cloud = this.store.cloud; if (!cloud?.ready || !this.desk.phoneRelay?.online) return false;
+    const body = { w: cloud.workspace, n: this.self.id, at: Date.now(), ...extra };
+    let text = JSON.stringify(body);
+    if (text.length > NOTE_BYTES) { delete body.rows; delete body.records; body.more = true; text = JSON.stringify(body); }
+    return this.desk.phoneRelay.sync(this.store.encrypt(text));
+  }
+  // An upload went through: the other computers hear what it carried. With the line down, the oldest versions are kept and told
+  // when it is back, so the other computers still read rows that were uploaded late.
+  uploaded({ shared = '', chat = '', rows = [], records = [] } = {}) {
+    if (!shared && !chat) return;
+    if (this.note({ shared, chat, rows, records })) return;
+    const kept = this.unsent || {};
+    this.unsent = { shared: older(kept.shared, shared), chat: older(kept.chat, chat) };
+  }
+  // The line came up (again): the other computers hear this one is on, with anything uploaded while it was down, and this one
+  // looks at the cloud once for what it missed meanwhile.
+  relayUp() {
+    const kept = this.unsent || {}; this.unsent = null;
+    this.note({ shared: kept.shared || '', chat: kept.chat || '', p: { name: this.self.name, agents: this.mineStatus() } });
+    this.catchUp = true; this.kick?.();
+  }
+  // Rex Desk is closing: the other computers show this one as off at once.
+  goodbye() { try { this.note({ bye: true }); } catch { /* closing anyway */ } }
+  // A note from another computer of this account.
+  onSync(text) {
+    let body; try { body = JSON.parse(this.store.decrypt(String(text))); } catch { return; }
+    if (!body || body.w !== this.store.cloud?.workspace || !body.n || body.n === this.self.id) return;
+    const node = String(body.n);
+    (this.noted ||= new Map()).set(node, Date.now());
+    if (body.bye) { this.heard?.delete(node); this.store.emit?.('change', { kind: 'peers' }); return; }
+    const was = this.seen(node); this.hear(node);
+    if (body.p) {
+      const before = this.cloudSeen?.get(node);
+      (this.cloudSeen ||= new Map()).set(node, { node, name: String(body.p.name || before?.name || ''), at: Date.now(), agents: body.p.agents || {}, noted: true });
+      if (!was || statusKey(before?.agents) !== statusKey(body.p.agents)) this.store.emit?.('change', { kind: 'peers' });
+    } else if (!was) this.store.emit?.('change', { kind: 'peers' });
+    // What rode inside the note is applied as it is: nothing is read from the cloud for it.
+    const due = this.due ||= {};
+    if (Array.isArray(body.records) && body.records.length) {
+      step('sync note: records', () => this.applyAll(body.records));
+      const seen = this.store.cloud?.pulled; if (seen) for (const item of body.records) seen.set(`${item.kind}\u001f${item.id}`, item.v);
+    }
+    if (Array.isArray(body.rows) && body.rows.length) step('sync note: chat messages', () => this.store.applyChatEvents(body.rows));
+    if (body.shared && (body.more || !Array.isArray(body.records))) due.shared = older(due.shared, String(body.shared));
+    if (body.chat && (body.more || !Array.isArray(body.rows))) due.chat = older(due.chat, String(body.chat));
+    if ('shared' in due || 'chat' in due) this.kick?.();
+  }
+  // Another computer that is on but sends no notes (its line is down, or it runs a version without them): it is still looked
+  // for in the cloud every FALLBACK_MS.
+  quietPeer() {
+    const noted = this.noted || new Map();
+    return [...(this.cloudSeen?.keys() || [])].some(node => this.seen(node) && Date.now() - (noted.get(node) || 0) > 3 * BEAT_MS);
+  }
+
   // ---------- the loop ----------
   start() {
     this.pendingCommands(); this.watchChats(); this.refreshSecure();
@@ -684,33 +763,42 @@ export class Peers {
         await bounded(() => this.pullFrom(peer));
         this.timers.set(peer.id, Date.now() + (this.direct(peer.id) ? 2500 : 10000));
       }
-      // Read the shared cloud fast while something is in flight (an agent replying here, or a message waiting to cross
-      // between computers), slowly when nothing is happening. A cross-device chat then feels near-instant without the
-      // cost of a fast poll when idle. store.list is cached, so this check is cheap on every tick.
-      if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); }
-      // Chat messages: about every second while an agent works or a message is on its way, every 5 seconds otherwise.
-      if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); doing(''); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
+      // The cloud is read when a note says something new is there (only from there on), and otherwise only for a safety look:
+      // every SAFETY_MS with the relay line up, every FALLBACK_MS without it (L88). Nothing polls it every second any more.
+      this.desk.phoneRelay?.ensure?.();
+      const linked = this.linked(), safety = linked && !this.quietPeer() ? SAFETY_MS : FALLBACK_MS, due = this.due ||= {}, catchUp = this.catchUp; this.catchUp = false;
+      for (const [part, pull] of [['shared', options => this.pullTurso(options)], ['chat', options => this.pullChats(options)]]) {
+        const timer = part === 'shared' ? 'turso' : 'chat';
+        if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { delete due[part]; this.timers.set(timer, Date.now() + safety); await bounded(() => pull()); doing(''); }
+        else if (part in due) { const from = due[part]; delete due[part]; await bounded(() => pull({ from, overlap: 0 })); doing(''); }
+        else if ((this.timers.get(timer) || 0) > Date.now() + safety) this.timers.set(timer, Date.now() + safety);
+      }
       if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { step('sync: settling split chats', () => this.desk.chatSplits?.settleAll()); step('sync: detecting split chats', () => this.desk.chatSplits?.detect()); step('sync: pushing chat messages', () => this.pushChats()); } catch { /* tried again in a minute */ } finally { doing(''); } }
       // Rex Desk tasks from another computer: a number both computers gave out is settled (LocalTasks.settle).
       if (this.tasksArrived || (this.timers.get('tasks') || 0) <= Date.now()) { this.tasksArrived = false; this.timers.set('tasks', Date.now() + 60000); await bounded(() => this.desk.localTasks?.settle()); }
       if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
-      // An agent here started or stopped working: the other computers hear it now, not at the next 30 s heartbeat.
+      // An agent here started or stopped working: the other computers hear it now, by note, and the cloud row is written too.
       const cloud = this.store.cloud?.ready, changed = cloud && this.sentStatus !== undefined && statusKey(this.mineStatus()) !== this.sentStatus;
-      if (changed || (this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence()); }
-      // While another computer is on, its agents' state is read every 2 s (one small row per computer).
-      else if (cloud && (this.timers.get('look') || 0) <= Date.now() && [...(this.cloudSeen?.keys() || [])].some(node => this.seen(node))) { this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence({ write: false })); }
+      if (linked && (changed || (this.timers.get('beat') || 0) <= Date.now())) { this.timers.set('beat', Date.now() + BEAT_MS); const agents = this.mineStatus(); if (this.note({ p: { name: this.self.name, agents } })) this.sentStatus = statusKey(agents); }
+      // The cloud row: every CLOUD_BEAT_MS with the line up (written only, unless a computer without notes is on or it is the
+      // safety look), every 30 s without it.
+      if (changed || catchUp || (this.timers.get('presence') || 0) <= Date.now()) {
+        const read = !linked || catchUp || this.quietPeer() || (this.timers.get('presence') || 0) <= Date.now();
+        this.timers.set('presence', Date.now() + (linked ? CLOUD_BEAT_MS : 30000)); this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence({ read }));
+      }
+      // While another computer is on that sends no notes, its agents' state is read every LOOK_MS (one small row per computer).
+      else if (cloud && (this.timers.get('look') || 0) <= Date.now() && (linked ? this.quietPeer() : [...(this.cloudSeen?.keys() || [])].some(node => this.seen(node)))) { this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence({ write: false })); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };
-    this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
+    // A note runs the next tick at once, so a change from another computer shows here within a moment, not at the next second.
+    const run = () => { if (this.ticking) { this.again = true; return; } this.ticking = true; void tick().finally(() => { this.ticking = false; if (this.again) { this.again = false; run(); } }); };
+    this.kick = () => { if (!this.stopped) run(); };
+    // Uploads done here are told to the other computers.
+    if (this.store.cloud) this.store.cloud.onUploaded = info => this.uploaded(info);
+    this.loop = setInterval(run, 1000);
     this.loop.unref?.();
   }
-  stop() { clearInterval(this.loop); this.stopped = true; }
-  // Something is worth polling fast for: an agent on this computer is mid-reply, or a command (a chat message, a task) is
-  // still waiting to be picked up or answered on either computer.
-  inFlight() {
-    const working = new Set(['starting', 'running', 'queued', 'waiting', 'verifying', 'replying']);
-    return this.store.list('run').some(run => working.has(run.state)) || this.store.list('peercmd').some(command => !command.done);
-  }
+  stop() { clearInterval(this.loop); this.stopped = true; if (this.store.cloud?.onUploaded) this.store.cloud.onUploaded = null; }
   selfUrl() { return this.port ? this.addresses(this.port).find(address => address.startsWith('http://')) || '' : ''; }
   async http(peer, method, route, data) {
     const response = await fetch(`${peer.url}${route}`, { method, signal: AbortSignal.timeout(6000),

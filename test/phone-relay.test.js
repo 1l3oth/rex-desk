@@ -14,7 +14,7 @@ function fakeDesk(port) {
 // A stand-in for the relay's WebSocket: frames the desk sends are kept, and the test plays the relay's frames into it.
 function fakeSocket() {
   const listeners = {}, sent = [];
-  const socket = { readyState: 1, sent, addEventListener: (name, fn) => { listeners[name] = fn; }, send: frame => sent.push(readRelayFrame(frame)), close() {}, emit: (name, event) => listeners[name]?.(event) };
+  const socket = { readyState: 1, sent, addEventListener: (name, fn) => { listeners[name] = fn; }, send: frame => sent.push(typeof frame === 'string' ? { text: frame } : readRelayFrame(frame)), close() {}, emit: (name, event) => listeners[name]?.(event) };
   socket.play = (op, streamId, payload) => socket.emit('message', { data: relayFrame(op, streamId, payload) });
   return socket;
 }
@@ -40,7 +40,7 @@ test('the relay connection says hello with the account and plays phone requests 
     assert.equal(dial.searchParams.get('device'), 'node-1'); assert.equal(dial.searchParams.get('name'), 'Laptop');
     const hello = socket.sent[0];
     assert.equal(hello.op, RELAY_OP.HELLO);
-    assert.deepEqual(JSON.parse(hello.payload), { token: 'account-token', desk: 'node-1', name: 'Laptop' });
+    assert.deepEqual(JSON.parse(hello.payload), { token: 'account-token', desk: 'node-1', name: 'Laptop', phones: true });
     socket.play(RELAY_OP.WELCOME, 0, Buffer.from(JSON.stringify({ url: 'https://web.rexdesk.app/d/node-1' })));
     assert.equal(relay.view().state, 'online');
 
@@ -306,4 +306,38 @@ test('being welcomed for a moment does not give back the replaced retries; a sta
     assert.equal(relay.replacedTries, 0, 'a minute up gives the retries back');
     relay.stop();
   } finally { mock.timers.reset(); }
+});
+
+test('a text ping the relay answers by itself replaces the old ping, so an idle line costs the relay nothing (L88)', () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), socket = fakeSocket();
+    const relay = new PhoneRelay(desk, { socket: () => socket });
+    relay.setEnabled(true); socket.emit('open');
+    mock.timers.tick(20000);
+    assert.ok(socket.sent.some(frame => frame.text === 'ping') && socket.sent.some(frame => frame.op === RELAY_OP.PING), 'both go until the relay answers a text ping');
+    socket.emit('message', { data: 'pong' }); socket.sent.length = 0; beats(40000);
+    assert.ok(socket.sent.some(frame => frame.text === 'ping'));
+    assert.ok(!socket.sent.some(frame => frame.op === RELAY_OP.PING), 'then only the text ping');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});
+
+test('with cloud backup on, the line stays up for sync notes even with the phone switch off; phones are not let in then (L88)', () => {
+  const { desk } = fakeDesk(1), socket = fakeSocket(), notes = [];
+  desk.store.cloud = { ready: true }; desk.peers.onSync = text => notes.push(text);
+  const relay = new PhoneRelay(desk, { socket: () => socket });
+  assert.equal(relay.sync('x'), false, 'no line yet: the caller keeps the note');
+  relay.ensure(); socket.emit('open');
+  assert.deepEqual(JSON.parse(socket.sent[0].payload), { token: 'account-token', desk: 'node-1', name: 'Laptop', phones: false });
+  assert.equal(relay.phonesOn(), false);
+  socket.play(RELAY_OP.WELCOME, 0, Buffer.from('{}'));
+  assert.equal(relay.sync('sealed note'), true);
+  const sent = socket.sent.at(-1); assert.equal(sent.op, RELAY_OP.SYNC); assert.equal(String(sent.payload), 'sealed note');
+  socket.play(RELAY_OP.SYNC, 0, Buffer.from('from the other computer'));
+  assert.deepEqual(notes, ['from the other computer']);
+  relay.stop();
+  // A free account has no cloud backup: nothing dials for sync.
+  const free = fakeDesk(1), dials = []; const idle = new PhoneRelay(free.desk, { socket: () => (dials.push(1), fakeSocket()) });
+  idle.ensure(); assert.equal(dials.length, 0);
 });

@@ -1,5 +1,5 @@
 // Binary framing shared by the phone relay and the desk connection.
-export const RELAY_OP = Object.freeze({ HELLO: 1, WELCOME: 2, PING: 3, PONG: 4, REQ: 16, REQ_BODY: 17, RES: 18, RES_BODY: 19, WS_OPEN: 32, WS_OPEN_ACK: 33, WS_TEXT: 34, WS_BIN: 35, WS_CLOSE: 36, ABORT: 48 });
+export const RELAY_OP = Object.freeze({ HELLO: 1, WELCOME: 2, PING: 3, PONG: 4, REQ: 16, REQ_BODY: 17, RES: 18, RES_BODY: 19, WS_OPEN: 32, WS_OPEN_ACK: 33, WS_TEXT: 34, WS_BIN: 35, WS_CLOSE: 36, ABORT: 48, SYNC: 64 });
 
 export function relayFrame(op, streamId, payload = Buffer.alloc(0)) {
   if (!Number.isInteger(op) || op < 0 || op > 255 || !Number.isInteger(streamId) || streamId < 0 || streamId > 0xffffffff) throw new RangeError('Invalid relay frame header');

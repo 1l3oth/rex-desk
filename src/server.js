@@ -344,7 +344,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const { desk, store, id } = session; session = null;
     if (forget) { accounts?.forget(id); store.cloud.account?.clearAvatar(); }
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
-    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.peers?.goodbye?.(); desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -610,6 +610,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (!found || desk.storage.gone(key)) return json(response, 404, { error: 'That file is not on this computer.' });
           return serveFile(request, response, found.file, { cache: 'private, max-age=3600', max: desk.peerFiles.max, verify: fd => openedInside(desk.store, key, fd) });
         }
+        // The line also stays up to sync this account's other computers (L88): with the phone switch off, phones are refused.
+        if (relayed && !desk.phoneRelay.phonesOn()) return json(response, 503, { error: 'The phone link is off on this computer. Turn it on in Settings, Devices.' });
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);
           if (entry.missing) return json(response, 400, { error: 'The relay did not say which phone or account this is.' });

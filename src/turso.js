@@ -19,6 +19,25 @@ const DEV_CLOUD_OFF = 'This is a development copy of Rex Desk, so cloud backup i
 const cloudAllowed = () => !development() || process.env.REX_DEV_CLOUD === '1';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
+// What one upload carried, for the sync note to the other computers (L88): the oldest version of the shared records in it, and
+// the records and chat rows themselves (small ones ride inside the note, so the other computer does not read them from the cloud).
+export function uploadedOf(pending) {
+  let shared = '', chat = '';
+  const rows = [], records = [];
+  for (const item of pending) {
+    const args = JSON.parse(item.args);
+    if (/^INSERT INTO rex_shared\(/.test(item.sql)) {
+      const [kind, id, value, deleted, v] = args; if (v && (!shared || String(v) < shared)) shared = String(v);
+      let parsed = null; try { parsed = deleted ? null : JSON.parse(value); } catch { continue; }
+      records.push({ kind, id, value: parsed, deleted: Boolean(Number(deleted)), v: String(v) });
+    }
+    else if (/^INSERT INTO rex_chat\(workspace,uid,run_id,kind,/.test(item.sql)) { const [, uid, run_id, kind, visible, value, created_at, v] = args; rows.push({ uid, run_id, kind, visible, value, created_at, v, deleted: 0 }); }
+    else if (/^INSERT INTO rex_chat\(workspace,uid,run_id,v,/.test(item.sql)) { const [, uid, run_id, v] = args; rows.push({ uid, run_id, kind: null, visible: null, value: null, created_at: null, v, deleted: 1 }); }
+  }
+  for (const row of rows) if (row.v && (!chat || row.v < chat)) chat = row.v;
+  return { shared, chat, rows, records };
+}
+
 export class TursoSync {
   constructor(store, { clientFactory = createClient, retryMs = 30000, accountFetcher, accountApi } = {}) {
     this.store = store; this.clientFactory = clientFactory; this.retryMs = retryMs; this.state = 'local'; this.error = ''; this.ready = false;
@@ -58,12 +77,14 @@ export class TursoSync {
   }
   // Each computer says it is on, every half minute, with how its agents are doing. A computer that cannot reach another one
   // directly (no Tailscale) still knows it is on, and messages for its agents go through this database.
-  async presence(name, agents) {
+  // read: false writes this computer's row only (L88): with the relay line up, the other computers' rows come with their sync notes.
+  async presence(name, agents, { read = true } = {}) {
     if (!this.ready || this.closed) return null;
     // Two computers already sharing one id: the one whose hostname sorts later takes a new id, so exactly one of them moves.
     const own = (await this.client.execute({ sql: 'SELECT host,at FROM rex_presence WHERE node=?', args: [this.store.nodeId] })).rows[0];
     if (own?.host && own.host !== os.hostname() && Date.now() - Number(own.at) < 7 * 86400000 && os.hostname() > own.host) this.store.reidentify();
     await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents,host=excluded.host,workspace=excluded.workspace', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents), os.hostname(), this.workspace] });
+    if (!read) return [];
     const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ? AND workspace = ?', args: [this.store.nodeId, this.workspace] });
     return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
   }
@@ -431,6 +452,8 @@ export class TursoSync {
           // A cloud call that never answers would hold every later upload until a restart: it gives up after a minute and is tried again.
           await Promise.race([this.client.batch(pending.map(row => ({ sql: row.sql, args: JSON.parse(row.args) })), 'write'), new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('The cloud did not answer in time; the changes are kept and sent again.')), 60000); timer.unref?.(); })]);
           this.store.transaction(() => { const remove = this.store.db.prepare('DELETE FROM cloud_outbox WHERE sequence=?'); for (const row of pending) remove.run(row.sequence); });
+          // The other computers hear about it now (L88), so they read only these new rows, and only now.
+          try { this.onUploaded?.(uploadedOf(pending)); } catch { /* a missed note is caught by the next safety check */ }
         }
         this.state = 'connected'; this.error = ''; this.lastSyncedAt = new Date().toISOString();
       } catch (error) { this.fail(error); }

@@ -154,6 +154,9 @@ test('a phone through the relay waits for its 6-digit code to be approved on the
   });
   try {
     await owner('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
+    // The line also stays up to sync the account's other computers (L88): with the phone switch off, no phone comes in.
+    assert.equal((await ask('/api/state')).status, 503, 'the phone link is off');
+    app.desk.phoneRelay.save({ enabled: true });
     const waiting = await ask('/');
     const code = /(\d{3}) (\d{3})/.exec(waiting.text)?.slice(1).join('');
     assert.match(code, /^\d{6}$/, 'the phone shows a 6-digit code');

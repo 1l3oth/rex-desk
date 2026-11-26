@@ -309,28 +309,94 @@ test('a page an agent on another computer shared is unpacked here when opened', 
   assert.match(readFileSync(path.join(b.desk.store.media('artifacts'), runId, 'explain.html'), 'utf8'), /How it works/);
 });
 
-test('without Tailscale, an agent replying on one computer shows as replying on the other within seconds, and asleep again soon after', async () => {
+// Two computers of one account linked by the relay line (L88): a note one sends reaches the other a moment later. Both hold the
+// account's key and workspace, as two computers signed in to one account do.
+function linkByRelay(a, b) {
+  b.desk.store.key = a.desk.store.key;
+  const lines = { a: { up: true }, b: { up: true } }, notes = [];
+  for (const [name, from, to] of [['a', a, b], ['b', b, a]]) from.desk.phoneRelay = { get online() { return lines[name].up; }, ensure() {}, sync: text => { if (!lines[name].up) return false; notes.push({ from: name, text }); setTimeout(() => to.desk.peers.onSync(text), 5); return true; } };
+  return { lines, notes };
+}
+const sharedCloud = (desks, workspace = 'workspace-1') => {
+  const table = new Map(), reads = { a: 0, b: 0 }, writes = { a: 0, b: 0 };
+  const cloud = (desk, name) => ({ ready: true, workspace, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {},
+    pullShared: async () => { reads[name]++; return []; }, pullChat: async () => { reads[name]++; return []; },
+    presence: async (title, agents, { read = true } = {}) => { writes[name]++; table.set(desk.store.nodeId, { node: desk.store.nodeId, name: title, at: Date.now(), agents }); if (!read) return []; reads[name]++; return [...table.values()].filter(row => row.node !== desk.store.nodeId); },
+    readPresence: async () => { reads[name]++; return [...table.values()].filter(row => row.node !== desk.store.nodeId); } });
+  for (const [name, desk] of Object.entries(desks)) desk.store.cloud = cloud(desk, name);
+  return { reads, writes };
+};
+const within = async (ms, check) => { const start = Date.now(); while (Date.now() - start < ms) { if (check()) return Date.now() - start; await new Promise(resolve => setTimeout(resolve, 20)); } throw new Error(`not within ${ms} ms`); };
+
+test('without Tailscale, an agent replying on one computer shows as replying on the other within a second, by note, and reads nothing for it (L88)', async () => {
   const { a, b } = computers();
   const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
   b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
-  // One shared presence table, as the cloud database holds it; every other sync step has nothing to say.
-  const table = new Map(), writes = { a: 0, b: 0 };
-  const cloud = (desk, name) => ({ ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, pullShared: async () => [], pullChat: async () => [],
-    presence: async (title, agents) => { writes[name]++; table.set(desk.store.nodeId, { node: desk.store.nodeId, name: title, at: Date.now(), agents }); return [...table.values()].filter(row => row.node !== desk.store.nodeId); },
-    readPresence: async () => [...table.values()].filter(row => row.node !== desk.store.nodeId) });
-  a.desk.store.cloud = cloud(a.desk, 'a'); b.desk.store.cloud = cloud(b.desk, 'b');
+  const { reads, writes } = sharedCloud({ a: a.desk, b: b.desk }); linkByRelay(a, b);
   a.desk.peers.start(); b.desk.peers.start();
   const copy = () => b.desk.store.get('specialist', dara.id), state = () => b.desk.specialists.status(copy()).state;
-  const within = async (ms, check) => { const start = Date.now(); while (Date.now() - start < ms) { if (check()) return Date.now() - start; await new Promise(resolve => setTimeout(resolve, 100)); } throw new Error(`not within ${ms} ms`); };
   try {
     await within(4000, () => state() === 'idle');
-    const before = writes.a;
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const before = { ...reads }, wrote = writes.a;
     a.desk.store.put('run', 'run-1', { id: 'run-1', specialistId: dara.id, role: 'specialist', state: 'running', createdAt: new Date().toISOString() });
-    await within(3500, () => state() === 'replying');
-    assert.ok(writes.a > before, 'the start went up at once');
+    assert.ok(await within(1500, () => state() === 'replying') < 1500, 'shown within a second or so');
+    assert.ok(writes.a > wrote, 'the cloud row is still written, for computers without the line');
     a.desk.store.put('run', 'run-1', { ...a.desk.store.get('run', 'run-1'), state: 'done' });
-    await within(3500, () => state() === 'idle');
+    await within(1500, () => state() === 'idle');
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    assert.deepEqual(reads, before, 'nothing was read from the cloud for it, and nothing is polled while idle');
   } finally { a.desk.peers.stop(); b.desk.peers.stop(); }
+});
+
+test('a room message and a chat message ride inside the note: the other computer shows them without reading the cloud (L88)', async () => {
+  const { a, b } = computers();
+  const { reads } = sharedCloud({ a: a.desk, b: b.desk }); const { notes } = linkByRelay(a, b);
+  const room = a.desk.rooms.create('Plans'); b.desk.peers.applyAll([{ kind: 'room', id: room.id, value: a.desk.store.get('room', room.id) }]);
+  a.desk.rooms.system(room.id, 'Ship it today'); const message = a.desk.store.list('roommsg').find(item => item.text === 'Ship it today');
+  const saved = a.desk.store.get('roommsg', message.id);
+  const record = { kind: 'roommsg', id: message.id, value: saved, deleted: false, v: saved._v };
+  const row = { uid: `${a.desk.store.nodeId}.1.x`, run_id: 'run-9', kind: 'agent-text', visible: 1, value: JSON.stringify({ text: 'Done' }), created_at: new Date().toISOString(), v: saved._v, deleted: 0 };
+  let applied = []; b.desk.store.applyChatEvents = rows => { applied = rows; return rows.length; };
+  a.desk.peers.uploaded({ shared: record.v, chat: row.v, records: [record], rows: [row] });
+  await within(500, () => b.desk.store.get('roommsg', message.id));
+  assert.equal(b.desk.store.get('roommsg', message.id).text, 'Ship it today');
+  assert.deepEqual(applied.map(item => item.uid), [row.uid], 'the chat message is applied from the note');
+  assert.deepEqual(b.desk.peers.due || {}, {}, 'and nothing is left to read');
+  assert.deepEqual(reads, { a: 0, b: 0 });
+  assert.doesNotMatch(notes[0].text, /Ship it today/, 'the relay only sees the sealed note');
+});
+
+test('a note too big to carry its rows, or one the line could not send, makes the other computer read from the oldest one only (L88)', async () => {
+  const { a, b } = computers();
+  sharedCloud({ a: a.desk, b: b.desk }); const { lines } = linkByRelay(a, b);
+  const asked = [];
+  b.desk.peers.pullTurso = async options => { asked.push(['shared', options]); }; b.desk.peers.pullChats = async options => { asked.push(['chat', options]); return 0; };
+  b.desk.peers.start();
+  try {
+    await within(5000, () => asked.length >= 2); asked.length = 0;
+    const big = Array.from({ length: 40 }, (_, i) => ({ uid: `u${i}`, run_id: 'r', kind: 'agent-text', visible: 1, value: 'x'.repeat(1000), created_at: '', v: `00000000${i}.0000.n`, deleted: 0 }));
+    a.desk.peers.uploaded({ chat: '000000005.0000.n', rows: big });
+    await within(1000, () => asked.some(([part]) => part === 'chat'));
+    assert.deepEqual(asked.find(([part]) => part === 'chat')[1], { from: '000000005.0000.n', overlap: 0 }, 'read from the oldest version in it, with no look back');
+    // Uploaded while the line was down: told, with the oldest version, once it is back.
+    lines.a.up = false; asked.length = 0;
+    a.desk.peers.uploaded({ shared: '00000000b.0000.n' }); a.desk.peers.uploaded({ shared: '00000000a.0000.n' });
+    lines.a.up = true; a.desk.peers.relayUp();
+    await within(1000, () => asked.some(([part]) => part === 'shared'));
+    assert.deepEqual(asked.find(([part]) => part === 'shared')[1], { from: '00000000a.0000.n', overlap: 0 });
+  } finally { b.desk.peers.stop(); }
+});
+
+test('a note from another account, or one that cannot be opened, is ignored; a closing computer shows off at once (L88)', async () => {
+  const { a, b } = computers();
+  sharedCloud({ a: a.desk, b: b.desk }); linkByRelay(a, b);
+  b.desk.peers.onSync('not a sealed note');
+  b.desk.peers.onSync(a.desk.store.encrypt(JSON.stringify({ w: 'another-workspace', n: a.desk.store.nodeId, p: { name: 'X', agents: {} } })));
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), false);
+  b.desk.peers.onSync(a.desk.store.encrypt(JSON.stringify({ w: 'workspace-1', n: a.desk.store.nodeId, p: { name: 'Home laptop', agents: {} } })));
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), true, 'a note says it is on');
+  a.desk.peers.goodbye(); await within(500, () => !b.desk.peers.online(a.desk.store.nodeId));
 });
 
 test('a computer that went off does not stay "on" because the chat overlap reads its last message again (L26)', async () => {

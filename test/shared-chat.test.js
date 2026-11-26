@@ -175,14 +175,14 @@ test('a reply written after the other computer read past it still arrives: a clo
   try { a.store.event(runId, 'agent-text', { text: 'Fixed after the clock went back.' }, true); } finally { Date.now = realNow; }
   await b.desk.peers.pullChats();
   assert.equal(texts(b.store, runId).at(-1), 'Fixed after the clock went back.', 'a stamp never goes below one already read');
-  // A message another computer stamped long before it reached the cloud: the hourly second look brings it in.
+  // A message another computer stamped long before it reached the cloud: the safety look at the last day (every 6 h) brings it in.
   const late = { uid: `${a.store.nodeId}.999.late`, run_id: runId, kind: 'agent-text', visible: 1, value: JSON.stringify({ text: 'Uploaded late.' }), created_at: new Date().toISOString(), v: `${(Date.now() - 3600000).toString(36).padStart(9, '0')}.0000.${a.store.nodeId}`, node: a.store.nodeId, deleted: 0 };
   hub.chat.set(late.uid, late);
   await b.desk.peers.pullChats();
   assert.ok(!texts(b.store, runId).includes('Uploaded late.'), 'the usual two-minute look back does not reach it');
-  b.desk.peers.save({ chatDeepAt: Date.now() - 2 * 3600000 });
+  b.desk.peers.save({ chatDeepAt: Date.now() - 7 * 3600000 });
   await b.desk.peers.pullChats();
-  assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1, 'the hourly look at the last day brings it, once');
+  assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1, 'the look at the last day brings it, once');
   await b.desk.peers.pullChats();
   assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1);
 });

@@ -78,6 +78,9 @@ export class PhoneRelay {
     if (this.approved(phone.id, account)) return { ok: true };
     return { ok: false, phone: { ...phone, account } };
   }
+  // Phones come in only while the phone link is on. The line itself also stays up for syncing this desk's other computers
+  // (L88), so with the switch off a phone request is refused here instead of the line being closed.
+  phonesOn() { return Boolean(this.settings().enabled); }
   setAskCode(on) { this.save({ askCode: Boolean(on) }); return this.view(); }
   // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code. A wait belongs to
   // the phone id and the relay's account together: the same id under another account gets its own code, never this one.
@@ -110,9 +113,25 @@ export class PhoneRelay {
   view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), askCode: Boolean(settings.askCode), state: this.state, problem: this.state === 'online' ? null : this.problem, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
 
   // ---------- the connection to the relay ----------
-  setEnabled(on) { this.save({ enabled: Boolean(on) }); if (on) this.start(); else this.stop(); return this.view(); }
+  // The phone switch changes what HELLO says (phones or not), so an open line is dialled again; with sync still wanted it stays up.
+  setEnabled(on) { this.save({ enabled: Boolean(on) }); this.stop(); if (this.wanted()) this.start(); return this.view(); }
+  // The line is wanted for phones (the switch) and, for a paid account with cloud backup, to tell the other computers of the
+  // account the moment something changed here (L88), so they read the cloud database only then instead of polling it.
+  syncWanted() { return Boolean(this.desk.store?.cloud?.ready); }
+  wanted() { return this.phonesOn() || this.syncWanted(); }
+  // Called on every sync tick: dials when the line is wanted and nothing is dialling yet. A "not paid" close stays closed until
+  // the switch or a new sign-in, and with no sign-in it waits for one.
+  ensure() {
+    if (this.socket || this.timer || this.desk.closed || !this.wanted() || ['not-paid', 'replaced'].includes(this.state)) return;
+    if (this.state === 'signed-out' && !this.desk.net?.token?.()) return;
+    this.start();
+  }
+  get online() { return this.state === 'online' && this.socket?.readyState === 1; }
+  // A small sync note for this account's other computers (L88). It is sealed with the account's own key before it gets here,
+  // so the relay only passes it on. false when the line is not up: the caller keeps it for later.
+  sync(payload) { if (!this.online) return false; this.send(RELAY_OP.SYNC, 0, Buffer.from(String(payload))); return true; }
   start() {
-    if (this.socket || !this.settings().enabled || this.desk.closed) return;
+    if (this.socket || !this.wanted() || this.desk.closed) return;
     const token = this.desk.net?.token?.(); if (!token) { this.state = 'signed-out'; return; }
     this.state = 'connecting';
     // The relay checks the sign-in on the upgrade itself, so the token rides on the handshake; HELLO repeats it with the desk's name.
@@ -121,8 +140,11 @@ export class PhoneRelay {
     let socket; try { socket = this.makeSocket(this.dialUrl(), token); } catch (error) { this.failed({ error: error.message }); this.state = 'offline'; return this.retry(); }
     this.socket = socket; socket.binaryType = 'arraybuffer';
     let opened = false, error = '';
-    socket.addEventListener('open', () => { opened = true; this.heard = Date.now(); this.keepAlive(socket); this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })); });
-    socket.addEventListener('message', event => { if (this.socket !== socket) return; this.heard = Date.now(); try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
+    socket.addEventListener('open', () => { opened = true; this.heard = Date.now(); this.keepAlive(socket); this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '', phones: this.phonesOn() })); });
+    socket.addEventListener('message', event => { if (this.socket !== socket) return; this.heard = Date.now();
+      // The relay answers a text ping with a text pong by itself, without waking up (L88): from then on only text pings go.
+      if (typeof event.data === 'string') { if (event.data === 'pong') { const own = this.timers.get(socket); if (own) own.textPong = true; } return; }
+      try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
     socket.addEventListener('close', event => { this.release(socket); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); else if (event?.code === 4001) this.retryReplaced(); });
@@ -143,7 +165,10 @@ export class PhoneRelay {
       // and adding the whole stall to it would push the last-reply time into the future.
       if (late > STALL_MS) this.heard += Math.max(0, Math.min(late, now - this.heard));
       if (now - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
-      this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
+      // A text ping costs the relay nothing while the line is idle. Until the relay has answered one, the old ping goes too, so
+      // a relay from before L88 still keeps the line alive.
+      try { socket.send('ping'); } catch {}
+      if (!this.timers.get(socket)?.textPong) this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
     }, PING_MS); beat.unref?.();
     this.timers.set(socket, { beat });
   }
@@ -182,7 +207,9 @@ export class PhoneRelay {
   dropStreams() { for (const stream of this.streams.values()) stream.request?.destroy(); this.streams.clear(); }
 
   onFrame({ op, streamId, payload }) {
-    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.markStable(this.socket); this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
+    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.markStable(this.socket); this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} this.desk.peers?.relayUp?.(); return; }
+    // Another computer of this account changed something (L88).
+    if (op === RELAY_OP.SYNC) { this.desk.peers?.onSync?.(payload.toString('utf8')); return; }
     if (op === RELAY_OP.PING) return this.send(RELAY_OP.PONG, streamId, payload);
     if (op === RELAY_OP.REQ) return this.openStream(streamId, JSON.parse(payload.toString('utf8')));
     if (op === RELAY_OP.REQ_BODY) return this.bodyChunk(streamId, payload);
