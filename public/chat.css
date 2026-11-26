@@ -1291,6 +1291,8 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 /* AI accounts: colored letter, email with a plan tag, plain profile name, a quiet In use mark */
 .acct-intro{flex-direction:column;align-items:flex-start;gap:6px}.acct-intro p{flex:none}
 .acct-note{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px;border-radius:999px;color:var(--good);background:color-mix(in srgb,var(--good) 12%,transparent)}
+/* A folder-gone note (L119): a quiet amber attention mark, not the green In-use tone, and a full-width bar so the sentence reads on one line. */
+.acct-note.bad{display:flex;color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
 .acct-pic{width:36px;height:36px;font-size:14px}
 .acct-name{display:flex;align-items:center;gap:8px;min-width:0}.acct-name b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-plan{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.02em;padding:1px 7px;border-radius:6px;color:var(--muted);border:1px solid var(--line)}

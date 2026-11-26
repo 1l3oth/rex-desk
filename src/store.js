@@ -67,14 +67,20 @@ function scheduleSettings(input = {}) {
   const maxRuns = Number.isInteger(Number(input.maxRuns)) ? Math.min(20, Math.max(1, Number(input.maxRuns))) : defaults.schedule.maxRuns;
   return { enabled: Boolean(input.enabled), time, days, fix: input.fix !== false, maxRuns };
 }
-// null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder.
-function agentProfile(value, name) {
+// null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder. A missing folder
+// is refused only when the person is choosing it now (the value differs from what was saved before): a profile saved
+// earlier whose folder has since disappeared is kept as-is, so it never blocks an unrelated save such as switching Claude
+// accounts (L119). Agents fall back to the default at launch (agents.js selected()), and its account tab shows a note.
+function agentProfile(value, name, previous) {
   if (value === undefined || value === null) return null;
   const folder = String(value).trim();
   if (!folder) return '';
   if (!path.isAbsolute(folder)) throw new Error(`${name} profile must be an absolute folder.`);
-  try { if (!statSync(folder).isDirectory()) throw new Error(); } catch { throw new Error(`${name} profile folder does not exist: ${folder}`); }
-  return path.resolve(folder);
+  const resolved = path.resolve(folder);
+  const unchanged = typeof previous === 'string' && previous.trim() !== '' && path.resolve(previous.trim()) === resolved;
+  try { if (!statSync(resolved).isDirectory()) throw new Error(); }
+  catch { if (!unchanged) throw new Error(`${name} profile folder does not exist: ${folder}`); }
+  return resolved;
 }
 
 // A counted or limited token is a size, not a credential, so a name such as max_tokens or token_count keeps its value.
@@ -511,7 +517,7 @@ export class Store extends EventEmitter {
     const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, autonomy: input.autonomy !== false, provider: aiProvider(input.provider || 'claude'),
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: sources.some(source => source.sendReport && source.enabled !== false), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, showChanges: input.showChanges !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini), openrouter: modelName('openrouter', input.models?.openrouter) }, sources, repositories,
-      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
+      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code', this.config().agentProfiles?.claude), codex: agentProfile(input.agentProfiles?.codex, 'Codex', this.config().agentProfiles?.codex), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini', this.config().agentProfiles?.gemini) },
       tourDismissed: Boolean(input.tourDismissed), keepHistory: [0, 365, 180, 90, 30].includes(Number(input.keepHistory)) ? Number(input.keepHistory) : 0, execution: 'headless', testAccounts: accounts,
       // The browser agents use (src/agent-browser.js); its time marks when it changed, so a no to a download counts until then.
       agentBrowser: ['obscura', 'chromium', 'off'].includes(input.agentBrowser) ? input.agentBrowser : 'obscura',

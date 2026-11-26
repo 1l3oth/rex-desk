@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { canonical } from '../src/agents.js';
+import { canonical, AgentProfiles, inheritedProfile } from '../src/agents.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 
@@ -138,5 +138,52 @@ test('a second agent hitting the limit on the old account does not mark the new 
   const limited = store.get('accounts', 'limited').until;
   assert.ok(!limited[keyOf(accounts[1])], 'B is still free');
   assert.equal(keyOf(store.config().agentProfiles.claude), keyOf(accounts[1]), 'it moves to B, the free one');
+  desk.closed = true;
+});
+
+// L119: a saved AI profile whose folder later disappears must not block other settings saves, must fall back to the default,
+// and the account tab shows a note. A folder the person chooses now that does not exist is still refused.
+test('L119: a saved Codex profile whose folder is gone does not block switching the Claude account', () => {
+  const store = new Store(temporary('l119-save'));
+  const claude1 = temporary('c1'), claude2 = temporary('c2'), codexDir = path.join(temporary('codexroot'), 'codex-work');
+  mkdirSync(codexDir, { recursive: true });
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: claude1, codex: codexDir } });
+  rmSync(codexDir, { recursive: true, force: true }); // the Codex folder later disappears
+  // The exact save that "Use" on another Claude account (and auto-switch) make: it must not throw now.
+  assert.doesNotThrow(() => store.saveConfig({ ...store.publicConfig(), agentProfiles: { ...store.config().agentProfiles, claude: claude2 } }));
+  assert.equal(store.config().agentProfiles.claude, claude2, 'the Claude switch took');
+  assert.equal(store.config().agentProfiles.codex, path.resolve(codexDir), 'the gone Codex profile is kept, not blanked or throwing');
+});
+
+test('L119: choosing a folder that does not exist is still refused', () => {
+  const store = new Store(temporary('l119-refuse'));
+  const gone = path.join(temporary('nope'), 'never-made');
+  assert.throws(() => store.saveConfig({ ...store.publicConfig(), agentProfiles: { codex: gone } }), /folder does not exist/);
+});
+
+test('L119: an agent falls back to the default when its saved profile folder is gone', () => {
+  const store = new Store(temporary('l119-sel')), agents = new AgentProfiles(store);
+  const codexDir = path.join(temporary('codexroot2'), 'codex-work');
+  mkdirSync(codexDir, { recursive: true });
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { codex: codexDir } });
+  rmSync(codexDir, { recursive: true, force: true });
+  assert.equal(agents.selected('codex'), inheritedProfile('codex'), 'a gone profile falls back to the inherited default, so agents still start');
+  assert.notEqual(agents.selected('codex'), path.resolve(codexDir));
+});
+
+test('L119: auto-switch on a Claude usage limit still works when a saved Codex folder is gone', async () => {
+  const store = new Store(temporary('l119-auto')), turns = [];
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'),
+    runnerFactory: options => ({ start: async prompt => { turns.push({ env: options.agentEnv.CLAUDE_CONFIG_DIR || '', prompt }); if (turns.length === 1) options.event('agent-text', { text: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); else options.event('agent-text', { text: 'Done.' }); }, interrupt() {}, close() {} }) });
+  const first = temporary('claude1'), second = temporary('claude2'), codexDir = path.join(temporary('codexroot3'), 'codex-work');
+  mkdirSync(codexDir, { recursive: true });
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: first, codex: codexDir } });
+  rmSync(codexDir, { recursive: true, force: true }); // the gone Codex profile that used to break every switch
+  desk.agents.alternative = async (provider, current) => current === first ? { profile: second, label: 'claude2', account: 'second@example.com', plan: 'max' } : null;
+  const run = await desk.startMain({ prompt: 'Hello' });
+  const waitFor = async predicate => { for (let attempt = 0; attempt < 200; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('timed out'); };
+  await waitFor(() => turns.length >= 2 && desk.run(run.id).state === 'finished');
+  assert.equal(store.config().agentProfiles.claude, second, 'the auto-switch moved the Claude account');
+  assert.equal(store.config().agentProfiles.codex, path.resolve(codexDir), 'the gone Codex profile stayed, it did not block the switch');
   desk.closed = true;
 });

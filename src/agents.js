@@ -249,7 +249,11 @@ export class AgentProfiles {
       const inUse = canonical(this.use(provider, selected) || ''), shown = new Map();
       profiles.forEach((item, index) => { const key = accountOf(index); if (key && (!shown.has(key) || canonical(item.profile || '') === inUse)) shown.set(key, index); });
       const keep = profiles.map((item, index) => !accountOf(index) || shown.get(accountOf(index)) === index);
-      return [provider, { selected, saved: this.store.config().agentProfiles?.[provider] ?? null, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
+      const saved = this.store.config().agentProfiles?.[provider] ?? null;
+      // A profile the person once saved whose folder has since disappeared: kept in the config, but agents fall back to the
+      // default, so the tab says so (L119) instead of letting the account look chosen.
+      const savedMissing = Boolean(saved && typeof saved === 'string' && !directory(saved));
+      return [provider, { selected, saved, savedMissing, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
         mcpEverywhere: profiles.every(item => this.mcpInstalled(provider, item.profile)),
         profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile) })).filter((item, index) => keep[index]) }];
     }));
