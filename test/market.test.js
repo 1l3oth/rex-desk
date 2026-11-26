@@ -65,8 +65,8 @@ test('Market labels each item: Orbit is an MCP server, never a connector; one-fi
   memory.put('config', 'main', { ...memory.config(), sources: [] });
   const fresh = marketList({ ...desk, orbitAccount: () => null }).items.find(item => item.name === 'Orbit');
   assert.deepEqual(fresh?.orbit, { signedIn: false, goals: 0, servers: [{ name: 'Goal', url: 'https://orbit.vongpichdaraboth.com/api/mcp' }, { name: 'Brain', url: 'https://orbit.vongpichdaraboth.com/api/mcp-server' }] });
-  // Flow and Morningmate's own MCP servers are hidden until Rex Desk can sign in to them (OAuth); their API connections stay.
-  assert.deepEqual(items.filter(item => item.remote), []);
+  // Flow and Morningmate's own MCP servers are listed now that Rex Desk can sign in to them (OAuth); their API connections stay.
+  assert.deepEqual(items.filter(item => item.remote).map(item => item.remote), ['flow-mcp', 'morningmate-mcp']);
   assert.ok(items.some(item => item.kind === 'connector' && item.name === 'Flow'), 'the Flow API connection is still listed');
   assert.ok(!marketList({ ...desk, toolbox: { ...desk.toolbox, servers: () => ({ 'flow-mcp': { type: 'http', url: 'https://flow.team/ai/mcp' } }) } }).items.some(item => item.remote === 'flow-mcp'), 'a linked Flow MCP shows as its own server, not again');
   assert.ok(!items.some(item => item.kind === 'connector' && item.name === 'Goal'), 'an Orbit goal is not listed as a connector');

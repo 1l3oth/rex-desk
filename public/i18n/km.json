@@ -5,6 +5,15 @@
  "{0}'s own bot": "បូតផ្ទាល់ខ្លួនរបស់ {0}",
  "another agent's own bot": "បូតផ្ទាល់ខ្លួនរបស់ភ្នាក់ងារផ្សេង",
  "This bot is also saved as {0}, which reads its messages. Disconnect one of them; this one takes over by itself.": "បូតនេះក៏ត្រូវបានរក្សាទុកជា {0} ដែលកំពុងអានសាររបស់វា។ ផ្តាច់មួយក្នុងចំណោមពួកវា ហើយបូតនេះនឹងបន្តដោយខ្លួនឯង។",
+ "That key looks too short. A key is at least 8 characters, so paste the whole key.": "កូនសោនេះខ្លីពេក។ កូនសោត្រូវមានយ៉ាងតិច ៨ តួអក្សរ ដូច្នេះសូមបិទភ្ជាប់កូនសោទាំងមូល។",
+ "Finish signing in in your browser.": "សូមបញ្ចប់ការចូលគណនីក្នុងកម្មវិធីរុករករបស់អ្នក។",
+ "Signed in. Rex Desk keeps the sign-in fresh.": "បានចូលគណនីហើយ។ Rex Desk រក្សាការចូលគណនីនេះឱ្យនៅប្រើបាន។",
+ "Sign-in expired": "ការចូលគណនីផុតកំណត់",
+ "MCP sign-ins": "ការចូលគណនី MCP",
+ "Sign out of {0}? Agents cannot use it until you sign in again.": "ចាកចេញពី {0}? ភ្នាក់ងារមិនអាចប្រើវាបានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។",
+ "Agents cannot use {0} until you sign in again. Rex Desk opens your browser and does the rest. Do this on the computer that runs Rex Desk.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។ Rex Desk បើកកម្មវិធីរុករក ហើយធ្វើអ្វីដែលនៅសល់ដោយខ្លួនឯង។ សូមធ្វើនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
+ "{0} sign-in expired": "ការចូលគណនី {0} ផុតកំណត់",
+ "Sign-in": "ការចូលគណនី",
  ", copied from {0}": ", ចម្លងពី {0}",
  "… {0} more lines": "… {0} បន្ទាត់ទៀត",
  "· @ to mention · # for a task": "· @ ដើម្បីលើកឈ្មោះ · # សម្រាប់កិច្ចការ",
@@ -2803,5 +2812,7 @@
  "Install and create shortcut": "Install and create shortcut",
  "Telegram turned down this bot's token. It was probably revoked or made again in @BotFather, so its messages don't reach this agent.": "Telegram បានបដិសេធ token របស់បូតនេះ។ ប្រហែលជាវាត្រូវបានដកហូត ឬបង្កើតម្ដងទៀតនៅក្នុង @BotFather ដូច្នេះសាររបស់វាមិនទៅដល់ agent នេះទេ។",
  "That token is for a different bot. Paste the token of this bot, or disconnect and connect the other bot.": "token នោះជារបស់បូតផ្សេង។ សូមបិទភ្ជាប់ token របស់បូតនេះ ឬផ្ដាច់ រួចភ្ជាប់បូតមួយទៀតនោះ។",
- "That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...": "នោះមិនដូច token របស់បូតទេ។ សូមចម្លងវាពី @BotFather៖ វាមើលទៅដូច 123456:ABC-..."
+ "That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...": "នោះមិនដូច token របស់បូតទេ។ សូមចម្លងវាពី @BotFather៖ វាមើលទៅដូច 123456:ABC-...",
+ "Finish sign-in on the computer running Rex Desk.": "សូមបញ្ចប់ការចូលគណនីនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
+ "Agents cannot use {0} until you sign in again.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។"
 }

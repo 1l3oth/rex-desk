@@ -84,7 +84,7 @@ function addHtml(ctx) {
       <div class="mk-add-foot"><span class="tb-kinds">${['claude mcp add …', 'npx skills add owner/repo', '{ "mcpServers": … }', t`a GitHub link or folder`].map(item => `<code>${esc(item)}</code>`).join('')}</span><button type="button" class="btn primary small" data-action="mk-install"${off}>${busy ? t('Installing…') : t('Install')}</button></div>`;
   return `<details class="mk-add"${ui.marketAddOpen ? ' open' : ''}><summary data-action="mk-add-toggle"><span class="mk-plus">${PLUS}</span><span class="mk-text"><b>${t`Add an MCP server, skill, command or hook`}</b><span class="mk-desc">${t`Paste an install line, a SKILL.md file, a command or a hook`}</span></span></summary>
     <div class="mk-add-body">${tabs}${body}
-    ${result ? `<ul class="mk-result" role="status">${result.map(item => `<li class="${item.ok ? 'ok' : 'bad'}">${esc(item.ok ? t`${item.name}: installed, agents can find it` : `${item.name}: ${item.error}`)}</li>`).join('')}</ul>` : ''}</div></details>`;
+    ${result ? `<ul class="mk-result" role="status">${result.map(item => `<li class="${item.ok ? 'ok' : 'bad'}">${esc(item.ok ? t`${item.name}: installed, agents can find it` : `${item.name}: ${item.error ? t(item.error) : ''}`)}</li>`).join('')}</ul>` : ''}</div></details>`;
 }
 
 export function marketStage(ctx) {
@@ -149,7 +149,7 @@ export async function marketAction(ctx, action, target) {
     const box = document.querySelector('[name="mk-install"]'), text = box?.value.trim() || '';
     if (!text) { box?.focus(); return; }
     Object.assign(ui, { marketText: text, marketBusy: true, marketResult: null }); renderAll();
-    try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); ui.marketBox = result; ui.marketResult = result.check || []; ui.marketText = ''; ui.market = await api('/market'); }
+    try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); ui.marketBox = result; ui.marketResult = result.check || []; if ((result.check || []).every(item => item.ok)) ui.marketText = ''; ui.market = await api('/market'); }
     catch (error) { ui.marketResult = [{ ok: false, name: t('Install'), error: error.message }]; }
     finally { ui.marketBusy = false; renderAll(); }
     return;

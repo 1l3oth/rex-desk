@@ -13,9 +13,24 @@ import { resolveCommand } from './processes.js';
 import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
+import { SIGN_IN_HELP, addressOf, carriesCredential } from './mcp-signin.js';
+import { headerSecrets, pinnedFetch, redactor, safeError, Unsafe, shortKey, KEY_TOO_SHORT } from './mcp-guard.js';
 
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
+// A server that wants a sign-in (or no longer takes this one), not one that is broken.
+const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|invalid_token|missing_bearer/i.test(String(error?.message || ''));
+// An address with a typed key of its own is the person's to fix; every other refused address needs a sign-in.
+const signsIn = (signIn, config) => { const url = addressOf(config); return Boolean(url && !carriesCredential(new URL(url)) && (signIn?.record(url) || !Object.keys(config.headers || {}).length)); };
+// What the person reads for a server that wants a sign-in (agents get SIGN_IN_HELP instead).
+// A server's address as the screen shows it: no user, password, query or fragment, which may hold a key.
+export const shownAddress = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
+// A command as the screen shows it: the program and its plain arguments; no flags, no value given to a key-like flag, and
+// nothing that looks like a key or a value (name=value).
+export const shownCommand = (command, args = []) => [command, ...args.filter((item, index) => !String(item).startsWith('-') && !/^-.*(key|token|secret|passw|auth|cred)/i.test(String(args[index - 1] ?? '')) && !/[=:@]|key|token|secret|passw/i.test(String(item).replace(/^@[\w.-]+\//, '')))].join(' ').slice(0, 200);
+// Addresses inside a message the screen shows are cut to their origin, so a key in a path or query never shows.
+export const withoutAddresses = text => String(text || '').replace(/https?:\/\/[^\s"'<>)]+/g, found => shownAddress(found) || '[address]');
+export const SIGN_IN_SHOWN = 'Needs sign-in. Press Sign in for it in Settings, Connectors.';
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
 const words = text => String(text || '').toLowerCase().normalize('NFKD').split(/[^a-z0-9ក-៿가-힯]+/).filter(word => word.length > 1);
@@ -88,7 +103,7 @@ export class Toolbox {
     const skillLines = all.slice(0, skills).map(skill => `- ${skill.name}${skill.description ? `: ${clip(skill.description)}` : ''}`);
     // The same items as data, for the agent's profile (the panel shows exactly what the instructions name, L53).
     const items = {
-      servers: Object.keys(servers).sort().map(name => ({ name, tools: (this.lists.get(name)?.tools || []).map(tool => tool.name), error: this.failed.get(name)?.error || '' })),
+      servers: Object.keys(servers).sort().map(name => ({ name, tools: (this.lists.get(name)?.tools || []).map(tool => tool.name), error: withoutAddresses(this.failed.get(name)?.error) })),
       skills: all.slice(0, skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
       more: all.slice(skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
     };
@@ -96,7 +111,13 @@ export class Toolbox {
   }
 
   // ---------- talking to one MCP server ----------
-  async client(name, config) {
+  async client(name, raw) {
+    // A configured key too short to tell from ordinary words is refused when a connection is opened too, after variable
+    // expansion, so a saved or synced short key is caught on the signed bridge and not only when the tool list is built,
+    // with the same plain message. The server's own configured credentials are checked, not the sign-in token added below.
+    if (shortKey(expand(raw))) throw Object.assign(new Error(KEY_TOO_SHORT), { own: true });
+    // The person's sign-in for this address is put on here, fresh each time (L30); a renewed token opens a new connection.
+    const config = this.signIn ? await this.signIn.authorize(raw) : raw;
     const open = this.clients.get(name);
     if (open && JSON.stringify(open.config) === JSON.stringify(config)) { clearTimeout(open.timer); open.timer = setTimeout(() => void this.close(name), IDLE_MS); open.timer.unref?.(); return open.client; }
     if (open) await this.close(name);
@@ -105,19 +126,65 @@ export class Toolbox {
     this.clients.set(name, { client, config, timer });
     return client;
   }
+  // One use of a server with the person's sign-in: a refused token is renewed once, and if that is refused too the person is
+  // asked to sign in again. Whatever comes back, answer or error, leaves without the sign-in in it. key: the open
+  // connection's name, when it is not the server's own.
+  async signed(name, config, work, key = name) {
+    const secrets = new Set(), note = used => this.secretsInto(secrets, config, used);
+    // Noted before and after the work: a token renewed on the way leaves both the old and the new one to hide.
+    const call = async () => { note(); const client = await this.client(key, config); note(this.clients.get(key)?.config); return work(client); };
+    const over = () => { this.failed.set(name, { at: Date.now(), error: SIGN_IN_HELP, signIn: true }); return Object.assign(new Error(`${name}: ${SIGN_IN_HELP}`), { own: true }); };
+    try {
+      const answer = await call().catch(async error => {
+        if (!wantsSignIn(error) || !signsIn(this.signIn, config)) throw error;
+        await this.close(key);
+        if (!await this.signIn?.refused(config)) throw over();
+        return call().catch(async second => {
+          if (!wantsSignIn(second)) throw second;
+          await this.close(key); this.signIn.rejected(config);
+          throw over();
+        });
+      });
+      note();
+      return redactor(secrets)(answer);
+    } catch (error) { note(); throw safeError(error, name, secrets); }
+  }
+  // Every credential a server could send back: the ones in its headers (as filled in), and the ones its sign-in holds.
+  secretsInto(secrets, ...configs) {
+    for (const config of configs) for (const secret of headerSecrets(expand(config))) secrets.add(secret);
+    for (const secret of this.signIn?.secrets?.(configs[0]) || []) if (secret) secrets.add(String(secret));
+    return secrets;
+  }
+  // A server's problem in the person's words: one that wants a sign-in says where to press Sign in.
+  shownError(name) { const failed = this.failed.get(name); return failed?.signIn ? SIGN_IN_SHOWN : withoutAddresses(failed?.error); }
   async close(name) { const open = this.clients.get(name); if (!open) return; this.clients.delete(name); clearTimeout(open.timer); await open.client.close?.().catch(() => {}); }
   async closeAll() { await Promise.all([...this.clients.keys()].map(name => this.close(name))); }
-  async toolsOf(name, config) {
+  async toolsOf(name, config, again = true) {
+    // However this server's key got here (typed, pasted, a command flag, an agent, an old saved config or a synced one), a
+    // key too short to tell from ordinary words is refused: it never connects, shows the same plain reason, and can be
+    // replaced. Nothing half-trusted is listed or cached as working.
+    if (shortKey(expand(config))) { this.lists.delete(name); this.failed.set(name, { at: Date.now(), error: KEY_TOO_SHORT }); return []; }
     const known = this.lists.get(name);
     if (known && Date.now() - known.at < LIST_MS && JSON.stringify(known.config) === JSON.stringify(config)) return known.tools;
+    const secrets = this.secretsInto(new Set(), config);
     try {
       const client = await this.client(name, config), tools = [];
+      this.secretsInto(secrets, config, this.clients.get(name)?.config);
       let cursor;
       do { const page = await client.listTools(cursor ? { cursor } : {}); tools.push(...page.tools); cursor = page.nextCursor; } while (cursor && tools.length < 1000);
-      const list = tools.map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
+      const clean = redactor(this.secretsInto(secrets, config));
+      // A tool that shows a sign-in where it cannot be taken out (its name, a field name) is left out of the list.
+      const list = tools.flatMap(tool => { try { return [clean(tool)]; } catch (error) { if (error instanceof Unsafe) return []; throw error; } }).map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
-    } catch (error) { this.failed.set(name, { at: Date.now(), error: plainError(error.message) }); await this.close(name); return known?.tools || []; }
+    } catch (error) {
+      await this.close(name);
+      const refused = wantsSignIn(error) && signsIn(this.signIn, config);
+      if (refused && again && await this.signIn?.refused(config)) return this.toolsOf(name, config, false);
+      if (refused && !again) this.signIn?.rejected?.(config);
+      this.failed.set(name, { at: Date.now(), error: refused ? SIGN_IN_HELP : plainError(safeError(error, name, this.secretsInto(secrets, config)).message), ...(refused ? { signIn: true } : {}) });
+      return known?.tools || [];
+    }
   }
   async catalog(project = '') {
     const servers = this.servers(project);
@@ -136,7 +203,7 @@ export class Toolbox {
     const hooks = this.listHooks();
     return {
       computer: this.computer?.() || '',
-      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : config.url, tools: tools.length, error: this.failed.get(name)?.error || '', removable: !user || Boolean(user[name]) })),
+      servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? shownCommand(config.command, config.args || []) : shownAddress(config.url), tools: tools.length, error: this.shownError(name), removable: !user || Boolean(user[name]) })),
       skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome), ...(skill.error ? { error: skill.error } : {}) })),
       commands, hooks,
     };
@@ -146,6 +213,8 @@ export class Toolbox {
     const id = String(name || '').trim();
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) throw new Error('A name is letters, numbers, - or _.');
     if (!command.trim() && !/^https?:\/\//.test(url.trim())) throw new Error('Give the command that starts it, or its https address.');
+    // A key too short to tell from ordinary words is refused before anything is saved (L30), so what was typed is not lost.
+    if (shortKey(expand(url.trim() ? { url: url.trim() } : { args: splitCommand(command) }))) throw new Error(KEY_TOO_SHORT);
     const args = url.trim() ? ['mcp', 'add', '--scope', 'user', '--transport', 'http', id, url.trim()] : ['mcp', 'add', '--scope', 'user', id, '--', ...splitCommand(command)];
     await this.cli(args); this.lists.delete(id); await this.close(id);
     return { added: id };
@@ -201,12 +270,15 @@ export class Toolbox {
       }
       return { kind: 'skill', ...result, check };
     }
+    // Every install path (a pasted command, a bare URL, a JSON block) is checked before a single server is written, so a
+    // key too short to tell from ordinary words never reaches Claude Code's config and the pasted text is kept to be fixed.
+    for (const args of plan.calls) if (shortKey(expand(installConfig(args)))) throw new Error(KEY_TOO_SHORT);
     for (const args of plan.calls) await this.cli(args);
     const servers = this.servers(), check = [];
     for (const name of plan.names) {
       this.lists.delete(name); this.failed.delete(name); await this.close(name);
       if (!servers[name]) { check.push({ name, ok: false, error: 'Claude Code took it, but Rex Desk does not see it yet. Restart Rex Desk and look again.' }); continue; }
-      const tools = await this.toolsOf(name, servers[name]), error = this.failed.get(name)?.error || '';
+      const tools = await this.toolsOf(name, servers[name]), error = this.shownError(name);
       check.push({ name, ok: !error && tools.length > 0, tools: tools.length, ...(error ? { error } : tools.length ? {} : { error: 'It started but offers no tools.' }) });
     }
     return { kind: 'server', added: plan.names.join(', '), check };
@@ -311,8 +383,7 @@ export class Toolbox {
       const text = readFileSync(target.skill.file, 'utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
       return { skill: target.skill.name, folder: target.skill.folder, instructions: clip(text, 40000), note: `Follow these instructions now. Files they mention are in ${target.skill.folder}; read them with your own tools when needed.` };
     }
-    const client = await this.client(target.server, target.config);
-    const result = await client.callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS });
+    const result = await this.signed(target.server, target.config, client => client.callTool({ name: target.tool.name, arguments: input && typeof input === 'object' ? input : {} }, undefined, { timeout: CALL_MS }));
     const text = (result.content || []).map(part => part.type === 'text' ? part.text : part.type === 'resource' ? part.resource?.text || `[resource ${part.resource?.uri || ''}]` : `[${part.type}${part.mimeType ? ` ${part.mimeType}` : ''}]`).join('\n');
     return { tool: `${target.server}/${target.tool.name}`, ...(result.isError ? { failed: true } : {}), result: clip(text || (result.structuredContent ? JSON.stringify(result.structuredContent) : ''), 30000) };
   }
@@ -331,14 +402,16 @@ export async function connectServer(name, config) {
     return client;
   }
   const headers = config.headers || {};
+  // A server given headers (a sign-in, a key) is reached at its registered address only (mcp-guard.js).
+  const options = sse => ({ requestInit: { headers }, ...(Object.keys(headers).length ? { fetch: pinnedFetch(config.url, { sse }) } : {}) });
+  // A transport that failed to connect is closed, or the SSE one goes on trying by itself.
+  const open = async (opened, transport) => { try { await opened.connect(transport); return opened; } catch (error) { await transport.close().catch(() => {}); throw error; } };
   if (config.type !== 'sse') {
-    try { const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js'); await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers } })); return client; }
+    try { const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js'); return await open(client, new StreamableHTTPClientTransport(new URL(config.url), options(false))); }
     catch (error) { if (config.type === 'http') throw error; }
   }
   const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-  const fallback = new Client({ name: 'rex-desk-toolbox', version: '1.0.0' });
-  await fallback.connect(new SSEClientTransport(new URL(config.url), { requestInit: { headers } }));
-  return fallback;
+  return open(new Client({ name: 'rex-desk-toolbox', version: '1.0.0' }), new SSEClientTransport(new URL(config.url), options(true)));
 }
 
 // Every SKILL.md under a folder, a few levels down, skipping .git and node_modules.
@@ -361,6 +434,7 @@ export function parseInstall(text) {
     if (!map || typeof map !== 'object') throw new Error('Paste the block with its name, like {"mcpServers": {"slack": {...}}}.');
     const entries = Object.entries(map).filter(([name, config]) => config && (config.command || config.url) && /^[A-Za-z0-9_-]{1,40}$/.test(name));
     if (!entries.length) throw new Error('No server in that JSON has a name and a command or url.');
+    for (const [, config] of entries) if (shortKey(expand(config))) throw new Error(KEY_TOO_SHORT);
     return { kind: 'server', names: entries.map(([name]) => name), calls: entries.map(([name, config]) => ['mcp', 'add-json', '--scope', 'user', name, JSON.stringify(config)]) };
   }
   const parts = splitCommand(line);
@@ -413,6 +487,13 @@ function gitClone(address, target) {
 
 // "npx -y @scope/server --flag" into its parts, keeping quoted parts together.
 export const splitCommand = text => [...String(text).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
+// The server config an "mcp add" / "mcp add-json" call would write, so a key in it can be checked before it is written: the
+// JSON block itself, or the address and command-line flags of a plain add (headers, -e KEY=value, a key in the address).
+export function installConfig(args) {
+  if (args[1] === 'add-json') { try { return JSON.parse(args[args.length - 1]); } catch { return {}; } }
+  const url = args.find(part => /^https?:\/\//.test(part));
+  return { ...(url ? { url } : {}), args };
+}
 function runClaude(args) {
   const claude = resolveCommand('claude');
   return new Promise((resolve, reject) => execFile(claude.command, [...claude.args, ...args], { windowsHide: true, timeout: 60000 }, (error, stdout, stderr) => error ? reject(new Error(String(stderr || stdout || error.message).trim().split('\n')[0])) : resolve(stdout)));

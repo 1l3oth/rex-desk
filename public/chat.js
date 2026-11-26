@@ -190,7 +190,7 @@ function taskSummary(counts) {
 }
 function renderRail() {
   // No Runs list: agents work in their own chats and rooms, the way the person tells them. An old run still opens from its task.
-  const snap = ui.snap, asks = pending().length;
+  const snap = ui.snap, asks = pending().length + (snap.mcpExpired || []).length;
   const tgUnread = (snap.telegramInbox || []).filter(row => !row.read).length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
   // The Tasks badge counts work still to do: open and waiting, never done.

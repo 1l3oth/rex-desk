@@ -6,11 +6,15 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connectServer, plainError } from './toolbox.js';
 import { assertBotFree, botIdOf } from './bot-use.js';
+import { KEY_FLOOR, KEY_TOO_SHORT } from './mcp-guard.js';
+
+// A field that holds a secret, so a value too short to tell from ordinary text is refused (L30). An address, a folder or a
+// webhook is not a key, so it is never length-checked.
+const SECRET_FIELD = /key|token|secret|passw/i;
 
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'connectors', 'catalog.json');
 let cached = null;
-// An item marked "hidden" is left out everywhere (picker, Market, check and save) until it can really connect: Flow and
-// Morningmate's MCP servers need an OAuth sign-in that Rex Desk's own MCP client does not do yet.
+// An item marked "hidden" is left out everywhere (picker, Market, check and save) until it can really connect.
 export function loadCatalog(file = FILE) { if (!cached || file !== FILE) { const raw = JSON.parse(readFileSync(file, 'utf8')), data = { ...raw, items: (raw.items || []).filter(item => !item.hidden) }; if (file !== FILE) return data; cached = data; } return cached; }
 export const catalogItem = (id, catalog = loadCatalog()) => catalog.items.find(item => item.id === id) || null;
 
@@ -24,6 +28,7 @@ export function readValues(item, input = {}) {
     if (!FIELD.test(name)) continue;
     const key = bare(name), value = String(input[key] ?? '').trim();
     if (!value && !optional(name) && key !== 'host') throw new Error(`Fill in ${LABELS[key] || key}.`);
+    if (value && SECRET_FIELD.test(key) && value.length < KEY_FLOOR) throw new Error(KEY_TOO_SHORT);
     values[key] = value;
   }
   return values;
@@ -129,7 +134,7 @@ export async function saveConnector(item, input, { toolbox, store, probed }) {
 // The connections the catalog added: MCP servers found in Claude Code's list under a catalog id, and saved token links.
 export function catalogConnections({ toolbox, store }, catalog = loadCatalog()) {
   let servers = {}; try { servers = toolbox.servers(); } catch { /* no config */ }
-  const mcp = catalog.items.filter(item => item.tier === 'mcp' && servers[item.id]).map(item => ({ id: item.id, connectorId: item.id, name: item.name, kind: 'mcp', server: item.id, error: toolbox.failed.get(item.id)?.error || '' }));
+  const mcp = catalog.items.filter(item => item.tier === 'mcp' && servers[item.id]).map(item => ({ id: item.id, connectorId: item.id, name: item.name, kind: 'mcp', server: item.id, error: toolbox.shownError?.(item.id) ?? (toolbox.failed.get(item.id)?.error || '') }));
   const links = (store.list('connector') || []).map(({ id, connectorId, name, kind }) => {
     const link = { id, connectorId, name, kind };
     // Telegram carries whether a chat is linked yet and that chat's display name, so the card can show "Linked to <name>".

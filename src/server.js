@@ -77,6 +77,8 @@ import { catalog as connectorCatalog, connections as connectionList, connector a
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { TelegramBridge } from './telegram.js';
 import { AgentBots } from './agent-bots.js';
+import { addressOf } from './mcp-signin.js';
+import { BRIDGE_PATH, handleBridge } from './mcp-bridge.js';
 import { BugBot } from './bug-bot.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
@@ -193,6 +195,10 @@ export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DES
 const WAITING = Symbol('waiting');
 const SIGN_IN_POLL_MS = Number(process.env.REX_SIGNIN_POLL_MS) || 20000;
 const settled = (promise, ms = SIGN_IN_POLL_MS) => Promise.race([promise, new Promise(resolve => { const timer = setTimeout(() => resolve(WAITING), ms); timer.unref?.(); })]);
+
+// A sign-in comes back to the computer running Rex Desk, so a phone or another computer cannot finish it: it is told to
+// finish there, and gets no sign-in link.
+const signInsFor = (desk, response) => desk.mcpSignIns().map(item => response.rexRemote ? { ...item, link: '', elsewhere: true } : item);
 
 export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory, peerFetcher } = {}) {
   // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
@@ -352,6 +358,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // The bug-report group bot: a separate bot added to customer groups that only files bug reports (src/bug-bot.js).
     desk.agentBots = new AgentBots(desk);
     if (!process.env.NODE_TEST_CONTEXT) desk.agentBots.start();
+    desk.onMcpSignIn = () => notify();
+    if (!process.env.NODE_TEST_CONTEXT) desk.mcpSignIn.startTimer();
     desk.bugBot = new BugBot(desk);
     if (!process.env.NODE_TEST_CONTEXT) desk.bugBot.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
@@ -373,7 +381,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const { desk, store, id } = session; session = null;
     if (forget) { accounts?.forget(id); store.cloud.account?.clearAvatar(); }
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
-    desk.peers?.goodbye?.(); desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.peers?.goodbye?.(); desk.phoneRelay?.stop(); desk.mcpSignIn.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -598,7 +606,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     doing(`${request.method} ${String(request.url || '').split('?')[0].slice(0, 120)}`);
     // While Rex Desk opens, this computer's window gets its page and files at once, and the page asks /api/boot what is
     // happening and shows it. Everything else (data, agents, other devices) waits until the workspace is open.
-    const early = (() => { try { const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress), page = new URL(request.url, 'http://local').pathname; return local && request.method === 'GET' && (page === '/api/boot' || (!page.startsWith('/api/') && page !== '/mcp' && !page.startsWith('/artifacts/'))); } catch { return false; } })();
+    const early = (() => { try { const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress), page = new URL(request.url, 'http://local').pathname; return local && request.method === 'GET' && (page === '/api/boot' || (!page.startsWith('/api/') && page !== '/mcp' && !page.startsWith(BRIDGE_PATH) && !page.startsWith('/artifacts/'))); } catch { return false; } })();
     if (early && new URL(request.url, 'http://local').pathname === '/api/boot') return json(response, 200, { stage: bootStage, ready: !bootStage });
     if (!early) await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -683,6 +691,17 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const [, , serverId, ...rest] = url.pathname.split('/');
         await bridge(session.desk.localAi, serverId, `/${rest.join('/')}`, request, response, request.method === 'POST' ? await body(request, 50 * 1024 * 1024) : undefined); return;
       }
+      // A signed-in MCP server, used by an agent through Rex Desk (mcp-bridge.js): its run token, on this computer only.
+      if (url.pathname.startsWith(BRIDGE_PATH)) {
+        if (remoteSocket) return json(response, 403, { error: 'Agents connect on this computer only.' });
+        const scope = session?.desk?.scope(request.headers.authorization?.replace(/^Bearer /i, ''));
+        if (!scope?.runId) return json(response, 401, { error: 'Supply the Rex Desk run token.' });
+        let name = ''; try { name = decodeURIComponent(url.pathname.slice(BRIDGE_PATH.length)); } catch { /* not a name */ }
+        const desk = session.desk, config = desk.bridgeTarget(scope.runId, name);
+        if (!config) return json(response, 404, { error: 'This run cannot use that server.' });
+        // Its own connection per address, so projects that share a server name never swap connections.
+        await handleBridge(work => desk.toolbox.signed(name, config, work, `signed ${name} ${config.url}`), name, request, response, request.method === 'POST' ? await body(request, 20 * 1024 * 1024) : undefined); return;
+      }
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
         if (!session) return json(response, 401, { error: 'Rex Desk is locked. Sign in to the dashboard first.' });
@@ -751,7 +770,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       // Settings › About: version, counts and storage.
       if (url.pathname === '/api/about' && request.method === 'GET') return json(response, 200, await aboutRexDesk({ store, rooms: desk.rooms.list(), update: updates.status(), install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : root, fresh: url.searchParams.has('fresh') }));
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, ...(response.rexRemote ? { mcpExpired: (snapshot.mcpExpired || []).map(item => ({ ...item, elsewhere: true })) } : {}), update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
@@ -1102,10 +1121,26 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/sources/orbit') url.pathname = '/api/connectors/orbit';
       else if (url.pathname.startsWith('/api/orbit/account')) url.pathname = url.pathname.replace('/api/orbit/account', '/api/connectors/orbit/account');
       // Connectors (connectors.js): what can be connected, and what is.
+      // Rex Desk's own sign-in for a remote MCP server (mcp-signin.js): the page opens the address it gets back.
+      const mcpAuth = url.pathname.match(/^\/api\/mcp-sign-in(?:\/(start|cancel|sign-out))?$/);
+      if (mcpAuth && request.method === 'GET' && !mcpAuth[1]) return json(response, 200, { signIns: signInsFor(desk, response) });
+      if (mcpAuth?.[1] && request.method === 'POST') {
+        const name = String((await body(request).catch(() => ({}))).name || ''), config = desk.toolbox.servers()[name], address = addressOf(config);
+        if (!address) return json(response, 400, { error: 'That server is not connected on this computer.' });
+        if (mcpAuth[1] === 'start' && response.rexRemote) return json(response, 409, { error: 'Finish sign-in on the computer running Rex Desk.' });
+        try {
+          if (mcpAuth[1] === 'start') { const started = await desk.mcpSignIn.start(name, address); notify(); return json(response, 200, { url: started.url, signIns: signInsFor(desk, response) }); }
+          if (mcpAuth[1] === 'cancel') desk.mcpSignIn.cancel(address); else desk.mcpSignIn.signOut(address);
+          notify(); return json(response, 200, { signIns: signInsFor(desk, response) });
+        } catch (error) { return json(response, 400, { error: error.message }); }
+      }
       if (url.pathname === '/api/connectors' && request.method === 'GET') {
+        // Each remote server is asked once (kept 10 minutes), so one that wants a sign-in shows its button; a slow one is not waited for.
+        let remote = []; try { remote = Object.entries(desk.toolbox.servers()).filter(([, item]) => item.url); } catch { /* no config */ }
+        await Promise.race([Promise.all(remote.filter(([name]) => !desk.toolbox.failed.has(name)).map(([name, item]) => desk.toolbox.toolsOf(name, item))), new Promise(resolve => setTimeout(resolve, 6000).unref?.())]);
         const config = store.publicConfig(), account = desk.orbitAccount();
         return json(response, 200, { ...connectorCatalog(), connections: connectionList(config).map(item => ({ ...item, hasKey: Boolean(config.sources.find(source => source.id === item.id)?.hasKey) })),
-          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [], catalog: loadCatalog(), links: catalogConnections({ toolbox: desk.toolbox, store }) });
+          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [], catalog: loadCatalog(), links: catalogConnections({ toolbox: desk.toolbox, store }), signIns: signInsFor(desk, response) });
       }
       // The catalog (connector-catalog.js): check connects for real and saves nothing; add checks again and saves only when it passes.
       const catalogMatch = url.pathname.match(/^\/api\/connectors\/catalog\/([a-z0-9-]+)(\/probe)?$/);
