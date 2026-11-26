@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { TursoSync } from '../src/turso.js';
+import { Peers } from '../src/peers.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const until = async (check, message) => {
@@ -419,5 +420,56 @@ test('hidden agent records stay on this computer: only what the chat shows goes 
   // The cloud check does not count the hidden ones as missing.
   const check = await store.cloud.verify();
   assert.equal(check.matched, true); assert.equal(check.localEvents, 1);
+  await store.cloud.close(); store.close();
+});
+
+// Rows the stand-in database walks for a look by version: the (workspace, v) range in order, until LIMIT rows passed the whole
+// WHERE (the rows the look returned). Turso bills those rows, not the ones that come back (L88).
+function countScans(turso, store) {
+  const counter = { rows: 0 }, execute = store.cloud.client.execute.bind(store.cloud.client);
+  store.cloud.client.execute = async query => {
+    const result = await execute(query), table = /FROM (rex_chat|rex_shared) WHERE .*v ?> ?\?/.exec(query.sql)?.[1];
+    if (/\(kind,id\) IN/.test(query.sql)) counter.rows += result.rows.length;
+    else if (table) {
+      const since = query.args.find(arg => typeof arg === 'string' && arg !== store.nodeId && arg !== store.cloud.workspace), limit = Number(query.args.at(-1));
+      const key = row => table === 'rex_chat' ? row.uid : `${row.kind}/${row.id}`;
+      const range = turso.remote.prepare(`SELECT * FROM ${table} WHERE workspace=? AND v>? ORDER BY v`).all(store.cloud.workspace, since).map(key);
+      counter.rows += result.rows.length < limit ? range.length : range.indexOf(key(result.rows.at(-1))) + 1;
+    }
+    return result;
+  };
+  return counter;
+}
+
+test("an idle computer reads its own cloud rows once, not on every look, and still gets the other computer's late rows (L88)", async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('idle-reads'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-idle.example.invalid', authToken: 'idle-token' });
+  const workspace = store.cloud.workspace, mine = store.nodeId, written = Date.now() - 10 * 60000;
+  const stamp = (at, index, node) => `${at.toString(36).padStart(9, '0')}.${index.toString(36).padStart(4, '0')}.${node}`;
+  const chat = (uid, v, node) => turso.remote.prepare('INSERT INTO rex_chat(workspace,uid,run_id,kind,visible,value,created_at,v,node,deleted) VALUES(?,?,?,?,?,?,?,?,?,0)').run(workspace, uid, 'chat-1', 'agent-text', 1, JSON.stringify({ text: uid }), new Date().toISOString(), v, node);
+  const shared = (id, v, node) => turso.remote.prepare('INSERT INTO rex_shared(kind,id,value,deleted,v,node,workspace) VALUES(?,?,?,?,?,?,?)').run('roommsg', id, JSON.stringify({ id }), 0, v, node, workspace);
+  // An hour ago the other computer wrote one message; ten minutes ago this computer wrote 1,500 of its own, and 900 records.
+  chat('theirs-old', stamp(written - 50 * 60000, 0, 'other-laptop'), 'other-laptop');
+  for (let index = 0; index < 1500; index++) chat(`mine-${index}`, stamp(written, index, mine), mine);
+  for (let index = 0; index < 900; index++) shared(`mine-${index}`, stamp(written, index, mine), mine);
+  const peers = new Peers({ store }), scans = countScans(turso, store), got = [];
+  store.applyChatEvents = rows => { got.push(...rows.map(row => row.uid)); return rows.length; };
+  await peers.pullChats(); await peers.pullTurso();
+  const first = scans.rows;
+  assert.ok(first >= 2400 && first < 2600, `the first look reads every row once (${first})`);
+  assert.deepEqual(got, ['theirs-old'], "this computer's own rows are read past, never applied");
+  scans.rows = 0;
+  for (let look = 0; look < 20; look++) { await peers.pullChats(); await peers.pullTurso(); }
+  assert.ok(scans.rows <= 5, `20 safety looks on an idle computer read almost nothing (${scans.rows} rows)`);
+  // The other computer's clock is a minute behind: its new message is stamped below where this computer has read to.
+  const late = stamp(written - 60000, 0, 'other-laptop'); chat('theirs-late', late, 'other-laptop');
+  await peers.pullChats({ from: late, overlap: 0 });
+  assert.ok(got.includes('theirs-late'), "the note names the late row, so the look starts below it");
+  // Without the note (the line down), the daily look reads it.
+  const lost = stamp(written - 2 * 60000, 1, 'other-laptop'); chat('theirs-lost', lost, 'other-laptop');
+  peers.save({ chatDeepAt: 0 }); await peers.pullChats();
+  assert.ok(got.includes('theirs-lost'), 'the daily second look reads a row stamped below the read position');
   await store.cloud.close(); store.close();
 });

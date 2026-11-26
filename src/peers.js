@@ -27,7 +27,8 @@ const CHAT_DEEP_MS = 6 * 3600000, CHAT_DEEP_SPAN = 24 * 3600000;
 // BEAT_MS: the note that says this computer is on, with what its agents do; a change goes at once.
 // CLOUD_BEAT_MS: this computer's heartbeat row in the cloud, for computers without the line; a change is written at once too.
 // NOTE_BYTES: a note bigger than this leaves its records and messages out, and the other computers read them instead.
-const SAFETY_MS = 5 * 60000, FALLBACK_MS = 20000, BEAT_MS = 60000, CLOUD_BEAT_MS = 5 * 60000, NOTE_BYTES = 16000;
+// SETTLE_MS: a safety look this long past the overlap after the newest row read settles it (see pullChats).
+const SAFETY_MS = 5 * 60000, SETTLE_MS = 60000, FALLBACK_MS = 20000, BEAT_MS = 60000, CLOUD_BEAT_MS = 5 * 60000, NOTE_BYTES = 16000;
 // How often the other computers' agent states are read while one of them is on but sends no notes.
 const LOOK_MS = FALLBACK_MS;
 const older = (left, right) => !left ? right || '' : !right ? left : left < right ? left : right;
@@ -362,23 +363,31 @@ export class Peers {
     // reaches the newest row; only then is it done for the hour, so rows past the page limit are never skipped.
     const safety = overlap > 0, going = safety && !again && settings.chatDeepFrom ? String(settings.chatDeepFrom) : '';
     const deep = safety && !again && (Boolean(going) || Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS);
+    // The overlap is read again only until one safety look ran a minute past it after the newest row read (chatSettled): by
+    // then a row from a clock up to the overlap behind is uploaded and was read, so the looks after it start at the last row
+    // read. Measured from the last row, not from now, the overlap read an idle computer's own last rows on every look (L88).
+    const settled = safety && !again && !deep && Boolean(since) && String(settings.chatSettled || '') === since;
     if (going) since = going;
-    else if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : overlap)).toString(36).padStart(9, '0'); }
+    else if (since && !settled) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : overlap)).toString(36).padStart(9, '0'); }
     // Uploaded late, or by a computer whose clock is behind: the note names the oldest one, so it is read now, not lost.
     if (from && since && !going && from <= since) since = justBelow(from);
     let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
-      if (!rows?.length) { finished = true; break; }
-      total += step(`sync chat: applyChatEvents (${rows.length} rows, page ${page + 1})`, () => this.store.applyChatEvents(rows));
+      // scanned and last count this computer's own rows too (TursoSync.pullChat), so the read position moves past them and
+      // they are read once, not on every look (L88). The overlap, the note's from and the daily look still catch a late row.
+      const count = rows?.scanned ?? rows?.length ?? 0, last = rows?.last || (rows?.length ? String(rows.at(-1).v) : '');
+      if (!count) { finished = true; break; }
+      if (rows.length) total += step(`sync chat: applyChatEvents (${rows.length} rows, page ${page + 1})`, () => this.store.applyChatEvents(rows));
       // Only a message newer than the last one read is a sign of life: the overlap reads the same last rows on every pull,
       // and counting those kept a computer that went off "online" forever (L26). An old message read for the first time is not either.
       step('sync chat: mark computers heard', () => { for (const row of rows) { const [time, , ...node] = String(row.v).split('.'); if (String(row.v) <= read || Date.now() - (parseInt(time, 36) || 0) > CLOUD_MS) continue; this.hear(node.join('.')); } });
-      newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
-      if (rows.length < 500) { finished = true; break; }
+      newest = last > newest ? last : newest; since = last;
+      if (count < 500) { finished = true; break; }
     }
     const look = deep && !finished ? { chatDeepFrom: since } : again || deep ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
-    if (again || deep || newest !== String(settings.chatAt || '')) step('sync chat: save read position', () => this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look }));
+    const calm = safety ? { chatSettled: newest && Date.now() >= (parseInt(newest.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newest : '' } : {};
+    if (again || deep || newest !== String(settings.chatAt || '') || (safety && calm.chatSettled !== String(settings.chatSettled || ''))) step('sync chat: save read position', () => this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look, ...calm }));
     return total;
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.
@@ -404,7 +413,10 @@ export class Peers {
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = step('sync shared: read peer settings', () => this.settings()), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
-    let since = `${Math.max(0, at - overlap).toString(36).padStart(9, '0')}`, newest = at;
+    // Settled like pullChats: once a safety look ran a minute past the overlap after the newest row, the looks after it start at
+    // that row's whole version (tursoSettled). tursoAt keeps only the time, and rows stamped in its last millisecond came back each look.
+    const settled = overlap > 0 && !again && at > 0 && Boolean(settings.tursoSettled) && (parseInt(String(settings.tursoSettled).split('.')[0], 36) || 0) === at;
+    let since = settled ? String(settings.tursoSettled) : `${Math.max(0, at - overlap).toString(36).padStart(9, '0')}`, newest = at, newestV = settled ? since : '';
     if (from && !again && from <= since) since = justBelow(from);
     try {
       // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
@@ -414,11 +426,14 @@ export class Peers {
         if (rows?.length) step(`sync shared: applyAll (${rows.length} rows, page ${page + 1})`, () => this.applyAll(rows));
         // Anything new from a computer means it is on (its own stamp is only used to tell new from already seen).
         for (const row of rows || []) { const [time, , ...node] = String(row.v).split('.'), stamp = parseInt(time, 36) || 0, from = node.join('.'); if (from && stamp > ((this.newestFrom ||= new Map()).get(from) || 0)) { if (this.newestFrom.has(from)) this.hear(from); this.newestFrom.set(from, stamp); } }
-        newest = Math.max(newest, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
-        if (!rows || rows.length < 400) break;
-        since = String(rows.at(-1).v);
+        // Past this computer's own rows too (TursoSync.pullShared counts them in scanned and last), so they are read once (L88).
+        const count = rows?.scanned ?? rows?.length ?? 0, last = rows?.last || (rows?.length ? String(rows.at(-1).v) : '');
+        if (last) { newest = Math.max(newest, parseInt(last.split('.')[0], 36) || 0); if (last > newestV) newestV = last; }
+        if (count < 400) break;
+        since = last;
       }
-      if (again || newest > at) step('sync shared: save read position', () => this.save({ tursoAt: newest, tursoNode: this.self.id }));
+      const calm = overlap > 0 ? { tursoSettled: newestV && Date.now() >= (parseInt(newestV.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newestV : '' } : {};
+      if (again || newest > at || (overlap > 0 && calm.tursoSettled !== String(settings.tursoSettled || ''))) step('sync shared: save read position', () => this.save({ tursoAt: newest, tursoNode: this.self.id, ...calm }));
     } catch { /* Turso shows its own state in Settings */ }
   }
   // What this computer's agents are doing, as the other computers show it in their sidebar.

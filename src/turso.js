@@ -18,6 +18,10 @@ import { development } from './folders.js';
 const DEV_CLOUD_OFF = 'This is a development copy of Rex Desk, so cloud backup is off. Start it with REX_DEV_CLOUD=1 to use a cloud database.';
 const cloudAllowed = () => !development() || process.env.REX_DEV_CLOUD === '1';
 
+// The rows of a look that are another computer's, with how many rows the cloud read (scanned, this computer's own included)
+// and the last version read (last), so Peers moves its read position past every row read, not only past the other computers'.
+export const scanned = (rows, read) => Object.assign(rows, { scanned: read.length, last: read.length ? String(read.at(-1).v) : '' });
+
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 // What one upload carried, for the sync note to the other computers (L88): the oldest version of the shared records in it, and
 // the records and chat rows themselves (small ones ride inside the note, so the other computer does not read them from the cloud).
@@ -99,7 +103,10 @@ export class TursoSync {
     // Each look re-reads a short overlap (for clocks that differ), so the versions come first and only the records not read
     // before are downloaded. Downloading every record of the overlap on every look moved tens of GB a month and crowded out
     // the account service on the same Turso servers.
-    const heads = await this.client.execute({ sql: 'SELECT kind,id,deleted,v FROM rex_shared WHERE v > ? AND node != ? AND workspace = ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, this.workspace, limit] });
+    // This computer's own rows are read too (their version only) and left out below: skipping them in the query still read
+    // them from the cloud on every look, and the read position never moved past them (L88). See scanned() for the position.
+    const all = await this.client.execute({ sql: 'SELECT kind,id,deleted,v,node FROM rex_shared WHERE v > ? AND workspace = ? ORDER BY v LIMIT ?', args: [since, this.workspace, limit] });
+    const heads = { rows: all.rows.filter(row => row.node !== this.store.nodeId) };
     const seen = this.pulled ||= new Map(), key = row => `${row.kind}\u001f${row.id}`;
     if (seen.size > 50000) seen.clear();
     const wanted = heads.rows.filter(row => !Number(row.deleted) && seen.get(key(row)) !== row.v);
@@ -110,12 +117,12 @@ export class TursoSync {
       const found = await this.client.execute({ sql: `SELECT kind,id,value,v FROM rex_shared WHERE (kind,id) IN (VALUES ${wanted.map(() => '(?,?)').join(',')}) AND +workspace = ?`, args: [...wanted.flatMap(row => [row.kind, row.id]), this.workspace] });
       for (const row of found.rows) values.set(key(row), row);
     }
-    return heads.rows.map(row => {
+    return scanned(heads.rows.map(row => {
       const deleted = Boolean(Number(row.deleted)), full = values.get(key(row));
       if (full) seen.set(key(row), full.v); else if (deleted) seen.set(key(row), row.v);
       // A record read before comes back without its value: applying it changes nothing, and it still counts for paging.
       return { kind: row.kind, id: row.id, deleted, value: deleted || !full ? null : JSON.parse(full.value), v: row.v };
-    });
+    }), all.rows);
   }
   // The next free number of a kind for this account, taken in the cloud database: the first computer to write a number gets it,
   // the other one tries the next. floor is the next number this computer knows of. null when the cloud cannot be reached.
@@ -156,11 +163,12 @@ export class TursoSync {
     if (!this.store.syncedChat(runId)) return;
     this.enqueue('INSERT INTO rex_chat(workspace,uid,run_id,v,node,deleted) VALUES(?,?,?,?,?,1) ON CONFLICT(workspace,uid) DO UPDATE SET deleted=1,v=excluded.v,value=NULL', [this.workspace, uid, runId, this.store.stamp(), this.store.nodeId]);
   }
-  // Messages other computers wrote since a version, oldest first.
+  // Messages other computers wrote since a version, oldest first. This computer's own messages are read too, without their
+  // text, only so the read position moves past them (L88): left out by the query, they were read again on every look.
   async pullChat(since, limit = 500) {
     if (!this.ready || this.closed) return null;
-    const result = await this.client.execute({ sql: 'SELECT uid,run_id,kind,visible,value,created_at,v,deleted FROM rex_chat WHERE workspace=? AND v>? AND node!=? ORDER BY v LIMIT ?', args: [this.workspace, since, this.store.nodeId, limit] });
-    return result.rows.map(row => ({ ...row }));
+    const result = await this.client.execute({ sql: 'SELECT uid,run_id,kind,visible,CASE WHEN node!=? THEN value END AS value,created_at,v,deleted,node FROM rex_chat WHERE workspace=? AND v>? ORDER BY v LIMIT ?', args: [this.store.nodeId, this.workspace, since, limit] });
+    return scanned(result.rows.filter(row => row.node !== this.store.nodeId).map(({ node, ...row }) => ({ ...row })), result.rows);
   }
   // Rex Agent's chats belong to this computer alone and never go to the cloud. Hidden records (raw agent output, tool steps,
   // sessions) stay here too: they were most of the rows and filled the account's cloud database.
