@@ -146,7 +146,7 @@ test('signed out, iPhone outside the Home Screen, and a computer each explain th
   reset(); const pc = browser({ ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }), log = [];
   await checkWebPush(desk({}, log), pc.w);
   html = webPushHtml(esc, '', pc.w);
-  assert.equal(webPushState.name, 'computer'); assert.match(html, /Turned on from your phone/); assert.deepEqual(log, [], 'a computer asks nothing');
+  assert.equal(webPushState.name, 'computer'); assert.match(html, /Turn on from your phone/); assert.deepEqual(log, [], 'a computer asks nothing');
 });
 
 test('a phone already turned on shows On after a reload, and a test to a removed phone turns it back off', async () => {

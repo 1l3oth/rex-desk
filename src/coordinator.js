@@ -212,7 +212,7 @@ export class Desk {
     this.notes = new AgentNotes(this);
     this.handover = new Handover(this);
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
-    this.notifier.webPush = new WebPush({ token: () => this.net.token(), base: () => this.net.base, fetcher: (...args) => this.net.fetcher(...args) });
+    this.notifier.webPush = new WebPush({ token: () => this.net.token(), base: () => this.net.base, fetcher: (...args) => this.net.fetcher(...args), seen: count => this.notifier.rememberWebPhones(count > 0) });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.

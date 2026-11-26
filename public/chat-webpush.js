@@ -85,12 +85,13 @@ export async function testWebPush(ctx, w = globalThis) {
 }
 
 // The row in Notifications settings. Each state says in plain words what is true and what to do.
-export function webPushHtml(esc, deskError = '', w = globalThis) {
+// seen: the account had a phone turned on at the desk's last look (a computer shows the desk's warning only then).
+export function webPushHtml(esc, deskError = '', w = globalThis, { seen = true } = {}) {
   const e = env(w), s = state.name || 'off', busy = state.busy;
   const button = (action, label) => `<button type="button" class="btn small${action === 'nt-wp-on' ? ' primary' : ''}" data-action="${action}" ${busy ? 'disabled' : ''}>${label}</button>`;
   const busyLabel = { allow: t('Waiting for Allow…'), save: t('Turning on…'), test: t('Sending a test…') }[busy];
   const lines = {
-    computer: [t('Turned on from your phone'), t('Open Rex Desk on your phone, then Settings, Notifications, and press Turn on.')],
+    computer: [t('Turn on from your phone'), t('Open Rex Desk on your phone, then Settings, Notifications, and press Turn on.')],
     'signed-out': [t('Sign in to Rex Desk to get phone notifications.'), t('The ntfy app under Other ways still works without signing in.')],
     'ios-home': [t('Add Rex Desk to your Home Screen first'), t('On iPhone, notifications work only in the Rex Desk app on the Home Screen.')],
     insecure: [t('Needs a secure address'), t('Open Rex Desk on this phone through your Rex Desk link (https), then turn this on.')],
@@ -104,8 +105,8 @@ export function webPushHtml(esc, deskError = '', w = globalThis) {
   const action = busy ? `<button type="button" class="btn small" disabled>${busyLabel}</button>`
     : s === 'off' ? button('nt-wp-on', t('Turn on')) : s === 'on' ? button('nt-wp-test', t('Send a test')) : s === 'error' ? button('nt-wp-on', t('Try again')) : s === 'blocked' ? button('nt-wp-check', t('Check again')) : '';
   const steps = s === 'ios-home' ? `<ol class="nt-steps nt-wp-steps"><li>${t`Tap the Share button in Safari.`}</li><li>${t`Tap Add to Home Screen, then Add.`}</li><li>${t`Open Rex Desk from the Home Screen and come back here.`}</li></ol>` : '';
-  const note = state.note ? `<p class="small ${s === 'error' ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(state.note)}</p>` : '';
-  const desk = deskError && s !== 'signed-out' ? `<p class="small warn-text nt-wp-note">${esc(deskError)}</p>` : '';
+  const note = state.note ? `<p class="small ${s === 'error' ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(t(state.note))}</p>` : '';
+  const desk = deskError && s !== 'signed-out' && (s !== 'computer' || seen) ? `<p class="small warn-text nt-wp-note">${esc(t(deskError))}</p>` : '';
   return `<div class="nt-wp" data-wp-state="${s}"><div class="nt-wp-row"><span class="nt-lbl"><b>${lines[0]}</b>${lines[1] ? `<small>${lines[1]}</small>` : ''}</span>${action}</div>${steps}${note}${desk}</div>`;
 }
 
@@ -174,10 +175,10 @@ export function phonesHtml(esc, w = globalThis) {
   if (s === 'signed-out') return '';
   if (!list.signedIn) return `<div class="nt-wp-list"><p class="small muted nt-wp-empty">${t`Sign in to Rex Desk to see the phones that get notices.`}</p></div>`;
   const head = `<p class="nt-wp-head">${t`Phones that get notices`}</p>`;
-  const note = list.note ? `<p class="small ${list.noteBad ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(list.note)}</p>` : '';
+  const note = list.note ? `<p class="small ${list.noteBad ? 'warn-text' : 'muted'} nt-wp-note" role="status">${esc(t(list.note))}</p>` : '';
   if (!list.phones) {
     const body = list.error && !list.loading
-      ? `<div class="nt-wp-row"><span class="nt-lbl"><small class="warn-text">${t`Could not load your phones: ${esc(list.error)}`}</small></span><button type="button" class="btn small" data-action="nt-wp-list">${t`Try again`}</button></div>`
+      ? `<div class="nt-wp-row"><span class="nt-lbl"><small class="warn-text">${t`Could not load your phones: ${esc(t(list.error))}`}</small></span><button type="button" class="btn small" data-action="nt-wp-list">${t`Try again`}</button></div>`
       : `<p class="small muted nt-wp-empty" role="status">${t`Looking up your phones…`}</p>`;
     return `<div class="nt-wp-list">${head}${body}${note}</div>`;
   }

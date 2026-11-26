@@ -55,8 +55,9 @@ export function fitPayload(notice) {
 export function noticeTag(source) { return createHash('sha256').update(String(source)).digest('base64url').slice(0, 22); }
 
 export class WebPush {
-  constructor({ token = () => '', base = ACCOUNT_API, fetcher = fetch, now = Date.now } = {}) {
-    Object.assign(this, { token, base, fetcher, now }); this.phones = null; this.phonesAt = 0; this.status = ''; this.busy = null;
+  // seen(count) hears how many phones the account had at each look, so Settings knows if a phone was ever turned on.
+  constructor({ token = () => '', base = ACCOUNT_API, fetcher = fetch, now = Date.now, seen = () => {} } = {}) {
+    Object.assign(this, { token, base, fetcher, now, seen }); this.phones = null; this.phonesAt = 0; this.status = ''; this.busy = null;
   }
   async call(method, pathname, body, offline = 'Rex Desk could not reach its account service, so the phone notification did not go out.') {
     const token = this.token(); if (!token) throw Object.assign(new Error(SIGN_IN_FIRST), { code: 'signed_out' });
@@ -75,7 +76,7 @@ export class WebPush {
   async list() {
     if (this.phones && this.now() - this.phonesAt < PHONES_MS) return this.phones;
     this.busy ??= this.call('GET', '/v1/push/phones').then(data => {
-      const seen = new Set(); this.phones = (data.phones || []).filter(phone => phone?.id && phone.keys && !seen.has(phone.id) && seen.add(phone.id)); this.phonesAt = this.now(); return this.phones;
+      const seen = new Set(); this.phones = (data.phones || []).filter(phone => phone?.id && phone.keys && !seen.has(phone.id) && seen.add(phone.id)); this.phonesAt = this.now(); this.seen(this.phones.length); return this.phones;
     }).finally(() => { this.busy = null; });
     return this.busy;
   }
@@ -84,14 +85,14 @@ export class WebPush {
   // A phone turned on from its own page: saved with the account, so every computer of the account can reach it.
   async savePhone({ subscription, name }) {
     const sub = subscription || {}, phone = await this.call('POST', '/v1/push/phones', { endpoint: sub.endpoint, keys: sub.keys, name });
-    this.forget(); this.status = ''; return phone;
+    this.forget(); this.status = ''; this.seen(1); return phone;
   }
   // The account's phones for the list in Notifications settings: always asked fresh (and kept for the next notice), never
   // with their keys.
   async phonesList() {
     this.forget();
     const phones = await this.call('GET', '/v1/push/phones', null, 'Rex Desk could not reach its account service to list your phones.');
-    this.phones = (phones.phones || []).filter(phone => phone?.id && phone.keys); this.phonesAt = this.now();
+    this.phones = (phones.phones || []).filter(phone => phone?.id && phone.keys); this.phonesAt = this.now(); this.seen(this.phones.length);
     return this.phones.map(({ id, name, created }) => ({ id, name: String(name || 'Phone'), created: String(created || '') }));
   }
   // A phone taken off the account: it gets nothing more from any computer (the account service refuses a notice for it).

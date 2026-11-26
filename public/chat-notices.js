@@ -110,7 +110,7 @@ export function noticeSettingsHtml(ctx) {
   if (!webPushState.checked) void checkWebPush(wpCtx);
   if (!webPushList.asked) void loadPhones(wpCtx);
   const phone = `<section class="card nt-card nt-phone"><h3>${t`Phone`}</h3>
-      ${webPushHtml(esc, prefs.webPushError || '')}
+      ${webPushHtml(esc, prefs.webPushError || '', window, { seen: Boolean(prefs.webPushSeen) })}
       ${phonesHtml(esc)}
       ${['', 'off', 'on', 'error', 'computer'].includes(webPushState.name) ? toggle('push.always', push.always, t('Also while I am at this computer'), t('Off: the phone gets it only when Rex Desk is not the window in front.')) : ''}
       <details class="nt-adv nt-other"><summary>${t`Other ways: the ntfy app`}</summary>

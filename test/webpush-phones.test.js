@@ -27,6 +27,7 @@ function browser({ ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)'
   };
   return { w, saved, session, calls, subscribed: () => Boolean(sub) };
 }
+const desk_ = (routes, log = []) => desk(routes, log);
 const desk = (routes, log = []) => ({ api: async (pathname, options = {}) => { log.push(`${options.method || 'GET'} ${pathname}`); const out = typeof routes[pathname] === 'function' ? routes[pathname](options) : routes[pathname]; if (out instanceof Error) throw out; return out; }, redraw() {} });
 const reset = () => {
   Object.assign(webPushState, { name: '', note: '', checked: false, key: '', busy: '' });
@@ -216,4 +217,55 @@ test('after a phone is added or removed the next notice asks for the list again,
   assert.deepEqual(acc.calls, ['POST /v1/push/send', 'GET /v1/push/phones', 'POST /v1/push/send'], 'refused once, list asked again, sent once more');
   assert.equal(result.sent, 1, 'only the phone still on the account gets it'); assert.deepEqual(other.phones.map(p => p.id), ['p3']);
   assert.equal(other.phones.some(p => p.id === 'p1'), false);
+});
+
+// ---------- review polish: Khmer desk messages, and no warning on a computer that never had a phone ----------
+test('the desk\'s own messages show in Khmer; messages from the account service stay as they came', async () => {
+  const { useLanguage } = await import('../public/i18n.js');
+  const { readFileSync } = await import('node:fs');
+  const km = JSON.parse(readFileSync(new URL('../public/i18n/km.json', import.meta.url), 'utf8'));
+  const desk = ['Rex Desk could not reach its account service, so the phone notification did not go out.', 'Rex Desk could not reach its account service to list your phones.',
+    'Rex Desk could not reach its account service, so the phone was not removed. Try again when online.', 'The phone notification did not reach any phone. Rex Desk will try with the next one.',
+    'Too many phone notifications in a minute; some were held back.', 'The test did not reach this phone. Try again.', 'This phone is no longer turned on. Turn it on again.', 'That phone has keys Rex Desk cannot use.'];
+  const sources = ['src/webpush.js', 'src/server.js'].map(file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')).join(' ');
+  for (const text of desk) { assert.ok(km[text], `Khmer for: ${text}`); assert.ok(sources.includes(text), `the desk really sends: ${text}`); }
+  useLanguage('km', km);
+  try {
+    const phone = browser({ ua: 'Mozilla/5.0 (Linux; Android 14) Mobile' });
+    reset(); webPushState.name = 'error'; webPushState.note = desk[0];
+    assert.match(webPushHtml(esc, desk[3], phone.w), new RegExp(km[desk[0]]), 'the Turn on note');
+    assert.match(webPushHtml(esc, desk[3], phone.w), new RegExp(km[desk[3]]), 'the desk warning');
+    reset(); await loadPhones(desk_({ '/notices/webpush/phones': { signedIn: true, phones: null, error: desk[1] } }));
+    assert.match(phonesHtml(esc, phone.w), new RegExp(km[desk[1]]), 'the list error');
+    reset(); await loadPhones(desk_({ '/notices/webpush/phones': { signedIn: true, phones: [two[0]] } }));
+    await removePhone(desk_({ '/notices/webpush/phones': { signedIn: true, phones: [two[0]] }, '/notices/webpush/phones/p1': new Error(desk[2]) }), 'p1', phone.w);
+    assert.match(phonesHtml(esc, phone.w), new RegExp(km[desk[2]]), 'the Remove error');
+    reset(); webPushState.name = 'error'; webPushState.note = 'Phone notifications are not part of this plan.';
+    assert.match(webPushHtml(esc, '', phone.w), /Phone notifications are not part of this plan\./, 'an account service message is shown as it came');
+    const computer = browser({ ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }); reset(); webPushState.name = 'computer';
+    assert.match(webPushHtml(esc, '', computer.w), new RegExp(km['Turn on from your phone']));
+  } finally { useLanguage('en'); }
+});
+
+test('a computer shows the desk\'s sign-in warning only when the account had a phone turned on', async () => {
+  const computer = browser({ ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }), phone = browser({ ua: 'Mozilla/5.0 (Linux; Android 14) Mobile' });
+  const warn = 'Sign in to Rex Desk to get phone notifications.';
+  reset(); webPushState.name = 'computer';
+  const never = webPushHtml(esc, warn, computer.w, { seen: false });
+  assert.match(never, /Turn on from your phone/); assert.doesNotMatch(never, /warn-text/, 'never had a phone: no amber line');
+  assert.match(webPushHtml(esc, warn, computer.w, { seen: true }), /class="small warn-text nt-wp-note">Sign in to Rex Desk to get phone notifications\./, 'had a phone and now cannot send: says so');
+  reset(); webPushState.name = 'off';
+  assert.match(webPushHtml(esc, 'The phone notification did not reach any phone. Rex Desk will try with the next one.', phone.w, { seen: false }), /warn-text nt-wp-note">The phone notification did not reach any phone/, 'the phone itself always shows it');
+  // The desk keeps what it saw at each look: a phone saved or listed sets it, an empty list clears it, signed out keeps it.
+  const app = await createApp({ dataDirectory: temporary('wp-seen'), port: 0 });
+  try {
+    const acc = account([]); const push = app.desk.notifier.webPush; push.token = () => 'k'; push.base = 'https://api.test'; push.fetcher = acc.fetcher;
+    const seen = async () => app.desk.notifier.summary().prefs.webPushSeen;
+    assert.equal(Boolean(await seen()), false);
+    acc.phones.push({ id: 'p1', name: 'iPhone', keys: realKeys(), created: '2026-11-20T08:00:00.000Z' });
+    await push.phonesList(); assert.equal(await seen(), true);
+    push.token = () => ''; await push.send({ source: 'x', body: 'y' }); assert.equal(await seen(), true, 'signed out keeps what it last saw');
+    push.token = () => 'k'; acc.phones.length = 0; await push.phonesList(); assert.equal(await seen(), false, 'all phones removed: no more warning');
+    acc.phones.push({ id: 'p2', name: 'Phone', keys: realKeys() }); push.forget(); await push.send({ source: 'z', body: 'w' }); assert.equal(await seen(), true, 'a notice that finds phones sets it too');
+  } finally { await app.close(); }
 });

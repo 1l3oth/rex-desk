@@ -60,6 +60,9 @@ export class Notifier {
     if (!prefs.push.topic) { prefs.push.topic = `rexdesk-${randomUUID().replaceAll('-', '').slice(0, 24)}`; this.store.put('prefs', 'notify', { ...saved, id: 'notify', push: prefs.push }); }
     return prefs;
   }
+  // Whether the account had a phone turned on at the last look. Kept, because a signed-out desk cannot look: a computer
+  // that had phones and now cannot send says so, and one that never had any shows no warning.
+  rememberWebPhones(on) { const saved = this.store.get('prefs', 'notify') || {}; if (Boolean(saved.webPushSeen) !== on) this.store.put('prefs', 'notify', { ...saved, id: 'notify', webPushSeen: on }); }
   // What the person chose on the Notifications screen. Only known settings are kept.
   setPrefs(input = {}) {
     const prefs = this.prefs(), next = { ...prefs, id: 'notify' }, time = value => /^\d{2}:\d{2}$/.test(String(value)) ? String(value) : null;
