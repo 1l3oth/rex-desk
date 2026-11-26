@@ -10,7 +10,7 @@ const ICON = {
 };
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
-import { askConfirm } from '/confirm.js';
+import { askConfirm } from './confirm.js';
 import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
