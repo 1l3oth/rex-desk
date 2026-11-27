@@ -41,9 +41,20 @@ export function verifyInstaller(bytes, manifest, key = releaseKeys) {
   if (![key].flat().some(trusted => verify(null, bytes, trusted, Buffer.from(manifest.signature || '', 'base64')))) throw new Error('The downloaded update is not signed by the Rex Desk release key.');
 }
 
-// What each kind of computer downloads to update itself: Windows runs an installer, a Mac swaps in a packed copy of the app.
-// The keys are Node's platform and processor names, and they name the entries under "platforms" in latest.json.
-export const updaters = { 'win32-x64': '-setup.exe', 'darwin-arm64': '.app.tar.gz' };
+// What each kind of computer downloads to update itself: Windows runs an installer, a Mac swaps in a packed copy of the app,
+// and Linux swaps in the new AppImage. The keys are Node's platform and processor names, and they name the entries under
+// "platforms" in latest.json. Suffixes are lower case: a file name is compared in lower case.
+// A Linux copy installed from the .deb has no entry: it lives in /usr and is updated by installing the newer .deb (apt,
+// or the company's own software tool), never by the app itself.
+export const updaters = { 'win32-x64': '-setup.exe', 'darwin-arm64': '.app.tar.gz', 'linux-x64': '.appimage' };
+// The running AppImage file (its own launcher sets APPIMAGE). Without it, a Linux copy came from the .deb.
+export const appImageOf = (env = process.env) => String(env.APPIMAGE || '');
+// A Windows copy in Program Files came from the .msi: it is for every user and IT updates it with the newer .msi. The
+// per-user .exe installer must never run over it (it cannot write there, and would leave two copies).
+export const fromMsi = (executable, env = process.env) => {
+  const file = path.win32.resolve(String(executable || '')).toLowerCase();
+  return [env.ProgramFiles, env.ProgramW6432, env['ProgramFiles(x86)']].filter(Boolean).some(folder => file.startsWith(path.win32.resolve(folder).toLowerCase() + path.win32.sep));
+};
 
 const quoted = value => `'${String(value).replaceAll("'", `'\\''`)}'`;
 // The Mac helper: waits for the server to exit, closes the app, unpacks the new app beside the old one (same disk, so the
@@ -63,9 +74,26 @@ open "$APP"
 `;
 }
 
+// The Linux AppImage helper: waits for the server to exit, closes the app, puts the new AppImage beside the old one (same
+// folder, so the swap is one rename), and opens Rex Desk again. When anything fails the old AppImage stays and is opened.
+export function appImageInstallScript({ serverPid, update, appImage, log }) {
+  return `#!/bin/sh
+exec >${quoted(log)} 2>&1
+APP=${quoted(appImage)}
+tries=0; while kill -0 ${Number(serverPid)} 2>/dev/null && [ $tries -lt 120 ]; do sleep 0.5; tries=$((tries+1)); done
+pkill -f "$APP" ; sleep 2
+NEW="$APP.new"
+if cp ${quoted(update)} "$NEW" && chmod 755 "$NEW" && mv -f "$NEW" "$APP"; then echo "Updated $APP"; else rm -f "$NEW"; echo "Swap failed, kept the old AppImage"; fi
+nohup "$APP" >/dev/null 2>&1 &
+`;
+}
+
 // Only the installed desktop app updates itself; a source checkout updates through Git.
 export class Updates {
-  constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKeys, platform = `${process.platform}-${process.arch}` } = {}) {
+  constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKeys, platform = `${process.platform}-${process.arch}`, appImage = appImageOf(), msi = fromMsi } = {}) {
+    // On Linux only an AppImage updates itself, and the file to swap is the AppImage, not the program inside its mount.
+    if (platform.startsWith('linux')) { executable = appImage || ''; if (!appImage) platform = `${platform}-deb`; }
+    if (platform.startsWith('win32') && executable && msi(executable)) platform = `${platform}-msi`;
     Object.assign(this, { fetcher, version, executable, key, platform, directory: path.join(dataDirectory, 'updates') });
     this.state = { supported: Boolean(version && executable && updaters[platform]), current: version || '', stage: 'Beta', checkedAt: '', available: null, ready: false, error: '', installFailed: null };
     this.state.installFailed = this.lastInstall();
@@ -125,7 +153,7 @@ export class Updates {
     if (this.file === file && this.state.ready) return;
     mkdirSync(this.directory, { recursive: true });
     // Only the newest installer is kept: older ones are not needed and took hundreds of MB on a nearly full drive.
-    for (const name of readdirSync(this.directory)) if (/^Rex-Desk-.+-setup\.exe$|^Rex-Desk-.+\.app\.tar\.gz$/i.test(name) && path.join(this.directory, name) !== file) rmSync(path.join(this.directory, name), { force: true });
+    for (const name of readdirSync(this.directory)) if (/^Rex-Desk-.+-setup\.exe$|^Rex-Desk-.+\.app\.tar\.gz$|^Rex-Desk-.+\.appimage$/i.test(name) && path.join(this.directory, name) !== file) rmSync(path.join(this.directory, name), { force: true });
     let bytes = existsSync(file) ? readFileSync(file) : null;
     if (!bytes) {
       const free = (this.freeSpace || freeSpace)(this.directory), need = Math.max(INSTALL_ROOM, 2 * (Number(update.size) || 0));
@@ -176,6 +204,12 @@ export class Updates {
       const helper = path.join(this.directory, 'install-update.sh');
       writeFileSync(helper, macInstallScript({ serverPid: process.pid, archive: this.file, app: path.resolve(this.executable, '../../..'), log: path.join(this.directory, 'install-update.log') }));
       spawn('/bin/sh', [helper], { detached: true, stdio: 'ignore' }).unref();
+      return 'helper';
+    }
+    if (this.platform.startsWith('linux')) {
+      const helper = path.join(this.directory, 'install-update.sh');
+      writeFileSync(helper, appImageInstallScript({ serverPid: process.pid, update: this.file, appImage: this.executable, log: path.join(this.directory, 'install-update.log') }));
+      (this.spawner || spawn)('/bin/sh', [helper], { detached: true, stdio: 'ignore' }).unref();
       return 'helper';
     }
     // Remembered for the next start: still on an older version then means the install did not take (see lastInstall).

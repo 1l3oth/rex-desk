@@ -19,7 +19,7 @@ import { parseArgs } from 'node:util';
 import { downloadsUrl, newer, updaters, verifyInstaller } from '../src/updates.js';
 
 export const channels = ['stable', 'beta'];
-const installerTypes = /\.(exe|msi|zip|dmg|tar\.gz)$/i;
+const installerTypes = /\.(exe|msi|zip|dmg|tar\.gz|deb|AppImage)$/i;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const walk = folder => readdirSync(folder, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(folder, entry.name)) : [path.join(folder, entry.name)]);
 

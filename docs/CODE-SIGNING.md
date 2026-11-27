@@ -26,6 +26,17 @@ Each release on the [Releases page](https://github.com/1l3oth/rex-desk/releases)
 
 Until the certificate is issued, the installers are unsigned, and Windows SmartScreen warns you the first time you run one (see the [README](../README.md#download)).
 
+### Where each file stands today
+
+| File | Signed by an operating-system certificate | Checked before an update installs |
+|---|---|---|
+| Windows `.exe` and `.msi` | Not yet (Certum certificate on its way) | The `.exe` update is checked against the Rex Desk release key |
+| macOS `.dmg` and app | Ad hoc only (no Apple Developer ID yet) | The packed app is checked against the Rex Desk release key |
+| Linux `.AppImage` | No (Linux has no central code signing) | The AppImage update is checked against the Rex Desk release key |
+| Linux `.deb` | No (there is no Rex Desk apt repository yet, so no signed apt index) | Installed by apt or your deployment tool; check its SHA-256 against `latest.json` |
+
+Every file's SHA-256 is published in <https://downloads.rexdesk.dev/stable/latest.json>. Companies whose policy requires signed packages should wait for the signed releases, or sign and host the `.msi` or `.deb` in their own repository after checking the SHA-256.
+
 ## How releases are made
 
 1. Every change is a commit in this repository. Outside contributions come in as pull requests, and the maintainer reviews each one before it is merged.

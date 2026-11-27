@@ -24,15 +24,20 @@ Get the newest build from the [Releases page](https://github.com/1l3oth/rex-desk
 
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `Rex.Desk_<version>_x64-setup.exe` (installer) |
-| Windows, if `.exe` installers are blocked | `Rex.Desk_<version>_x64_en-US.msi`, or `Rex.Desk_<version>_x64-portable.zip` (unzip it and run `rex-desk.exe`, no install needed) |
+| Windows 10/11 (64-bit) | `Rex.Desk_<version>_x64-setup.exe` (installer for you only, updates itself) |
+| Windows, for IT or if `.exe` installers are blocked | `Rex.Desk_<version>_x64_en-US.msi` (installs for every user on the computer; silent install: `msiexec /i Rex.Desk_<version>_x64_en-US.msi /qn`). Or `Rex.Desk_<version>_x64-portable.zip`: unzip it and run `rex-desk.exe`, no install needed |
+| Linux x64, Ubuntu 22.04+ or Debian 12+ | `Rex-Desk_<version>_amd64.deb`: `sudo apt install ./Rex-Desk_<version>_amd64.deb` |
+| Linux x64, other distributions | `Rex-Desk_<version>_amd64.AppImage`: `chmod +x` it and run it (needs FUSE 2, `libfuse2` or `libfuse2t64`) |
 | macOS (Apple Silicon) | `Rex.Desk_<version>_aarch64.dmg` |
 
 The installers bundle Node.js and the Rex Desk server, so you don't need to install anything else to open the app.
 
+How each one updates: the Windows `.exe`, the macOS app and the Linux AppImage update themselves (Settings, Updates). The `.msi` and the `.deb` are for IT: install the newer `.msi` or `.deb` over the old one (`msiexec /i ... /qn`, or `sudo apt install ./....deb`, or your deployment tool); your data stays. On Linux your data is in `~/.local/share/Rex Desk`.
+
 The installers are **not code-signed yet**. A Certum open-source code signing certificate is on its way; [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md) says what will be signed and how to check it. Until then your computer warns you the first time:
 
 - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info**, then **Run anyway**.
+- **Linux:** there is no system warning. To check a file, compare its SHA-256 (`sha256sum <file>`) with the `sha256` for it in <https://downloads.rexdesk.dev/stable/latest.json>.
 - **macOS:** open the `.dmg` and drag Rex Desk to Applications. The first time, right-click Rex Desk and choose **Open**. If macOS says the app is damaged, run this once in Terminal:
 
   ```bash
@@ -108,7 +113,7 @@ Then open http://127.0.0.1:4318 (a checkout runs as development on 4318; the ins
 
 ## Build the installers
 
-The **Desktop installers** workflow (`.github/workflows/desktop.yml`) builds the Windows `.exe`, `.msi` and portable `.zip` and the macOS `.dmg` on GitHub. Start it from the Actions tab with **Run workflow** and fill in:
+The **Desktop installers** workflow (`.github/workflows/desktop.yml`) builds the Windows `.exe`, `.msi` and portable `.zip`, the macOS `.dmg` and the Linux `.deb` and `.AppImage` on GitHub. Its **try** job then installs the Windows and Linux packages on clean GitHub machines, opens them and checks that the server answers; on Windows it also upgrades the version people have now to the new one, for the `.exe` and the `.msi`. Start it from the Actions tab with **Run workflow** and fill in:
 
 - **channel**: `beta` for a test release, `stable` for everyone, `none` to only build.
 - **version**: like `0.3.0`. Leave it empty to use the version in `desktop/src-tauri/tauri.conf.json`.

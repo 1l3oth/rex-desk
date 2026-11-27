@@ -183,3 +183,26 @@ test('an update that did not take (antivirus blocked it) is told on the next sta
   assert.equal(updates.status().installFailed, null);
   assert.match(read(path.join(folder, 'install-update.log'), 'utf8'), /server: installing 0\.3\.0/);
 });
+
+test('Linux: an AppImage update swaps the file in one rename beside the old one, closes the app first, and reopens it', async () => {
+  const { appImageInstallScript } = await import('../src/updates.js');
+  const script = appImageInstallScript({ serverPid: 4242, update: "/home/me/.local/share/Rex Desk/updates/Rex-Desk-0.3.0.appimage", appImage: "/home/me/Apps/it's Rex.AppImage", log: '/tmp/install-update.log' });
+  assert.match(script, /kill -0 4242/, 'waits for the server to end');
+  assert.ok(script.includes(String.raw`APP='/home/me/Apps/it'\''s Rex.AppImage'`), 'quotes the path safely');
+  assert.match(script, /cp '\/home\/me\/\.local\/share\/Rex Desk\/updates\/Rex-Desk-0\.3\.0\.appimage' "\$NEW" && chmod 755 "\$NEW" && mv -f "\$NEW" "\$APP"/);
+  assert.match(script, /else rm -f "\$NEW"; echo "Swap failed, kept the old AppImage"/, 'a failed copy keeps the old AppImage');
+  assert.match(script, /nohup "\$APP"/, 'opens Rex Desk again either way');
+});
+
+test('Windows: a copy from the .msi (Program Files) never runs the per-user installer over itself; IT updates it with the newer .msi', async () => {
+  const { Updates, fromMsi } = await import('../src/updates.js');
+  const win = (...parts) => path.win32.join('C:\\', ...parts);
+  const env = { ProgramFiles: win('Program Files'), 'ProgramFiles(x86)': win('Program Files (x86)') };
+  assert.equal(fromMsi(win('Program Files', 'Rex Desk', 'rex-desk.exe'), env), true);
+  assert.equal(fromMsi(win('program files', 'Rex Desk', 'rex-desk.exe'), env), true, 'any letter case');
+  assert.equal(fromMsi(win('Users', 'me', 'AppData', 'Local', 'Rex Desk', 'rex-desk.exe'), env), false);
+  assert.equal(fromMsi(win('Program Files Extra', 'rex-desk.exe'), env), false);
+  const data = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-msi-'));
+  assert.equal(new Updates(data, { version: '0.1.0', executable: win('Program Files', 'Rex Desk', 'rex-desk.exe'), platform: 'win32-x64', msi: () => true }).status().supported, false);
+  assert.equal(new Updates(data, { version: '0.1.0', executable: win('Users', 'me', 'AppData', 'Local', 'Rex Desk', 'rex-desk.exe'), platform: 'win32-x64', msi: () => false }).status().supported, true);
+});

@@ -279,8 +279,14 @@ const NODE: &str = "node";
 fn data_home(fallback: &PathBuf) -> PathBuf {
     #[cfg(windows)]
     let base = std::env::var_os("APPDATA").map(PathBuf::from);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     let base = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library").join("Application Support"));
+    // Linux: the usual place for a program's own data, ~/.local/share (or XDG_DATA_HOME when the person set it).
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share")));
     base.unwrap_or_else(|| fallback.clone()).join("Rex Desk")
 }
 
@@ -384,7 +390,8 @@ fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
 
 // The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk
 // unless the person picked another folder. A development build falls back to a checkout and the system Node.
-// On a Mac the payload sits in Contents/Resources, and the data in ~/Library/Application Support/Rex Desk.
+// On a Mac the payload sits in Contents/Resources, and the data in ~/Library/Application Support/Rex Desk. On Linux the
+// payload sits in usr/lib/Rex Desk, and the data in ~/.local/share/Rex Desk.
 fn runtime() -> Result<Runtime, String> {
     runtime_with(false)
 }
@@ -404,7 +411,9 @@ fn runtime_with(ask: bool) -> Result<Runtime, String> {
             _ => {}
         }
     }
-    for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
+    // Windows: beside the program. Mac: Contents/Resources. Linux (.deb and AppImage): the program is in usr/bin and its
+    // files in usr/lib/Rex Desk.
+    for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload"), folder.join("..").join("lib").join("Rex Desk").join("payload")] {
         let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
         if node.is_file() && app.join("src").join("server.js").is_file() {
             return Ok(Runtime { node, app, data: choose_data(data_home(&beside), ask), bundled: true });
@@ -610,7 +619,8 @@ fn main() {
                 .disable_drag_drop_handler()
                 .additional_browser_args(BROWSER_ARGS)
                 .on_new_window(move |url, features| open_link(&handle, url, features))
-                .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
+                // Linux keeps the system's own title bar, so the page draws no window buttons of its own there.
+                .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else if cfg!(target_os = "windows") { "window.__REX_SHELL = 'windows';" } else { "window.__REX_SHELL = 'linux';" })
                 // Dark before the first page paints, so the window never flashes white while Rex Desk starts.
                 .background_color(tauri::window::Color(10, 14, 25, 255))
                 .title("Rex Desk Beta")
