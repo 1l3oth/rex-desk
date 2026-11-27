@@ -238,7 +238,7 @@ test('a new Claude account gets its own profile folder in ~/.config, sharing the
   const created = profiles.addProfile('claude', 'Work Account', { roots: { home } });
   assert.equal(path.basename(created.profile), 'claude-work-account');
   assert.equal(realpathSync(path.join(created.profile, 'projects')).toLowerCase(), realpathSync(shared).toLowerCase());
-  assert.throws(() => profiles.addProfile('claude', 'work account', { roots: { home } }), /already a profile/);
+  assert.throws(() => profiles.addProfile('claude', 'work account', { roots: { home } }), /already an account called work-account/);
   const found = discoverProfiles('claude', { roots: { home, appData: path.join(home, 'AppData') } }).map(item => path.basename(item.profile));
   assert.ok(found.includes('claude1') && found.includes('claude-work-account') && !found.includes('claude-code-shared-history'));
   assert.ok(existsSync(created.profile));

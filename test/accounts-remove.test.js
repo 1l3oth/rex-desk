@@ -115,7 +115,7 @@ test('adding a removed account\'s name again brings it back and says so, instead
     assert.equal(desk.agents.hidden('claude', work), false);
     assert.equal(listed(desk.agents, 'claude', work), true);
     assert.equal(readFileSync(path.join(work, '.credentials.json'), 'utf8'), '{"signed":"in"}', 'its sign-in is the earlier one');
-    assert.throws(() => desk.agents.addProfile('claude', 'work'), /already a profile called work/, 'a listed one still says it exists');
+    assert.throws(() => desk.agents.addProfile('claude', 'work'), /already an account called work. It is in the list/, 'a listed one still says it exists');
   });
 });
 

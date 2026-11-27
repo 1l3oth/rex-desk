@@ -2914,5 +2914,8 @@
   "The installer stopped: {0}": "កម្មវិធីដំឡើងបានឈប់៖ {0}",
   "The update did not install. Press Install manually to run the installer yourself.": "ការអាប់ដេតមិនបានដំឡើងទេ។ ចុច «ដំឡើងដោយដៃ» ដើម្បីដំណើរការកម្មវិធីដំឡើងដោយខ្លួនឯង។",
   "Rex Desk could not open the folder. Open it yourself: {0}": "Rex Desk មិនអាចបើកថតបានទេ។ សូមបើកវាដោយខ្លួនឯង៖ {0}",
-  "The installer is selected in the window that opened. Double-click it to run it.": "កម្មវិធីដំឡើងត្រូវបានជ្រើសរើសនៅក្នុងផ្ទាំងដែលបានបើក។ ចុចពីរដងលើវា ដើម្បីដំណើរការ។"
+  "The installer is selected in the window that opened. Double-click it to run it.": "កម្មវិធីដំឡើងត្រូវបានជ្រើសរើសនៅក្នុងផ្ទាំងដែលបានបើក។ ចុចពីរដងលើវា ដើម្បីដំណើរការ។",
+ "Same account as {0}": "គណនីដូចគ្នានឹង {0}",
+ "To add a different account here, first sign out of {0} in your browser (or pick the other email when it asks), then press Sign in again.": "ដើម្បីបន្ថែមគណនីផ្សេងនៅទីនេះ សូមចាកចេញពី {0} ក្នុងកម្មវិធីរុករកជាមុនសិន (ឬជ្រើសអ៊ីមែលផ្សេងនៅពេលវាសួរ) រួចចុច «ចូលម្ដងទៀត»។",
+ "That name is kept for the shared conversation history. Pick another name.": "ឈ្មោះនោះត្រូវបានរក្សាទុកសម្រាប់ប្រវត្តិសន្ទនារួម។ សូមជ្រើសឈ្មោះផ្សេង។"
 }

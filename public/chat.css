@@ -3222,3 +3222,9 @@ html:has(.iv[open]){overflow:hidden}
 .acct-dialog .acct-acts .or-link{font-size:12.5px;padding:1px 0;line-height:1.4}
 .acct-dialog .acct-one{margin:2px 2px 0;font-size:13px;line-height:1.45}
 .acct-list .acct-name .acct-badge,.acct-list .acct-name .acct-use{align-self:center}
+
+/* An account row that is the same account as another row: no Use, a quiet note, Sign in again and Remove. */
+.dialog .acct-list div.acct-dup{display:flex;padding:10px 14px;gap:12px;color:var(--ink);border-top:1px solid var(--line)}.dialog .acct-list div.acct-dup:first-child{border-top:0}
+.acct-dup .acct-main{flex:1;min-width:0}.acct-dup .acct-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.acct-same{font-size:12px;color:var(--warn)}.acct-dup-act{display:flex;gap:4px;align-items:center;margin-top:8px;white-space:nowrap}.acct-dup .acct-acts{margin:0}.dialog .acct-dup small.acct-dup-help{white-space:normal;overflow:visible;text-overflow:clip}
+.dialog .acct-list div.acct-dup+label.acct-row{border-top:1px solid var(--line)}
+.dialog .acct-list .acct-dup .acct-dup-act{display:flex!important;flex-direction:row!important;align-self:flex-start;justify-content:flex-start;gap:12px;margin:8px 0 0}.dialog .acct-list .acct-dup .acct-acts{margin-left:0}

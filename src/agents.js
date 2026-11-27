@@ -1,6 +1,6 @@
 import { AI_PROVIDERS, aiProvider, providerTitle, profileKey } from './codex.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -199,6 +199,9 @@ export function parseClaudeStatus(output) {
 // Where each AI program sends people to sign in.
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
+// Which account a signed-in folder is: its email and organisation, or '' when not signed in or not known.
+export const accountKey = status => status?.loggedIn && status.account ? `${String(status.account).toLowerCase()}|${status.organization || ''}` : '';
+
 export class AgentProfiles {
   constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound } = {}) { this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // The OpenRouter key: the one saved in Settings (encrypted, shared with Jev), else OPENROUTER_API_KEY from the launch environment.
@@ -223,9 +226,12 @@ export class AgentProfiles {
   async alternative(provider, current) {
     if (provider === 'openrouter') return null;
     const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
+    // The account that is out (its email and organisation): another folder signed in to that same account shares its limit.
+    const out = accountKey(await this.status(provider, current).catch(() => null));
     for (const item of this.profiles(provider, { configured: current })) {
       if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
       const status = await this.status(provider, item.profile, { refresh: true }).catch(() => null);
+      if (status?.loggedIn && out && accountKey(status) === out) continue;
       if (status?.loggedIn) return { profile: item.profile, label: status.label, account: status.account, plan: status.plan };
     }
     return null;
@@ -267,19 +273,25 @@ export class AgentProfiles {
     const providers = await Promise.all(AI_PROVIDERS.map(async provider => {
       const selected = this.selected(provider), profiles = this.profiles(provider, { configured: selected });
       const statuses = await Promise.all(profiles.map(item => this.status(provider, item.profile, { refresh })));
-      // The same account signed in in two folders (Orca keeps its own copy of each sign-in) is one account: it shows once,
-      // as the folder in use, otherwise the first one found (the person's own folders come before Orca's).
-      const accountOf = index => statuses[index]?.loggedIn && statuses[index].account ? `${statuses[index].account.toLowerCase()}|${statuses[index].organization || ''}` : '';
-      const inUse = canonical(this.use(provider, selected) || ''), shown = new Map();
-      profiles.forEach((item, index) => { const key = accountOf(index); if (key && (!shown.has(key) || canonical(item.profile || '') === inUse)) shown.set(key, index); });
-      const keep = profiles.map((item, index) => !accountOf(index) || shown.get(accountOf(index)) === index);
+      // Orca keeps its own copy of each sign-in: an Orca folder signed in to an account already listed is that account, and
+      // shows once (the folder in use wins). Only Orca copies merge: a folder the person has (added here, ~/.claude-*, the
+      // launch one) always shows, so a name Rex Desk says is taken always has a row to act on. Such a folder signed in to an
+      // account another row already shows (the browser was still signed in to the first claude.ai account) is marked sameAs.
+      const accountOf = index => accountKey(statuses[index]);
+      const inUse = canonical(this.use(provider, selected) || ''), first = new Map();
+      const lead = new Map();
+      profiles.forEach((item, index) => { const key = accountOf(index); if (!key) return; const own = item.origin !== 'orca', current = lead.get(key);
+        if (current === undefined || canonical(item.profile || '') === inUse || (own && profiles[current].origin === 'orca' && canonical(profiles[current].profile || '') !== inUse)) lead.set(key, index); });
+      const keep = profiles.map((item, index) => !accountOf(index) || item.origin !== 'orca' || lead.get(accountOf(index)) === index);
+      profiles.forEach((item, index) => { const key = accountOf(index); if (key && keep[index] && !first.has(key)) first.set(key, index); });
+      const sameAs = index => { const at = first.get(accountOf(index)); return accountOf(index) && keep[index] && at !== index ? { profile: profiles[at].profile, label: profiles[at].label, account: statuses[at].account } : null; };
       const saved = this.store.config().agentProfiles?.[provider] ?? null;
       // A profile the person once saved whose folder has since disappeared: kept in the config, but agents fall back to the
       // default, so the tab says so (L119) instead of letting the account look chosen.
       const savedMissing = Boolean(saved && typeof saved === 'string' && !directory(saved));
       return [provider, { selected, saved, savedMissing, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
         mcpEverywhere: profiles.every(item => this.mcpInstalled(provider, item.profile)),
-        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile), removable: this.removable(provider, item.profile) })).filter((item, index) => keep[index]) }];
+        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), sameAs: sameAs(index), mcp: this.mcpInstalled(provider, item.profile), removable: this.removable(provider, item.profile) })).filter((item, index) => keep[index]) }];
     }));
     return Object.fromEntries(providers);
   }
@@ -401,7 +413,13 @@ export class AgentProfiles {
     const folder = path.join(roots.home, '.config', `${aiProvider(provider)}-${slug}`);
     // An account removed from Rex Desk earlier kept its folder: adding the same name brings it back, sign-in and all, and says so.
     if (existsSync(folder) && this.hidden(provider, folder)) { this.unhideProfile(provider, folder); return { profile: folder, label: profileLabel(provider, folder), restored: true }; }
-    if (existsSync(folder)) throw new Error(`There is already a profile called ${slug}.`);
+    // A taken name always points at something the person can act on: a listed account, or a plain reason when nothing can be listed.
+    if (/shared-history/.test(slug)) throw new Error('That name is kept for the shared conversation history. Pick another name.');
+    if (existsSync(folder)) {
+      let real = false; try { real = lstatSync(folder).isDirectory(); } catch { real = false; }
+      if (!real) throw new Error(`The name ${slug} is taken by a file or link that is not an account (${folder}). Pick another name.`);
+      throw new Error(`There is already an account called ${slug}. It is in the list: sign it in again or remove it there.`);
+    }
     mkdirSync(folder, { recursive: true });
     // A removed account whose folder the person deleted since: the new one must not stay hidden.
     if (this.hidden(provider, folder)) this.unhideProfile(provider, folder);
