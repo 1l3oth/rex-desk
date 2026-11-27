@@ -311,6 +311,8 @@ test('a new message clears the guard stop, so the chat no longer shows Stopped (
     await waitFor(() => prompts.length === 2 && store.get('run', run.id).state === 'finished', 'the next turn');
     assert.equal(store.get('run', run.id).stuckStopped, undefined);
     const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
-    assert.match(chat, /const stateLabel = run => run\.stuckStopped && FINISHED\.includes\(run\.state\) \? t\('Stopped'\)/, 'the chip reads Stopped only while the guard stop is on');
+    assert.match(chat, /const guardStopped = run => Boolean\(run\?\.stuckStopped\) && FINISHED\.includes\(run\.state\)/, 'Stopped only while the guard stop is on');
+    assert.match(chat, /const stateLabel = run => guardStopped\(run\) \? t\('Stopped'\)/, 'a run chat reads Stopped');
+    assert.match(chat, /: personal \? \(guardStopped\(run\) \? `<span class="chip warn">\$\{t\('Stopped'\)\}<\/span>` : ''\)/, "an agent's own chat shows the amber Stopped chip, and no chip otherwise");
   } finally { await desk.shutdown(); store.close(); }
 });
