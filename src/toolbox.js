@@ -19,7 +19,17 @@ import { headerSecrets, pinnedFetch, redactor, safeError, Unsafe, shortKey, KEY_
 // When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
 export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
 // A server that wants a sign-in (or no longer takes this one), not one that is broken.
-const wantsSignIn = error => Number(error?.code) === 401 || /401|unauthorized|invalid_token|missing_bearer/i.test(String(error?.message || ''));
+const SIGN_IN_TEXT = /(?:http|status|code|error)["':\s(]*401\b|\b401\s+unauthori[sz]ed\b|unauthori[sz]ed|unauthenticated|invalid_token|missing_bearer|invalid authentication credentials|missing required authentication/i;
+const resultText = answer => [
+  ...(Array.isArray(answer?.content) ? answer.content.map(part => part?.type === 'text' ? part.text : part?.resource?.text || '') : []),
+  answer?.structuredContent ? JSON.stringify(answer.structuredContent) : '',
+].filter(Boolean).join('\n');
+export const wantsSignIn = error => {
+  if (!error) return false;
+  if (Number(error?.code) === 401 || Number(error?.status) === 401) return true;
+  if (error?.isError) return SIGN_IN_TEXT.test(resultText(error));
+  return SIGN_IN_TEXT.test(String(error?.message || ''));
+};
 // An address with a typed key of its own is the person's to fix; every other refused address needs a sign-in.
 const signsIn = (signIn, config) => { const url = addressOf(config); return Boolean(url && !carriesCredential(new URL(url)) && (signIn?.record(url) || !Object.keys(config.headers || {}).length)); };
 // What the person reads for a server that wants a sign-in (agents get SIGN_IN_HELP instead).
@@ -132,7 +142,14 @@ export class Toolbox {
   async signed(name, config, work, key = name) {
     const secrets = new Set(), note = used => this.secretsInto(secrets, config, used);
     // Noted before and after the work: a token renewed on the way leaves both the old and the new one to hide.
-    const call = async () => { note(); const client = await this.client(key, config); note(this.clients.get(key)?.config); return work(client); };
+    const call = async () => {
+      note(); const client = await this.client(key, config); note(this.clients.get(key)?.config);
+      const answer = await work(client);
+      // Some remote MCP servers (such as Google Drive) return HTTP 200 on tools/list and report 401/UNAUTHENTICATED inside
+      // an isError: true tool result: handle it like a thrown 401 so token refresh or SIGN_IN_HELP runs.
+      if (answer?.isError && wantsSignIn(answer) && signsIn(this.signIn, config)) throw Object.assign(new Error(resultText(answer) || 'HTTP 401'), { code: 401 });
+      return answer;
+    };
     const over = () => { this.failed.set(name, { at: Date.now(), error: SIGN_IN_HELP, signIn: true }); return Object.assign(new Error(`${name}: ${SIGN_IN_HELP}`), { own: true }); };
     try {
       const answer = await call().catch(async error => {

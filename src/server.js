@@ -74,7 +74,7 @@ function ffmpegPath() {
 }
 import { ORBIT_URL, orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
-import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
+import { loadCatalog, catalogItem, catalogItemByUrl, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { TelegramBridge } from './telegram.js';
 import { AgentBots } from './agent-bots.js';
 import { addressOf } from './mcp-signin.js';
@@ -1129,8 +1129,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (!address) return json(response, 400, { error: 'That server is not connected on this computer.' });
         if (mcpAuth[1] === 'start' && response.rexRemote) return json(response, 409, { error: 'Finish sign-in on the computer running Rex Desk.' });
         try {
-          if (mcpAuth[1] === 'start') { const started = await desk.mcpSignIn.start(name, address); notify(); return json(response, 200, { url: started.url, signIns: signInsFor(desk, response) }); }
-          if (mcpAuth[1] === 'cancel') desk.mcpSignIn.cancel(address); else desk.mcpSignIn.signOut(address);
+          if (mcpAuth[1] === 'start') { const item = catalogItem(name) || catalogItemByUrl(address); const started = await desk.mcpSignIn.start(name, address, item?.connect?.oauth); notify(); return json(response, 200, { url: started.url, signIns: signInsFor(desk, response) }); }
+          if (mcpAuth[1] === 'cancel') desk.mcpSignIn.cancel(address); else await desk.mcpSignIn.signOut(address);
           notify(); return json(response, 200, { signIns: signInsFor(desk, response) });
         } catch (error) { return json(response, 400, { error: error.message }); }
       }

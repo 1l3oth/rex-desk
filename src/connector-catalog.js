@@ -7,6 +7,7 @@ import path from 'node:path';
 import { connectServer, plainError } from './toolbox.js';
 import { assertBotFree, botIdOf } from './bot-use.js';
 import { KEY_FLOOR, KEY_TOO_SHORT } from './mcp-guard.js';
+import { addressOf, preRegisteredOAuthClient } from './mcp-signin.js';
 
 // A field that holds a secret, so a value too short to tell from ordinary text is refused (L30). An address, a folder or a
 // webhook is not a key, so it is never length-checked.
@@ -17,6 +18,11 @@ let cached = null;
 // An item marked "hidden" is left out everywhere (picker, Market, check and save) until it can really connect.
 export function loadCatalog(file = FILE) { if (!cached || file !== FILE) { const raw = JSON.parse(readFileSync(file, 'utf8')), data = { ...raw, items: (raw.items || []).filter(item => !item.hidden) }; if (file !== FILE) return data; cached = data; } return cached; }
 export const catalogItem = (id, catalog = loadCatalog()) => catalog.items.find(item => item.id === id) || null;
+export function catalogItemByUrl(url, catalog = loadCatalog()) {
+  const target = addressOf({ url }).replace(/\/$/, '');
+  if (!target) return null;
+  return catalog.items.find(item => item.connect?.kind === 'remote-mcp' && addressOf({ url: item.connect.url }).replace(/\/$/, '') === target) || null;
+}
 
 const FIELD = /^[a-zA-Z]+\??$/;
 const optional = name => name.endsWith('?');
@@ -51,19 +57,46 @@ export function serverConfig(item, values = {}) {
   return { type: 'http', url, ...(values.token ? { headers: { Authorization: `Bearer ${values.token}` } } : {}) };
 }
 
-// Does the server let a new app sign in by itself (OAuth with dynamic client registration)? Read from its own metadata.
+// Does the server support OAuth (with dynamic client registration or a pre-registered OAuth client)? Read from its metadata.
 async function signInWay(url, fetcher) {
   const target = new URL(url), get = async address => { const response = await fetcher(address, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return response.ok ? response.json() : null; };
   const resource = await get(`${target.origin}/.well-known/oauth-protected-resource${target.pathname.replace(/\/$/, '')}`).catch(() => null) || await get(`${target.origin}/.well-known/oauth-protected-resource`).catch(() => null);
   const issuer = resource?.authorization_servers?.[0] || target.origin;
-  const meta = await get(`${new URL(issuer).origin}/.well-known/oauth-authorization-server${new URL(issuer).pathname.replace(/\/$/, '')}`).catch(() => null) || await get(`${new URL(issuer).origin}/.well-known/oauth-authorization-server`).catch(() => null);
-  return { oauth: Boolean(meta?.authorization_endpoint), register: Boolean(meta?.registration_endpoint) };
+  const issuerUrl = new URL(issuer), issuerPath = issuerUrl.pathname.replace(/\/$/, '');
+  const metaUrls = issuerPath
+    ? [
+        `${issuerUrl.origin}/.well-known/oauth-authorization-server${issuerPath}`,
+        `${issuerUrl.origin}/.well-known/oauth-authorization-server`,
+        `${issuerUrl.origin}/.well-known/openid-configuration${issuerPath}`,
+        `${issuerUrl.origin}${issuerPath}/.well-known/openid-configuration`,
+        `${issuerUrl.origin}/.well-known/openid-configuration`,
+      ]
+    : [
+        `${issuerUrl.origin}/.well-known/oauth-authorization-server`,
+        `${issuerUrl.origin}/.well-known/openid-configuration`,
+      ];
+  let meta = null;
+  for (const address of metaUrls) { meta = await get(address).catch(() => null); if (meta?.authorization_endpoint) break; }
+  return { oauth: Boolean(meta?.authorization_endpoint), register: Boolean(meta?.registration_endpoint), issuer: meta?.issuer || issuer };
 }
 
 const result = (ok, method, extra = {}) => ({ ok, method, needs: '', tools: null, error: '', ...extra });
 
+async function probeOAuth(item, config, { fetcher, env, oauthClients, tools = null }) {
+  const way = await signInWay(config.url, fetcher).catch(() => ({ oauth: false, register: false, issuer: '' }));
+  const extra = tools !== null ? { tools } : {};
+  if (way.oauth && way.register) return result(true, 'oauth', { needs: 'sign-in', ...extra });
+  if (way.oauth) {
+    const pre = preRegisteredOAuthClient({ provider: item.connect.oauth?.provider, issuer: way.issuer, url: config.url, env, oauthClients });
+    if (pre?.client) return result(true, 'oauth', { needs: 'sign-in', ...extra });
+    if (pre?.provider) return result(false, 'oauth', { error: pre.provider.missingMessage(item.name) });
+    return result(false, 'oauth', { error: `${item.name} lets only apps it approved sign in, so Rex Desk cannot connect it yet.` });
+  }
+  return result(false, 'oauth', { error: `${item.name} asked for a sign-in Rex Desk could not find.` });
+}
+
 // Connect for real and say what happened: { ok, method, needs, tools, error }. Nothing is written anywhere.
-export async function probe(item, input = {}, { connect = connectServer, fetcher = fetch } = {}) {
+export async function probe(item, input = {}, { connect = connectServer, fetcher = fetch, env = process.env, oauthClients = {} } = {}) {
   if (!item) return result(false, '', { error: 'Rex Desk does not know that app.' });
   if (item.phase !== 1) return result(false, '', { error: item.note || 'Not ready to connect yet.' });
   let values; try { values = readValues(item, input); } catch (error) { return result(false, '', { error: error.message }); }
@@ -73,15 +106,19 @@ export async function probe(item, input = {}, { connect = connectServer, fetcher
       const config = serverConfig(item, values);
       try {
         const client = await connect(item.id, config);
-        try { const { tools = [] } = await client.listTools(); return result(true, kind, { tools: tools.length }); }
-        finally { await client.close?.().catch(() => {}); }
+        try {
+          const { tools = [] } = await client.listTools();
+          // Some OAuth MCP servers (such as Google Drive) return HTTP 200 on tools/list without auth and require OAuth on tools/call.
+          if (kind === 'remote-mcp' && item.connect.auth === 'oauth' && !values.token) {
+            return await probeOAuth(item, config, { fetcher, env, oauthClients, tools: tools.length });
+          }
+          return result(true, kind, { tools: tools.length });
+        } finally { await client.close?.().catch(() => {}); }
       } catch (error) {
         const message = String(error?.message || error);
-        // No token and the server asks for a sign-in: fine when the server lets a new app register on its own.
-        if (kind === 'remote-mcp' && !values.token && (Number(error?.code) === 401 || /401|unauthori[sz]ed|invalid_token|authenticat/i.test(message))) {
-          const way = await signInWay(config.url, fetcher).catch(() => ({ oauth: false, register: false }));
-          if (way.oauth && way.register) return result(true, 'oauth', { needs: 'sign-in' });
-          return result(false, 'oauth', { error: way.oauth ? `${item.name} lets only apps it approved sign in, so Rex Desk cannot connect it yet.` : `${item.name} asked for a sign-in Rex Desk could not find.` });
+        // No token and the server asks for a sign-in: fine when the server lets a new app register or has a pre-registered OAuth client.
+        if (kind === 'remote-mcp' && !values.token && (Number(error?.code) === 401 || /401|unauthori[sz]ed|unauthenticated|invalid_token|authenticat/i.test(message))) {
+          return await probeOAuth(item, config, { fetcher, env, oauthClients });
         }
         if (Number(error?.code) === 401 || Number(error?.code) === 403) return result(false, kind, { error: values.token ? `${item.name} did not take that token.` : `${item.name} wants a sign-in Rex Desk could not make.` });
         if (Number(error?.code) >= 400) return result(false, kind, { error: `${item.name} answered with error ${error.code}.` });

@@ -30,6 +30,12 @@ test('the catalog: a version, task trackers are only Orbit, Flow and Morningmate
   assert.equal(catalogItem('clickup').connect.auth, 'oauth');
   assert.equal(catalogItem('atlassian').connect.url, 'https://mcp.atlassian.com/v2/mcp');
   assert.equal(catalogItem('slack').phase, 2); assert.equal(catalogItem('asana').phase, 2);
+  const gdrive = catalogItem('googledrive');
+  assert.equal(gdrive.phase, 1); assert.equal(gdrive.verified, false); assert.equal(gdrive.connect.auth, 'oauth');
+  assert.equal(gdrive.connect.oauth?.provider, 'google'); assert.equal(gdrive.connect.oauth?.includeResource, false);
+  assert.deepEqual(gdrive.connect.oauth?.scopes, ['https://www.googleapis.com/auth/drive.readonly', 'openid', 'email']);
+  assert.deepEqual(gdrive.connect.oauth?.authParams, { access_type: 'offline', prompt: 'select_account consent' });
+  assert.doesNotMatch(readFileSync(path.join('public', 'connectors', 'catalog.json'), 'utf8'), /client_secret/i, 'catalog.json never holds a client_secret');
 });
 
 test('probe connects for real: tools counted, a token goes in the header, a sign-in is fine only when the app lets new apps register', async () => {
@@ -77,4 +83,23 @@ test('a failed check saves nothing; the list carries the catalog', async () => {
     const checked = await call('/api/connectors/catalog/github/probe', 'POST', {});
     assert.equal(checked.body.ok, false);
   } finally { await app.close(); }
+});
+
+test('Google Drive pre-registered OAuth probe: HTTP 200 on tools/list still needs sign-in, and missing credentials give a plain error', async () => {
+  const gdrive = catalogItem('googledrive');
+  const googleMeta = async address => {
+    if (address.includes('oauth-protected-resource')) return { ok: true, json: async () => ({ resource: 'https://drivemcp.googleapis.com/mcp/v1', authorization_servers: ['https://accounts.google.com'], scopes_supported: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.file'] }) };
+    if (address.includes('openid-configuration')) return { ok: true, json: async () => ({ issuer: 'https://accounts.google.com', authorization_endpoint: 'https://accounts.google.com/o/oauth2/v2/auth', token_endpoint: 'https://oauth2.googleapis.com/token', code_challenge_methods_supported: ['plain', 'S256'] }) };
+    return { ok: false, json: async () => null };
+  };
+  // drivemcp.googleapis.com returns HTTP 200 on tools/list without auth: missing client credentials must report a clear error.
+  const missing = await probe(gdrive, {}, { connect: fakeClient(4), fetcher: googleMeta, env: {} });
+  assert.equal(missing.ok, false); assert.equal(missing.method, 'oauth');
+  assert.match(missing.error, /REX_GOOGLE_OAUTH_CLIENT_ID.*REX_GOOGLE_OAUTH_CLIENT_SECRET/);
+  // With pre-registered client credentials, HTTP 200 on tools/list still requires OAuth sign-in.
+  const ready = await probe(gdrive, {}, { connect: fakeClient(4), fetcher: googleMeta, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-client-id', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-client-secret' } });
+  assert.deepEqual([ready.ok, ready.method, ready.needs, ready.tools], [true, 'oauth', 'sign-in', 4]);
+  // A 401 on connect/listTools also succeeds as needs: sign-in when pre-registered credentials exist.
+  const on401 = await probe(gdrive, {}, { connect: async () => { throw Object.assign(new Error('HTTP 401 Unauthorized'), { code: 401 }); }, fetcher: googleMeta, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-client-id', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-client-secret' } });
+  assert.deepEqual([on401.ok, on401.method, on401.needs], [true, 'oauth', 'sign-in']);
 });

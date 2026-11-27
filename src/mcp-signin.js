@@ -11,10 +11,70 @@ import { createHash, randomBytes } from 'node:crypto';
 import { discoverOAuthServerInfo, extractWWWAuthenticateParams, registerClient, startAuthorization, exchangeAuthorization, refreshAuthorization, selectResourceURL } from '@modelcontextprotocol/sdk/client/auth.js';
 
 const KIND = 'mcpauth';
-const EARLY_MS = 10 * 60000, TICK_MS = 60000, WAIT_MS = 5 * 60000, ASK_MS = 30000;
+const EARLY_MS = 10 * 60000, TICK_MS = 60000, WAIT_MS = 5 * 60000, ASK_MS = 30000, REVOKE_MS = 3000;
 // The server said this sign-in is over (not a network blip): only a new sign-in helps.
 const OVER = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client']);
 export const SIGN_IN_HELP = 'Needs sign-in. Ask the person to press Sign in for it in Rex Desk, Settings, Connectors. Rex Desk does the whole sign-in: never tell them to use a terminal, /mcp or a config file.';
+
+// Pre-registered OAuth providers that do not support RFC 7591 dynamic client registration.
+// Credentials stay in env/runtime config (never in public/connectors/catalog.json).
+const OAUTH_PROVIDERS = {
+  google: {
+    clientIdEnv: 'REX_GOOGLE_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'REX_GOOGLE_OAUTH_CLIENT_SECRET',
+    scopesEnv: 'REX_GOOGLE_OAUTH_SCOPES',
+    matches({ provider, issuer, url }) {
+      if (provider === 'google') return true;
+      for (const value of [issuer, url]) {
+        if (!value) continue;
+        try {
+          const host = new URL(String(value)).hostname.toLowerCase();
+          if (host === 'accounts.google.com' || host === 'googleapis.com' || host.endsWith('.googleapis.com')) return true;
+        } catch { /* ignore */ }
+      }
+      return false;
+    },
+    includeResource: false,
+    authParams: { access_type: 'offline', prompt: 'select_account consent' },
+    defaultScopes: ['https://www.googleapis.com/auth/drive.readonly', 'openid', 'email'],
+    revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+    missingMessage: (name = 'Google') => `${name} sign-in needs Google OAuth client credentials (REX_GOOGLE_OAUTH_CLIENT_ID and REX_GOOGLE_OAUTH_CLIENT_SECRET) configured on this computer.`,
+  },
+};
+const normalizeScopes = value => {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[\s,]+/) : [];
+  return list.map(item => String(item || '').trim()).filter(Boolean).join(' ');
+};
+export function oauthProviderFor({ provider, issuer, url } = {}) {
+  for (const [id, spec] of Object.entries(OAUTH_PROVIDERS)) {
+    if (spec.matches({ provider, issuer, url })) return { id, ...spec };
+  }
+  return null;
+}
+export function preRegisteredOAuthClient({ provider, issuer, url, env = process.env, oauthClients = {} } = {}) {
+  const spec = oauthProviderFor({ provider, issuer, url });
+  if (!spec) return null;
+  const configured = oauthClients?.[spec.id] || {};
+  const clientId = String(configured.clientId ?? configured.client_id ?? env?.[spec.clientIdEnv] ?? '').trim();
+  const clientSecret = String(configured.clientSecret ?? configured.client_secret ?? env?.[spec.clientSecretEnv] ?? '').trim();
+  const scopes = normalizeScopes(configured.scopes ?? (spec.scopesEnv ? env?.[spec.scopesEnv] : ''));
+  const client = clientId && clientSecret ? { client_id: clientId, client_secret: clientSecret, token_endpoint_auth_method: 'client_secret_post' } : null;
+  return { provider: spec, client, scopes };
+}
+const sanitizeEmail = value => {
+  const email = String(value || '').replace(/[\r\n\t\0]/g, '').trim();
+  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+};
+// Non-secret account email from an OIDC id_token payload (received directly over TLS from the pinned token endpoint).
+export function emailFromIdToken(idToken) {
+  if (typeof idToken !== 'string') return '';
+  const parts = idToken.split('.');
+  if (parts.length !== 3 || !parts[1]) return '';
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return sanitizeEmail(payload?.email);
+  } catch { return ''; }
+}
 
 // What the person reads when a sign-in fails: always Rex Desk's own words. What the server wrote can hold sensitive values
 // (tokens, codes, addresses with keys), so only its OAuth error code picks the message (RFC 6749, RFC 7591).
@@ -168,14 +228,15 @@ const pinnedTransport = (target, init = {}) => init.pin ? nodeFetch(target, init
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
-  constructor(store, { fetcher = pinnedTransport, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }) } = {}) {
-    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
+  constructor(store, { fetcher = pinnedTransport, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }), env = process.env, oauthClients = {}, oauthFor = null } = {}) {
+    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.env = env; this.oauthClients = oauthClients; this.oauthFor = oauthFor;
+    this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
   }
   record(url) { return url ? this.store.get(KIND, idOf(url)) || null : null; }
   secret(record) { try { return JSON.parse(this.store.decrypt(record.sealed)); } catch { return null; } }
-  save(url, name, secret, status = 'connected') {
-    const id = idOf(url);
-    this.store.put(KIND, id, { id, url, name, status, expiresAt: secret.expiresAt || 0, sealed: this.store.encrypt(JSON.stringify(secret)), at: new Date().toISOString() });
+  save(url, name, secret, status = 'connected', accountEmail = '') {
+    const id = idOf(url), email = sanitizeEmail(accountEmail);
+    this.store.put(KIND, id, { id, url, name, status, ...(email ? { accountEmail: email } : {}), expiresAt: secret.expiresAt || 0, sealed: this.store.encrypt(JSON.stringify(secret)), at: new Date().toISOString() });
   }
   expire(record) {
     const now = this.store.get(KIND, record.id); if (!now || now.status === 'expired') return;
@@ -183,15 +244,21 @@ export class McpSignIn {
   }
   // Every secret held for a server's address, so it can be taken out of whatever that server sends back.
   secrets(config) { const record = this.record(addressOf(config)), held = record && this.secret(record); return held ? [held.accessToken, held.refreshToken, held.client?.client_secret, held.client?.registration_access_token].filter(Boolean) : []; }
-  // What the pages show: no token and no address, ever.
+  // What the pages show: no token and no address, ever. Non-secret accountEmail is included when known.
   state(url) {
     const record = this.record(url);
-    return { state: record?.status || '', waiting: this.waiting.has(url), link: this.waiting.get(url)?.link || '', error: this.waiting.get(url)?.error || '' };
+    return {
+      state: record?.status || '',
+      waiting: this.waiting.has(url),
+      link: this.waiting.get(url)?.link || '',
+      error: this.waiting.get(url)?.error || '',
+      ...(record?.accountEmail ? { accountEmail: record.accountEmail } : {}),
+    };
   }
   expired() { return this.store.list(KIND).filter(record => record.status === 'expired').map(({ id, name, at }) => ({ id, name, at })); }
 
   // ---- signing in ----
-  async discover(url) {
+  async discover(url, oauth = {}, name = '') {
     // The person's own server, and its own same-origin sign-in endpoints, may be private; every other destination must be public.
     const home = originOf(url);
     // The server's 401 may name where its metadata is; without that the well-known addresses are tried (the SDK does both).
@@ -202,7 +269,16 @@ export class McpSignIn {
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
     const check = async address => { this.endpoint(address, 'sign-in information address'); return this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
-    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, check, this.ms) });
+    let discoveredRevocation = '';
+    const discoveryFetch = checkedFetch(this.fetcher, check, this.ms);
+    const captureMeta = async (target, init) => {
+      const response = await discoveryFetch(target, init);
+      if (response.ok && /\/\.well-known\/(?:openid-configuration|oauth-authorization-server)/i.test(String(target))) {
+        try { const data = await response.clone().json(); if (typeof data?.revocation_endpoint === 'string') discoveredRevocation = data.revocation_endpoint; } catch { /* ignore */ }
+      }
+      return response;
+    };
+    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: captureMeta });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
     // Every address the server named is checked like the one the person added: secure, with no key or password in it, and
@@ -210,21 +286,51 @@ export class McpSignIn {
     await this.named(info.authorizationServerUrl, 'sign-in server', home);
     for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) await this.named(metadata[key], what, home);
     if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
-    if (!metadata.registration_endpoint) throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
-    await this.named(metadata.registration_endpoint, 'registration address', home);
-    const resource = await selectResourceURL(url, {}, info.resourceMetadata);
-    if (resource) await this.named(info.resourceMetadata.resource, 'server address', home);
-    return { server: info.authorizationServerUrl, metadata, resource: resource ? String(info.resourceMetadata.resource) : url, scope: challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined };
+    const pre = preRegisteredOAuthClient({ provider: oauth?.provider, issuer: metadata.issuer || info.authorizationServerUrl, url, env: this.env, oauthClients: this.oauthClients });
+    let client = null;
+    if (metadata.registration_endpoint) {
+      await this.named(metadata.registration_endpoint, 'registration address', home);
+    } else if (pre?.client) {
+      client = pre.client;
+    } else if (pre?.provider) {
+      throw new Plain(pre.provider.missingMessage(name || 'This server'));
+    } else {
+      throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
+    }
+    const includeResource = oauth?.includeResource ?? pre?.provider?.includeResource ?? true;
+    let resourceValue;
+    if (includeResource) {
+      const resource = await selectResourceURL(url, {}, info.resourceMetadata);
+      if (resource) await this.named(info.resourceMetadata.resource, 'server address', home);
+      resourceValue = resource ? String(info.resourceMetadata.resource) : url;
+    }
+    const explicitScope = pre?.scopes || normalizeScopes(oauth?.scopes) || normalizeScopes(pre?.provider?.defaultScopes);
+    const scope = explicitScope || challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined;
+    const authParams = { ...(pre?.provider?.authParams || {}), ...(oauth?.authParams || {}) };
+    const revocationEndpoint = metadata.revocation_endpoint || discoveredRevocation || (!this.loopback ? pre?.provider?.revocationEndpoint : '') || '';
+    const userinfoEndpoint = metadata.userinfo_endpoint || '';
+    return { server: info.authorizationServerUrl, metadata, resource: resourceValue, scope, client, authParams, revocationEndpoint, userinfoEndpoint };
+  }
+  async fetchAccountEmail(userinfoEndpoint, accessToken, home) {
+    if (!userinfoEndpoint || !accessToken) return '';
+    try {
+      const pinned = this.pinned(userinfoEndpoint, 'account info address', home);
+      const response = await pinned(userinfoEndpoint, { method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } });
+      if (!response.ok) return '';
+      const data = await response.json();
+      return sanitizeEmail(data?.email);
+    } catch { return ''; }
   }
   // Starts a sign-in and gives back the page to open. done resolves when the browser came back and the tokens are saved.
-  async start(name, address) {
+  async start(name, address, oauth = null) {
     const url = addressOf({ url: address }); if (!url) throw new Plain('This server has no web address to sign in to.');
     const home = originOf(url);
     const couldNot = error => new Error(error instanceof Plain ? error.message : `Rex Desk could not start the sign-in. ${signInError(error)}`);
+    const options = oauth || this.oauthFor?.(name, url) || {};
     let found;
     try {
       if (carriesCredential(safeAddress(url, 'server address', this.loopback))) throw new Plain('This address has a key or password in it, so Rex Desk does not sign in there.');
-      this.cancel(url); found = await this.discover(url);
+      this.cancel(url); found = await this.discover(url, options, name);
     } catch (error) { throw couldNot(error); }
     const state = randomBytes(24).toString('base64url');
     let answer, fail; const code = new Promise((resolve, reject) => { answer = resolve; fail = reject; });
@@ -252,19 +358,23 @@ export class McpSignIn {
     const redirectUri = `http://127.0.0.1:${listener.address().port}/callback`;
     let timer = null; const close = () => { clearTimeout(timer); listener.close(); };
     try {
-      // Registration is bounded by its own fetch (pinnedTo); the wait for the browser starts once the answer is waited on.
-      const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address', home),
+      // Registration is bounded by its own fetch (pinnedTo); pre-registered clients skip DCR.
+      const client = found.client || await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address', home),
         clientMetadata: { client_name: 'Rex Desk', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
-      const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, resource: found.resource });
+      const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, ...(found.resource ? { resource: found.resource } : {}) });
+      for (const [key, value] of Object.entries(found.authParams || {})) {
+        if (value !== undefined && value !== null && value !== '') authorizationUrl.searchParams.set(key, String(value));
+      }
       // The page handed to the screen is the checked sign-in page with Rex Desk's own sign-in values added, nothing else.
       const opened = new URL(authorizationUrl), signInPage = this.endpoint(found.metadata.authorization_endpoint, 'sign-in page');
       if (opened.origin !== signInPage.origin || opened.pathname !== signInPage.pathname) throw new Plain('The sign-in page this server named does not match, so Rex Desk stopped.');
       const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Plain('The sign-in was cancelled.')) };
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
-        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
+        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, ...(found.resource ? { resource: found.resource } : {}), fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
+        const accountEmail = emailFromIdToken(tokens.id_token) || await this.fetchAccountEmail(found.userinfoEndpoint, tokens.access_token, home);
         // Saved first, then the tab is told it worked: "Signed in" shows only after the sign-in is really saved.
-        if (this.waiting.get(url) === attempt) { this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, resource: found.resource, client }, tokens)); this.waiting.delete(url); this.changed(url); }
+        if (this.waiting.get(url) === attempt) { this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, ...(found.resource ? { resource: found.resource } : {}), client, ...(found.revocationEndpoint ? { revocationEndpoint: found.revocationEndpoint } : {}) }, tokens), 'connected', accountEmail); this.waiting.delete(url); this.changed(url); }
         finish(200, 'Signed in. You can close this tab and go back to Rex Desk.');
       }).catch(error => {
         // The sign-in did not complete: the tab gets a plain failure page, never a false "Signed in".
@@ -309,9 +419,28 @@ export class McpSignIn {
     await this.ensurePublic(url, what, home);
     return url;
   }
-  pinned(address, what, home) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms: this.ms, guard: to => this.ensurePublic(to, what, home) }); }
+  pinned(address, what, home, ms = this.ms) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms, guard: to => this.ensurePublic(to, what, home) }); }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
-  signOut(url) { this.cancel(url); const record = this.record(url); if (record) { this.store.delete(KIND, record.id); this.changed(url); } }
+  signOut(url) {
+    this.cancel(url);
+    const record = this.record(url), secret = record && this.secret(record);
+    if (record) { this.store.delete(KIND, record.id); this.changed(url); }
+    const endpoint = secret?.revocationEndpoint || secret?.metadata?.revocation_endpoint || '';
+    const token = secret?.refreshToken || secret?.accessToken || '';
+    if (!endpoint || !token) return Promise.resolve(false);
+    return this.revoke(url, endpoint, token, secret?.client);
+  }
+  async revoke(url, endpoint, token, client) {
+    try {
+      const form = new URLSearchParams({ token });
+      if (client?.client_id) form.set('client_id', client.client_id);
+      if (client?.client_secret) form.set('client_secret', client.client_secret);
+      const pinned = this.pinned(endpoint, 'revocation address', originOf(url), Math.min(this.ms, REVOKE_MS));
+      const response = await pinned(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+      await response.body?.cancel?.().catch(() => {});
+      return Boolean(response.ok);
+    } catch { return false; }
+  }
   kept(base, tokens, before = {}) {
     return { ...base, accessToken: tokens.access_token, refreshToken: tokens.refresh_token || before.refreshToken || '', expiresAt: tokens.expires_in ? Date.now() + Number(tokens.expires_in) * 1000 : 0 };
   }
@@ -328,10 +457,11 @@ export class McpSignIn {
     if (!secret || record.status === 'expired') return false;
     if (!secret.refreshToken) { if (secret.expiresAt && secret.expiresAt <= Date.now()) this.expire(record); return false; }
     try {
-      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, resource: secret.resource, fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
+      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, ...(secret.resource ? { resource: secret.resource } : {}), fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
       // Signed out or signed in again while this ran: the old answer is dropped.
       if (this.store.get(KIND, record.id)?.sealed !== record.sealed) return false;
-      this.save(url, record.name, this.kept(secret, tokens, secret));
+      const accountEmail = emailFromIdToken(tokens.id_token) || record.accountEmail || '';
+      this.save(url, record.name, this.kept(secret, tokens, secret), 'connected', accountEmail);
       return true;
     } catch (error) {
       if (OVER.has(error?.errorCode || error?.constructor?.errorCode) && this.store.get(KIND, record.id)?.sealed === record.sealed) this.expire(record);

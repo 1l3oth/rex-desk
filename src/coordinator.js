@@ -6,7 +6,7 @@ import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { McpSignIn, addressOf, carriesCredential } from './mcp-signin.js';
 import { bridged } from './mcp-bridge.js';
-import { catalogItem } from './connector-catalog.js';
+import { catalogItem, catalogItemByUrl } from './connector-catalog.js';
 import { Team } from './team.js';
 import { Schedules } from './schedules.js';
 import { AgentNotes } from './agent-notes.js';
@@ -230,7 +230,7 @@ export class Desk {
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.
     this.toolbox.computer = () => this.peers.self.name;
     // Rex Desk signs in to remote MCP servers itself and keeps those sign-ins fresh for every agent (L30).
-    this.mcpSignIn = new McpSignIn(store, { changed: url => this.mcpSignInChanged(url) });
+    this.mcpSignIn = new McpSignIn(store, { changed: url => this.mcpSignInChanged(url), oauthFor: (name, url) => (catalogItem(name) || catalogItemByUrl(url))?.connect?.oauth });
     this.toolbox.signIn = this.mcpSignIn;
     // The browser agents use (Settings, Agents): downloaded on first use after a yes in Needs you.
     this.agentBrowser = new AgentBrowser(this); this.evidence.agentBrowser = () => this.agentBrowser;
@@ -419,8 +419,10 @@ export class Desk {
     let servers = {}; try { servers = this.toolbox.servers(); } catch { /* no config */ }
     return Object.entries(servers).flatMap(([name, config]) => {
       const url = addressOf(config); if (!url || carriesCredential(new URL(url))) return [];
+      const item = catalogItem(name) || catalogItemByUrl(url);
+      const catalogOAuth = Boolean(item?.connect?.kind === 'remote-mcp' && item.connect.auth === 'oauth' && !Object.keys(config.headers || {}).length);
       const state = this.mcpSignIn.state(url), refused = Boolean(this.toolbox.failed.get(name)?.signIn);
-      if (!state.state && !state.waiting && !refused) return [];
+      if (!state.state && !state.waiting && !refused && !catalogOAuth) return [];
       return [{ name, ...state, state: state.state === 'expired' || (state.state && refused) ? 'expired' : state.state || 'needed' }];
     });
   }

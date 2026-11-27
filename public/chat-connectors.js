@@ -28,16 +28,24 @@ export async function loadConnectors(ctx, state, draw) {
 
 const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? t('not synced yet') : minutes < 1 ? t('synced just now') : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
 
-// Remote MCP servers Rex Desk signs in to itself (L30): how each stands, with its one button.
-function signInParts({ esc }, item) {
+// Remote MCP servers Rex Desk signs in to itself (L30): how each stands, with its actions.
+export function signInParts({ esc }, item) {
   const name = esc(item.name);
-  const bad = text => `<span class="tb-status bad"><i aria-hidden="true"></i>${text}</span>`;
+  const email = item.accountEmail ? esc(item.accountEmail) : '';
+  const bad = (text, title = '') => `<span class="tb-status bad"${title ? ` title="${title}"` : ''}><i aria-hidden="true"></i>${text}</span>`;
+  const expired = email ? t`Sign-in expired (${email})` : t`Sign-in expired`;
   // On a phone or another computer: the sign-in can only be finished where Rex Desk runs.
-  if (item.elsewhere && item.state !== 'connected') return { sub: `${item.state === 'expired' ? bad(t`Sign-in expired`) : ''}<span>${t`Finish sign-in on the computer running Rex Desk.`}</span>`, button: '' };
+  if (item.elsewhere && item.state !== 'connected') return { sub: `${item.state === 'expired' ? bad(expired, email) : ''}<span>${t`Finish sign-in on the computer running Rex Desk.`}</span>`, button: '' };
   if (item.waiting && item.link) return { sub: `<span>${t`Finish signing in in your browser.`} <a href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${t`Open the sign-in page`}</a></span>`, button: `<button type="button" class="btn small quiet" data-mcp-cancel="${name}">${t`Cancel`}</button>` };
   const again = item.state === 'expired';
-  if (item.state === 'connected') return { sub: `<span>${t`Signed in. Rex Desk keeps the sign-in fresh.`}</span>`, button: `<button type="button" class="btn small quiet" data-mcp-sign-out="${name}">${t`Sign out`}</button>` };
-  return { sub: item.error ? bad(esc(item.error)) : again ? bad(t`Sign-in expired`) : `<span>${t`Not signed in`}</span>`, button: `<button type="button" class="btn small primary" data-mcp-start="${name}">${again ? t`Sign in again` : t`Sign in`}</button>` };
+  if (item.state === 'connected') {
+    const switchBtn = item.elsewhere ? '' : `<button type="button" class="btn small quiet" data-mcp-start="${name}">${t`Switch account`}</button>`;
+    return {
+      sub: `${item.error ? bad(esc(item.error)) : ''}<span${email ? ` title="${email}"` : ''}>${email ? t`Signed in as ${email}. Rex Desk keeps the sign-in fresh.` : t`Signed in. Rex Desk keeps the sign-in fresh.`}</span>`,
+      button: `${switchBtn}<button type="button" class="btn small quiet" data-mcp-sign-out="${name}">${t`Sign out`}</button>`,
+    };
+  }
+  return { sub: item.error ? bad(esc(item.error)) : again ? bad(expired, email) : `<span>${t`Not signed in`}</span>`, button: `<button type="button" class="btn small primary" data-mcp-start="${name}">${again ? t`Sign in again` : t`Sign in`}</button>` };
 }
 
 // One linked connection: its state line (or its failed sync, kept on its own row), then Sync, Change and Remove.
@@ -49,9 +57,9 @@ function connectionRow({ ui, esc }, state, item, kind, tag) {
   const sub = failed ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(failed)}</span>` : `<span>${esc(kind.name)} · ${tasks === 1 ? t('1 task') : t`${tasks} tasks`} · ${ago(sync?.at)}${item.enabled ? '' : ` · ${t('Off')}`}</span>`;
   const report = kind.gives.includes('report') ? `<label class="cx-opt"><input type="checkbox" data-cn-report="${esc(item.id)}" ${item.options.sendReport ? 'checked' : ''}> ${t`Agents send their final report here`}</label>` : '';
   return `<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${esc(tag)}</span></span>${sub}${report}</div>
-      <button type="button" class="btn small" data-cn-sync="${esc(item.id)}" ${busy ? 'disabled' : ''}>${busy ? t('Syncing…') : t('Sync')}</button>
+      <div class="cx-actions"><button type="button" class="btn small" data-cn-sync="${esc(item.id)}" ${busy ? 'disabled' : ''}>${busy ? t('Syncing…') : t('Sync')}</button>
       <button type="button" class="btn small quiet" data-cn-edit="${esc(item.id)}">${failed ? t('Paste a new key') : t('Change')}</button>
-      <button type="button" class="btn small quiet danger" data-cn-remove="${esc(item.id)}" aria-label="${esc(t`Remove ${item.name}`)}">${t`Remove`}</button></li>`;
+      <button type="button" class="btn small quiet danger" data-cn-remove="${esc(item.id)}" aria-label="${esc(t`Remove ${item.name}`)}">${t`Remove`}</button></div></li>`;
 }
 
 // The page. trackers: the Flow and Morningmate cards (chat-trackers.js), which keep their own editor for now.
@@ -85,11 +93,11 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
       : `<span>${esc(howLine(kind, true))}</span>`;
     const linkBtn = tg ? `<button type="button" class="btn small${link.linked ? ' quiet' : ' primary'}" data-cn-tg-link="${esc(link.id)}">${link.linked ? t`Relink` : t`Link`}</button>` : '';
     (rows[kind.group] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><span class="mk-name"><b>${esc(link.name)}</b><span class="mk-tag">${esc(tagOf(kind))}</span></span>${sub}</div>
-      ${parts?.button || ''}${linkBtn}<button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></li>`);
+      <div class="cx-actions">${parts?.button || ''}${linkBtn}<button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></div></li>`);
   }
   // Servers added by hand (not from this list) that need a sign-in get a row of their own.
   const listed = new Set((data.links || []).filter(link => items.has(link.connectorId)).map(link => link.server));
-  const others = (data.signIns || []).filter(item => !listed.has(item.name)).map(item => { const parts = signInParts(ctx, item); return `<li class="tb-row cx-row"><div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${t`MCP`}</span></span>${parts.sub}</div>${parts.button}</li>`; });
+  const others = (data.signIns || []).filter(item => !listed.has(item.name)).map(item => { const parts = signInParts(ctx, item); return `<li class="tb-row cx-row"><div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${t`MCP`}</span></span>${parts.sub}</div>${parts.button ? `<div class="cx-actions">${parts.button}</div>` : ''}</li>`; });
   const hasTrackers = Boolean(trackers);
   const groups = (data.catalog?.groups || data.types).map(type => {
     const list = rows[type.id] || [], extra = type.id === 'tasks' ? trackers : '';
@@ -106,7 +114,7 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
 // How an item connects, in one line, from its catalog hint. after: the line under a connected row.
 function howLine(item, after = false) {
   const { kind, auth } = item.connect || {};
-  if (kind === 'remote-mcp' && auth === 'oauth') return after ? t`Agents can use ${item.name}. You sign in the first time one does.` : t`Sign in with ${item.name}`;
+  if (kind === 'remote-mcp' && auth === 'oauth') return after ? t`Agents can use ${item.name} after you sign in.` : t`Sign in with ${item.name}`;
   if (kind === 'remote-mcp' && auth === 'none') return after ? t`Agents can use ${item.name}.` : t('No sign-in');
   if (kind === 'local-mcp') return after ? t`Agents can use ${item.name}. It runs on this computer.` : t('Runs on this computer');
   if (kind === 'webhook') return after ? t('Messages go to one channel.') : t('Paste a webhook address');
@@ -144,7 +152,7 @@ function catalogFormHtml({ esc }, state, data) {
     const hint = name === 'host' ? 'gitlab.com' : name === 'folder' ? 'D:\\work\\docs' : '';
     return `<label class="st-field"><span>${labels[name] || esc(name)}${optional ? ` <em class="muted">${t`optional`}</em>` : ''}</span><input data-cn-field="${esc(name)}" type="${secret ? 'password' : 'text'}" autocomplete="off" spellcheck="false" value="${esc(values[name] || '')}" placeholder="${esc(hint)}"></label>`;
   }).join('');
-  const okLine = () => probe.needs === 'sign-in' ? t`${item.name} answered. You sign in with ${item.name} the first time an agent uses it.` : probe.tools != null ? (probe.tools === 1 ? t('It works: 1 tool for your agents.') : t`It works: ${probe.tools} tools for your agents.`) : probe.label ? t`It works: ${probe.label}.` : t('It works.');
+  const okLine = () => probe.needs === 'sign-in' ? t`${item.name} answered. Add it, then press Sign in.` : probe.tools != null ? (probe.tools === 1 ? t('It works: 1 tool for your agents.') : t`It works: ${probe.tools} tools for your agents.`) : probe.label ? t`It works: ${probe.label}.` : t('It works.');
   const line = busy ? `<p class="cx-probe muted" role="status">${t`Checking…`}</p>`
     : !probe ? ''
     : probe.ok ? `<p class="cx-probe ok" role="status">${esc(okLine())}</p>`
@@ -197,7 +205,12 @@ export async function connectorsClick(ctx, state, target, back, draw) {
   const mcp = hit('mcp-start') || hit('mcp-cancel') || hit('mcp-sign-out');
   if (mcp) {
     const { mcpStart, mcpCancel, mcpSignOut } = mcp.dataset;
-    if (mcpSignOut && !await askConfirm(t`Sign out of ${mcpSignOut}? Agents cannot use it until you sign in again.`)) return true;
+    const signOutLabel = mcpSignOut
+      ? ((state.extra.connectors?.links || []).find(entry => entry.server === mcpSignOut)?.name
+        || (state.extra.connectors?.catalog?.items || []).find(entry => entry.id === mcpSignOut)?.name
+        || mcpSignOut)
+      : '';
+    if (mcpSignOut && !await askConfirm(t`Sign out of ${signOutLabel}? Agents cannot use it until you sign in again.`)) return true;
     try {
       if (mcpStart) await startMcpSignIn(ctx, mcpStart);
       else await api(`/mcp-sign-in/${mcpCancel ? 'cancel' : 'sign-out'}`, { method: 'POST', data: { name: mcpCancel || mcpSignOut } });

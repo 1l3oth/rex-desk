@@ -111,6 +111,23 @@ npm start
 
 Then open http://127.0.0.1:4318 (a checkout runs as development on 4318; the installed app is the real Rex Desk on 4317). Use `npm run dev` to restart on every change. A source checkout updates itself: when new commits reach its branch and no agent is working, it pulls them and restarts.
 
+### Google Drive connector (OAuth setup)
+
+Google OAuth does not support dynamic client registration, so the **Google Drive** connector (`Settings → Connectors → Add connector`) reads a pre-registered Google Cloud OAuth client from environment variables on the computer running Rex Desk (client secrets are never stored in `public/connectors/catalog.json`):
+
+| Variable | Required | Default / notes |
+|---|---|---|
+| `REX_GOOGLE_OAUTH_CLIENT_ID` | Yes | OAuth 2.0 Client ID from Google Cloud Console |
+| `REX_GOOGLE_OAUTH_CLIENT_SECRET` | Yes | OAuth 2.0 Client Secret from Google Cloud Console |
+| `REX_GOOGLE_OAUTH_SCOPES` | No | Space- or comma-separated scopes. Defaults to `https://www.googleapis.com/auth/drive.readonly openid email` |
+
+To configure a Google Cloud OAuth client:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project and enable the **Google Drive API**.
+2. Configure the **OAuth consent screen** (for external users outside Testing mode, Google requires OAuth verification for restricted Drive scopes; while testing, add your Google account under **Test users**).
+3. Under **Credentials → Create Credentials → OAuth client ID**, choose **Desktop app** (Desktop apps support Rex Desk's loopback `http://127.0.0.1:<port>/callback` redirect).
+4. Set `REX_GOOGLE_OAUTH_CLIENT_ID` and `REX_GOOGLE_OAUTH_CLIENT_SECRET` in the environment before starting Rex Desk, then connect **Google Drive** in **Settings → Connectors**.
+
 ## Build the installers
 
 The **Desktop installers** workflow (`.github/workflows/desktop.yml`) builds the Windows `.exe`, `.msi` and portable `.zip`, the macOS `.dmg` and the Linux `.deb` and `.AppImage` on GitHub. Its **try** job then installs the Windows and Linux packages on clean GitHub machines, opens them and checks that the server answers; on Windows it also upgrades the version people have now to the new one, for the `.exe` and the `.msi`. Start it from the Actions tab with **Run workflow** and fill in:
