@@ -96,6 +96,8 @@ test('Windows: the server starts the installer itself, detached, over the runnin
   assert.deepEqual(calls[0].args, ['/P', '/R', String.raw`/D=D:\Rex Desk`], 'the installer is told the folder of the running copy, and reopens it');
   assert.equal(calls[0].options.detached, true); assert.equal(calls[0].options.windowsVerbatimArguments, true, '/D= must stay unquoted');
   assert.equal(calls[0].options.argv0, `"${calls[0].file}"`, 'the installer path keeps its quotes in the command line');
+  assert.equal(calls[0].options.cwd, path.join(data, 'updates'), "it runs from the updates folder, never from Rex Desk's own folder");
+  assert.equal(calls[0].options.env.REX_INSTALL_LOG, path.join(data, 'updates', 'install-update.log'), 'the installer writes its steps to the same log');
   const settings = JSON.parse(read(path.join(data, 'updates', 'install-update.json'), 'utf8'));
   assert.equal(settings.app, String.raw`D:\Rex Desk\rex-desk.exe`); assert.equal(settings.version, '0.3.0');
   const files = list(path.join(data, 'updates'));
@@ -124,18 +126,19 @@ test('Windows: a second install while the first is going is refused, so only one
   await blocked.install();
 });
 
-test('Windows: an installer that cannot start (antivirus) says so, with Install manually, and the log keeps the reason', async () => {
+test('Windows: an installer that cannot start says so, with Install manually, and the log keeps the reason; no cause is guessed', async () => {
   const { readFileSync: read } = await import('node:fs');
   const data = temporary('install-blocked');
   const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
   assert.equal((await updates.check()).ready, true);
   updates.freeSpace = () => 10 * 2 ** 30;
   updates.spawner = fakeSpawn([], Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
-  await assert.rejects(updates.install(), /The installer did not start \(spawn EPERM\)\. Your antivirus may have blocked it\. Press Install manually/);
+  await assert.rejects(updates.install(), /^Error: The installer did not start \(spawn EPERM\)\. Press Install manually to run it yourself\.$/);
   assert.match(read(path.join(data, 'updates', 'install-update.log'), 'utf8'), /the installer did not start: spawn EPERM/);
   // On the next start, still on 0.2.0: the card says the installer did not start.
   const next = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
-  assert.match(next.status().installFailed.reason, /^The installer did not start\. Your antivirus may have blocked it/);
+  assert.equal(next.status().installFailed.why, 'not-started');
+  assert.equal(next.status().installFailed.reason, 'The installer did not start. Press Install manually to run it yourself.');
 });
 
 test('a full drive is said in plain words: no download without room, and the card gets the reason', async () => {
@@ -157,7 +160,7 @@ test('a full drive is said in plain words: no download without room, and the car
   assert.equal(plainProblem(new Error('Update download failed (500).'), data), 'Update download failed (500).');
 });
 
-test('an update that did not take (antivirus blocked it) is told on the next start, and the log is written by the server too', async () => {
+test('an update that did not take is told on the next start with only what is known, and the log is written by the server too', async () => {
   const { writeFileSync: write, readFileSync: read, mkdirSync: make } = await import('node:fs');
   const data = temporary('blocked-install'), folder = path.join(data, 'updates'), installerFile = path.join(folder, 'Rex-Desk-0.3.0-setup.exe');
   make(folder, { recursive: true }); write(installerFile, 'setup');
@@ -166,12 +169,24 @@ test('an update that did not take (antivirus blocked it) is told on the next sta
   settings('0.3.0'); write(path.join(folder, 'install-update.log'), '2026-11-25T10:00:00 server: installing 0.3.0\r\n');
   let failed = open('0.2.0').status().installFailed;
   assert.equal(failed.version, '0.3.0'); assert.equal(failed.installer, installerFile);
-  assert.match(failed.reason, /^The installer did not start\. Your antivirus may have blocked it\. Add the Rex Desk folder to its exclusions, or press Install manually/);
+  assert.equal(failed.why, 'not-started'); assert.match(failed.reason, /^The installer did not start\. Press Install manually/);
   write(path.join(folder, 'install-update.log'), 'x server: the server started the installer (process 1)\r\n');
-  assert.match(open('0.2.0').status().installFailed.reason, /^The update did not install\. Your antivirus may have blocked it/);
+  failed = open('0.2.0').status().installFailed;
+  assert.equal(failed.why, 'not-installed'); assert.equal(failed.stopped, '');
+  assert.equal(failed.reason, 'The update did not install. Press Install manually to run the installer yourself.');
+  // The installer wrote its steps and why it stopped: the card says that, as the installer wrote it.
+  write(path.join(folder, 'install-update.log'), ['x server: the server started the installer (process 1)', 'x installer: started, installing into C:\\Rex Desk',
+    'x installer: could not rename C:\\Rex Desk\\payload to C:\\Rex Desk\\payload.old after 10 tries (Windows error 32)',
+    'x installer: stopped: Rex Desk could not move its current version aside (a file in its folder is in use), so the update stopped and the current version stays. Run the update again in a minute.', ''].join('\r\n'));
+  failed = open('0.2.0').status().installFailed;
+  assert.equal(failed.why, 'not-installed');
+  assert.match(failed.stopped, /^Rex Desk could not move its current version aside \(a file in its folder is in use\)/);
+  assert.equal(failed.reason, `The installer stopped: ${failed.stopped}`);
+  assert.match(failed.log, /Windows error 32/);
   rmSync(installerFile);
   failed = open('0.2.0').status().installFailed;
-  assert.match(failed.reason, /installer is gone\. Your antivirus may have removed it/); assert.equal(failed.installer, '');
+  assert.equal(failed.why, 'gone'); assert.match(failed.reason, /installer is gone, so the update could not run/); assert.equal(failed.installer, '');
+  assert.doesNotMatch(failed.reason, /antivirus/i, 'no cause is guessed');
   assert.equal(open('0.3.0').status().installFailed, null, 'installed: forgotten');
   assert.equal(existsSync(path.join(folder, 'install-update.json')), false);
   // Pressing Update now again clears it, and the server writes the first lines of the log itself.
@@ -205,4 +220,33 @@ test('Windows: a copy from the .msi (Program Files) never runs the per-user inst
   const data = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-msi-'));
   assert.equal(new Updates(data, { version: '0.1.0', executable: win('Program Files', 'Rex Desk', 'rex-desk.exe'), platform: 'win32-x64', msi: () => true }).status().supported, false);
   assert.equal(new Updates(data, { version: '0.1.0', executable: win('Users', 'me', 'AppData', 'Local', 'Rex Desk', 'rex-desk.exe'), platform: 'win32-x64', msi: () => false }).status().supported, true);
+});
+
+// Install manually: the installer is shown selected in a visible Explorer window. /select takes the quoted path as one word,
+// so it is passed as written; no hidden window. Finder and the Linux file manager show the folder, as before.
+test('Install manually shows the installer selected in a visible Explorer window, and says so when it cannot open', async () => {
+  const { writeFileSync: write, mkdirSync: make } = await import('node:fs');
+  const data = temporary('reveal with spaces'), folder = path.join(data, 'updates'), installerFile = path.join(folder, 'Rex Desk_0.3.0_x64-setup.exe');
+  make(folder, { recursive: true }); write(installerFile, 'setup');
+  write(path.join(folder, 'install-update.json'), JSON.stringify({ version: '0.3.0', installer: installerFile }));
+  const open = platform => new Updates(data, { version: '0.2.0', executable: 'C:/Rex Desk/rex-desk.exe', key: keys.publicKey, platform, appImage: '/opt/Rex.AppImage', fetcher: fetcher(manifest()) });
+  const windows = open('win32-x64'), calls = []; windows.spawner = fakeSpawn(calls);
+  assert.deepEqual(await windows.reveal(), { opened: true, file: installerFile });
+  assert.equal(calls[0].file, 'explorer.exe');
+  assert.deepEqual(calls[0].args, [`/select,"${installerFile}"`], 'the whole path, spaces and all, in quotes');
+  assert.equal(calls[0].options.windowsVerbatimArguments, true, 'passed as written, so the quotes reach Explorer');
+  assert.equal(calls[0].options.windowsHide, undefined, 'never a hidden window');
+  assert.equal(calls[0].options.detached, true);
+  // Explorer could not be started: the card gets the folder to open by hand.
+  windows.spawner = fakeSpawn([], Object.assign(new Error('spawn explorer.exe ENOENT'), { code: 'ENOENT' }));
+  assert.deepEqual(await windows.reveal(), { opened: false, folder: path.resolve(folder) });
+  for (const [platform, command] of [['darwin-arm64', 'open'], ['linux-x64', 'xdg-open']]) {
+    const other = open(platform), seen = []; other.spawner = fakeSpawn(seen);
+    if (!other.state.installFailed) other.state.installFailed = { installer: installerFile };
+    await other.reveal();
+    assert.equal(seen[0].file, command); assert.deepEqual(seen[0].args, [path.resolve(folder)], `${platform}: the folder, as before`);
+  }
+  // An installer outside the updates folder is never shown.
+  windows.state.installFailed = { installer: path.join(data, 'elsewhere.exe') }; write(path.join(data, 'elsewhere.exe'), 'x');
+  assert.throws(() => windows.reveal(), /not in the updates folder/);
 });

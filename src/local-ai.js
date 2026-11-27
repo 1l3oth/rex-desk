@@ -314,10 +314,11 @@ export function findOllama() {
   const found = places.find(place => place && existsSync(place)); if (found) return found;
   try { return execFileSync(process.platform === 'win32' ? 'where' : 'which', ['ollama'], { windowsHide: true, timeout: 10000, encoding: 'utf8' }).split(/\r?\n/)[0].trim(); } catch { return ''; }
 }
-// Starts Ollama's server in the background; it keeps running after Rex Desk closes, like the Ollama app does.
+// Starts Ollama's server in the background; it keeps running after Rex Desk closes, like the Ollama app does. It works from
+// the home folder, never Rex Desk's own: a program left working in Rex Desk's folder keeps an update from renaming it.
 export function startOllama(executable) {
   if (!executable) return;
-  const child = spawn(executable, ['serve'], { detached: true, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(executable, ['serve'], { cwd: os.homedir(), detached: true, windowsHide: true, stdio: 'ignore' });
   child.on('error', () => {}); child.unref();
 }
 // Installs Ollama without asking anything: winget on Windows, Homebrew on a Mac, Ollama's own script on Linux.

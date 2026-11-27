@@ -1,5 +1,6 @@
 ; Runs inside the Windows installer (see bundle.windows.nsis.installerHooks in tauri.conf.json).
 !include LogicLib.nsh
+!include FileFunc.nsh
 
 ; An update copies the new files over the old ones and never removes a file the new version no longer has, so code from
 ; earlier versions piled up in the install folder (and the server still served old page scripts). So the new version is
@@ -15,6 +16,9 @@
 ; payload.pending (next to the payload) is written before the new files go in and removed once the copy is checked or
 ; the last version is back. A first install has no backup to fall back on, so this is how the app (payload_swap.rs) and
 ; the next installer know a payload without the marker is an install that never finished, not one from an older version.
+; Every step and the reason for any stop go to a log: the file Rex Desk names in REX_INSTALL_LOG (its install-update.log,
+; which the update card reads on the next start), or install-update.log in the install folder for an installer run by hand.
+; A failed update then says why, instead of a guess.
 
 Var RexSwapLock
 Var RexResult
@@ -30,20 +34,60 @@ Var RexPath
 Var RexFile
 Var RexGot
 Var RexCount
+Var RexLog
+Var RexLogFile
+Var RexOk
+Var RexErr
+Var RexT0
+Var RexT1
+Var RexT2
+Var RexT3
+Var RexT4
+Var RexT5
+Var RexT6
+
+; Adds one line, "<UTC time> installer: <text>", to the install log. Never stops the install: a log that cannot be written
+; is skipped.
+Function RexWriteLog
+  Exch $RexLine
+  ${If} $RexLog != ""
+    ${GetTime} "" "LS" $RexT0 $RexT1 $RexT2 $RexT3 $RexT4 $RexT5 $RexT6
+    ClearErrors
+    FileOpen $RexLogFile "$RexLog" a
+    ${IfNot} ${Errors}
+      FileSeek $RexLogFile 0 END
+      FileWrite $RexLogFile "$RexT2-$RexT1-$RexT0T$RexT4:$RexT5:$RexT6 installer: $RexLine$\r$\n"
+      FileClose $RexLogFile
+    ${EndIf}
+  ${EndIf}
+  Pop $RexLine
+FunctionEnd
+!macro RexNote text
+  Push `${text}`
+  Call RexWriteLog
+!macroend
+; Stops the install with this reason, written to the log first.
+!macro RexStop text
+  !insertmacro RexNote `stopped: ${text}`
+  Abort `${text}`
+!macroend
 
 ; Renames $RexFrom to $RexTo. A virus scanner may still hold a file for a moment, so it tries a few times.
 ; $RexResult: ok or fail.
 Function RexRename
   StrCpy $RexTry 0
   ${Do}
-    ClearErrors
-    Rename "$RexFrom" "$RexTo"
-    ${IfNot} ${Errors}
+    ; MoveFileW, like Rename, but with the Windows error: 32 means a program has a file or the folder open, 5 access refused.
+    System::Call 'kernel32::MoveFileW(w "$RexFrom", w "$RexTo") i .s ?e'
+    Pop $RexErr
+    Pop $RexOk
+    ${If} $RexOk != 0
       StrCpy $RexResult ok
       Return
     ${EndIf}
     IntOp $RexTry $RexTry + 1
     ${If} $RexTry >= 10
+      !insertmacro RexNote "could not rename $RexFrom to $RexTo after 10 tries (Windows error $RexErr)"
       StrCpy $RexResult fail
       Return
     ${EndIf}
@@ -153,6 +197,7 @@ Function RexCheckPayload
       FileClose $RexList
       ${If} $RexResult != ok
         DetailPrint "The file list of the new version does not end as it should."
+        !insertmacro RexNote "the file list of the new version does not end as it should"
       ${EndIf}
       Return
     ${EndIf}
@@ -160,6 +205,7 @@ Function RexCheckPayload
     FileOpen $RexFile "$INSTDIR\payload\$RexPath" r
     ${If} ${Errors}
       DetailPrint "Missing after the copy: $RexPath"
+      !insertmacro RexNote "missing after the copy: $RexPath"
       FileClose $RexList
       Return
     ${EndIf}
@@ -167,6 +213,7 @@ Function RexCheckPayload
     FileClose $RexFile
     ${If} $RexGot != $RexSize
       DetailPrint "Incomplete after the copy: $RexPath"
+      !insertmacro RexNote "incomplete after the copy: $RexPath ($RexGot bytes, expected $RexSize)"
       FileClose $RexList
       Return
     ${EndIf}
@@ -175,9 +222,15 @@ Function RexCheckPayload
   ; The list stopped before its end line: a readable start of it is not a whole copy.
   FileClose $RexList
   DetailPrint "The file list of the new version is cut short."
+  !insertmacro RexNote "the file list of the new version is cut short"
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  ReadEnvStr $RexLog REX_INSTALL_LOG
+  ${If} $RexLog == ""
+    StrCpy $RexLog "$INSTDIR\install-update.log"
+  ${EndIf}
+  !insertmacro RexNote "started, installing into $INSTDIR"
   ; Waits for the app if it is putting a backup back right now (a few renames), then holds the lock until the end.
   System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\RexDeskPayloadSwap") p .s'
   Pop $RexSwapLock
@@ -185,14 +238,26 @@ FunctionEnd
   Pop $RexResult
   ${If} $RexResult != 0
   ${AndIf} $RexResult != 128
-    Abort "Rex Desk is busy restoring its last version. Nothing was changed. Run the update again in a minute."
+    !insertmacro RexStop "Rex Desk is busy restoring its last version. Nothing was changed. Run the update again in a minute."
   ${EndIf}
   ; Running the installer by hand while Rex Desk is open closes the window but not the server, whose bundled node.exe
   ; then cannot be replaced ("Error opening file for writing"). Everything still running from the install folder is
   ; stopped first, the way the in-app update already does it. The installer is a 32-bit program, so its PowerShell
   ; cannot read the path of a 64-bit process through Get-Process; Win32_Process gives it.
-  nsExec::Exec `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$f = '$INSTDIR\'; for ($$i = 0; $$i -lt 20; $$i++) { $$p = @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }); if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }"`
-  Pop $0
+  ; What is still running from the install folder afterwards goes to the log, so a folder held open can be traced.
+  nsExec::ExecToStack `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$f = '$INSTDIR\'; $$q = { @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }) }; for ($$i = 0; $$i -lt 20; $$i++) { $$p = & $$q; if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }; $$left = & $$q; if ($$left.Count) { 'still running from the install folder: ' + (($$left | ForEach-Object { $$_.Name + ' ' + $$_.ProcessId }) -join ', ') } else { 'nothing is left running from the install folder' }"`
+  Pop $RexOk
+  Pop $RexErr
+  ${Do}
+    StrCpy $RexT0 $RexErr 1 -1
+    ${If} $RexT0 == "$\n"
+    ${OrIf} $RexT0 == "$\r"
+      StrCpy $RexErr $RexErr -1
+    ${Else}
+      ${Break}
+    ${EndIf}
+  ${Loop}
+  !insertmacro RexNote "closed Rex Desk (exit $RexOk): $RexErr"
   ; A backup left by an install that never finished: when the new copy was checked and marked, only the clean-up was
   ; lost; otherwise the backup is the last copy that worked and goes back first.
   ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
@@ -204,12 +269,12 @@ FunctionEnd
       Call RexClearPending
       ${If} $RexResult != ok
         SetErrorLevel 2
-        Abort "Rex Desk could not clear an unfinished update (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
+        !insertmacro RexStop "Rex Desk could not clear an unfinished update (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
       ${EndIf}
       Call RexRestoreBackup
       ${If} $RexResult != ok
         SetErrorLevel 2
-        Abort "Rex Desk could not put its last working version back (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
+        !insertmacro RexStop "Rex Desk could not put its last working version back (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
       ${EndIf}
     ${EndIf}
     Delete "$INSTDIR\payload.pending"
@@ -224,13 +289,14 @@ FunctionEnd
   RMDir /r "$INSTDIR\payload.broken"
   ${If} ${FileExists} "$INSTDIR\payload\*.*"
     ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
-      Abort "An old Rex Desk backup could not be cleared (a file in it is in use), so the update stopped and the current version stays. Run the update again in a minute."
+      !insertmacro RexStop "An old Rex Desk backup could not be cleared (a file in it is in use), so the update stopped and the current version stays. Run the update again in a minute."
     ${EndIf}
+    !insertmacro RexNote "moving the current version aside"
     StrCpy $RexFrom "$INSTDIR\payload"
     StrCpy $RexTo "$INSTDIR\payload.old"
     Call RexRename
     ${If} $RexResult != ok
-      Abort "Rex Desk could not move its current version aside (a file in its folder is in use), so the update stopped and the current version stays. Run the update again in a minute."
+      !insertmacro RexStop "Rex Desk could not move its current version aside (a file in its folder is in use), so the update stopped and the current version stays. Run the update again in a minute."
     ${EndIf}
   ${EndIf}
   CreateDirectory "$INSTDIR"
@@ -239,7 +305,7 @@ FunctionEnd
   FileWrite $RexFile "installing"
   FileClose $RexFile
   ${If} ${Errors}
-    Abort "Rex Desk could not write to its install folder, so the update stopped. The current version goes back when Rex Desk next starts. Run the update again."
+    !insertmacro RexStop "Rex Desk could not write to its install folder, so the update stopped. The current version goes back when Rex Desk next starts. Run the update again."
   ${EndIf}
   ; On a drive Windows compresses to save space, the install folder was compressed too, and so was everything written into
   ; it: node.exe and the server's files. On a busy hard disk Node then needed minutes just to load (0% CPU, before any
@@ -248,6 +314,7 @@ FunctionEnd
   CreateDirectory "$INSTDIR"
   nsExec::Exec `compact.exe /u /s:"$INSTDIR" /i /q`
   Pop $0
+  !insertmacro RexNote "copying the new files"
 !macroend
 
 ; The new files are in. A copy that matches the file list gets the completion marker and the backup goes. Any other copy
@@ -257,6 +324,7 @@ FunctionEnd
 !macro NSIS_HOOK_POSTINSTALL
   ; Windows will not rename a folder the installer is working in, so it steps out of payload first.
   SetOutPath "$INSTDIR"
+  !insertmacro RexNote "new files copied, checking them"
   Call RexCheckPayload
   ${If} $RexResult == ok
     ClearErrors
@@ -270,6 +338,7 @@ FunctionEnd
   ${If} $RexResult == ok
     RMDir /r "$INSTDIR\payload.old"
     Delete "$INSTDIR\payload.pending"
+    !insertmacro RexNote "finished: the new version is in place"
     System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
     System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
   ${Else}
@@ -295,6 +364,6 @@ FunctionEnd
     System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
     System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
     SetErrorLevel 2
-    Abort "$RexLine"
+    !insertmacro RexStop "$RexLine"
   ${EndIf}
 !macroend

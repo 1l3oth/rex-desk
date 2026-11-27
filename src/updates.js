@@ -99,8 +99,10 @@ export class Updates {
     this.state.installFailed = this.lastInstall();
   }
   // The last install this copy started (install-update.json names its version). Still on an older version now means it did not
-  // take: antivirus such as Kaspersky blocks the silent installer or the helper that runs it, or removes the downloaded file.
-  // The log says how far it got. A finished install (this copy is that version or newer) is forgotten.
+  // take. Only what is known is said: the installer is gone, it never started, or it stopped and its own log line says why
+  // (the installer writes each step and its stop reason to install-update.log). No cause is guessed. A finished install (this
+  // copy is that version or newer) is forgotten.
+  // why: gone, not-started or not-installed, for the card to say it in the person's language; stopped: the installer's own reason.
   lastInstall() {
     if (!this.state.supported) return null;
     const settingsFile = path.join(this.directory, 'install-update.json');
@@ -108,10 +110,12 @@ export class Updates {
     if (!settings?.version || !newer(settings.version, this.version)) { rmSync(settingsFile, { force: true }); return null; }
     let log = ''; try { log = readFileSync(path.join(this.directory, 'install-update.log'), 'utf8'); } catch { /* never written */ }
     const installer = String(settings.installer || ''), gone = !installer || !existsSync(installer);
-    const reason = gone ? 'The downloaded installer is gone. Your antivirus may have removed it. Add the Rex Desk folder to its exclusions, then check for updates again.'
-      : !/started the installer/.test(log) ? 'The installer did not start. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or press Install manually and run it yourself.'
-        : 'The update did not install. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or press Install manually and run it yourself.';
-    return { version: String(settings.version), reason, installer: gone ? '' : installer, log: log.trim().split(/\r?\n/).slice(-6).join('\n') };
+    const stopped = (log.match(/installer: stopped: (.+)/g) || []).at(-1)?.replace(/^installer: stopped: /, '').trim() || '';
+    const why = gone ? 'gone' : !/started the installer/.test(log) ? 'not-started' : 'not-installed';
+    const reason = why === 'gone' ? 'The downloaded installer is gone, so the update could not run. Check for updates to download it again.'
+      : why === 'not-started' ? 'The installer did not start. Press Install manually to run it yourself.'
+        : stopped ? `The installer stopped: ${stopped}` : 'The update did not install. Press Install manually to run the installer yourself.';
+    return { version: String(settings.version), why, reason, stopped, installer: gone ? '' : installer, log: log.trim().split(/\r?\n/).slice(-6).join('\n') };
   }
   // Writes one line to install-update.log from this server, so the log exists and says what happened even when the installer
   // never runs (it was missing on a computer where antivirus stopped the update).
@@ -218,14 +222,38 @@ export class Updates {
     await this.launch(folder);
     return 'server';
   }
+  // Shows the installer of an update that did not install, selected in a visible Explorer window (Finder or the file manager
+  // shows its folder), so the person can run it by hand. Resolves { opened: true } once the window's program started, or
+  // { opened: false, folder } when it could not, so the card can give the folder to open by hand. Explorer's /select takes the
+  // path in quotes as one word, so it is passed as written (windowsVerbatimArguments); a Windows file name cannot hold a quote,
+  // and one that somehow does is refused rather than passed on.
+  reveal() {
+    const file = this.state.installFailed?.installer || this.file || '', folder = path.resolve(this.directory);
+    this.note('the person opened the installer folder to install by hand');
+    if (!file || !existsSync(file) || path.dirname(path.resolve(file)) !== folder) throw new Error('The installer is not in the updates folder any more. Check for updates to download it again.');
+    const windows = this.platform.startsWith('win32');
+    if (windows && /["\r\n]/.test(file)) return Promise.resolve({ opened: false, folder });
+    const [command, args, options] = windows ? ['explorer.exe', [`/select,"${path.resolve(file)}"`], { windowsVerbatimArguments: true }]
+      : [this.platform.startsWith('darwin') ? 'open' : 'xdg-open', [folder], {}];
+    return new Promise(resolve => {
+      let child;
+      const failed = error => { this.note(`the installer folder did not open: ${error?.message || error}`); resolve({ opened: false, folder }); };
+      try { child = (this.spawner || spawn)(command, args, { ...options, detached: true, stdio: 'ignore' }); } catch (error) { failed(error); return; }
+      child.once('error', failed);
+      child.once('spawn', () => { child.unref(); resolve({ opened: true, file }); });
+    });
+  }
   // Started detached and outside this server's console, with the command line written as is: NSIS reads /D= only as the
   // last word, unquoted, even when the folder has spaces. Written as is, the installer's own path would lose its quotes and
   // NSIS would read the rest of a path with spaces as options, so it is quoted by hand (argv0).
   launch(folder) {
     return new Promise((resolve, reject) => {
       let child;
-      const failed = error => { const reason = plainProblem(error, this.directory, this.freeSpace || freeSpace); this.note(`the installer did not start: ${reason}`); reject(new Error(`The installer did not start (${reason}). Your antivirus may have blocked it. Press Install manually to run it yourself.`)); };
-      try { child = (this.spawner || spawn)(this.file, ['/P', '/R', `/D=${folder}`], { detached: true, stdio: 'ignore', windowsHide: false, windowsVerbatimArguments: true, argv0: `"${this.file}"` }); }
+      const failed = error => { const reason = plainProblem(error, this.directory, this.freeSpace || freeSpace); this.note(`the installer did not start: ${reason}`); reject(new Error(`The installer did not start (${reason}). Press Install manually to run it yourself.`)); };
+      // It runs from the updates folder, never from Rex Desk's own folder (the server's working folder is inside payload, which
+      // the installer must rename: a program working in a folder keeps it from being renamed). REX_INSTALL_LOG tells the
+      // installer where to write its steps (desktop/src-tauri/windows/hooks.nsh).
+      try { child = (this.spawner || spawn)(this.file, ['/P', '/R', `/D=${folder}`], { cwd: this.directory, env: { ...process.env, REX_INSTALL_LOG: path.join(this.directory, 'install-update.log') }, detached: true, stdio: 'ignore', windowsHide: false, windowsVerbatimArguments: true, argv0: `"${this.file}"` }); }
       catch (error) { failed(error); return; }
       child.once('error', failed);
       child.once('spawn', () => { this.note(`the server started the installer (process ${child.pid})`); child.unref(); resolve(); });

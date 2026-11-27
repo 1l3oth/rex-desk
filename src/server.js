@@ -954,15 +954,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') { const status = await updates.check(); notify(); return json(response, 200, status); }
-      // The installer of an update that did not install, shown selected in its folder so the person can run it by hand.
-      if (url.pathname === '/api/update/reveal' && request.method === 'POST') {
-        const file = updates.state.installFailed?.installer || updates.file || '';
-        updates.note('the person opened the installer folder to install by hand');
-        if (!file || !existsSync(file) || path.dirname(path.resolve(file)) !== path.resolve(updates.directory)) throw new Error('The installer is not in the updates folder any more. Check for updates to download it again.');
-        if (process.platform === 'win32') spawn('explorer.exe', [`/select,${file}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-        else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [path.dirname(file)], { detached: true, stdio: 'ignore' }).unref();
-        return json(response, 200, { opened: file });
-      }
+      // The installer of an update that did not install, shown selected in a visible window so the person can run it by hand.
+      if (url.pathname === '/api/update/reveal' && request.method === 'POST') return json(response, 200, await updates.reveal());
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
         if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }

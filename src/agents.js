@@ -315,8 +315,9 @@ export class AgentProfiles {
     if (process.platform === 'win32') {
       const script = signInWindowScript({ name, found, install, executable, bare: bareName[provider], args });
       // `start` gives it a window of its own (a console started straight from Rex Desk closes at once), and the encoded script
-      // passes through cmd untouched, so `|`, `&` and quotes in it are not read by cmd.
-      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: terminalEnv, windowsHide: false, detached: true, stdio: 'ignore' });
+      // passes through cmd untouched, so `|`, `&` and quotes in it are not read by cmd. The window works from the home folder, never
+      // Rex Desk's own: a window left open there keeps an update from renaming Rex Desk's folder.
+      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: terminalEnv, windowsHide: false, cwd: os.homedir(), detached: true, stdio: 'ignore' });
     } else {
       const key = profileKey(aiProvider(provider)), profileSet = env[key] ? `export ${key}=${shQuote(env[key])}; ` : '';
       const line = profileSet + signInShellLine({ name, found, install, executable, bare: bareName[provider], args });
@@ -451,7 +452,7 @@ export class AgentProfiles {
     let child;
     if (process.platform === 'win32') {
       const script = ["$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-out'", `Write-Host ${psQuote(line)}`, "Write-Host ''", `& ${[executable.command, ...executable.args].map(psQuote).join(' ')}`].join('\n');
-      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-out', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env, windowsHide: false, detached: true, stdio: 'ignore' });
+      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-out', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env, windowsHide: false, cwd: os.homedir(), detached: true, stdio: 'ignore' });
     } else {
       const shell = `echo ${shQuote(line)}; ${[executable.command, ...executable.args].map(shQuote).join(' ')}`;
       child = process.platform === 'darwin'

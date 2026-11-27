@@ -2907,5 +2907,12 @@
  "This account was removed from Rex Desk before. Its earlier folder was found at {0}, so it is back.": "គណនីនេះធ្លាប់ត្រូវបានដកចេញពី Rex Desk ពីមុន។ បានរកឃើញថតពីមុនរបស់វានៅ {0} ដូច្នេះវាត្រឡប់មកវិញហើយ។",
   "This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.": "ការជជែកនេះបានផ្លាស់ទៅគណនី Codex ផ្សេង ដែលរក្សាប្រវត្តិរបស់ខ្លួនដាច់ដោយឡែក។ វាបន្តក្នុងវគ្គថ្មី ដែលអានសេចក្តីសង្ខេបនៃការជជែកនេះជាមុនសិន។",
   "Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.": "Codex រកមិនឃើញការសន្ទនាមុននៅលើគណនីនេះទេ។ វាបន្តក្នុងវគ្គថ្មី ដែលអានសេចក្តីសង្ខេបនៃការជជែកនេះជាមុនសិន។",
-  "Rex Desk could not read this Codex account's history folder to check the earlier conversation, so nothing was sent yet. Your message is kept: press Resume or send again to retry.": "Rex Desk មិនអាចអានថតប្រវត្តិរបស់គណនី Codex នេះ ដើម្បីពិនិត្យការសន្ទនាមុនបានទេ ដូច្នេះមិនទាន់បានផ្ញើអ្វីនៅឡើយទេ។ សាររបស់អ្នកត្រូវបានរក្សាទុក៖ ចុច Resume ឬផ្ញើម្តងទៀត ដើម្បីសាកល្បងម្តងទៀត។"
+  "Rex Desk could not read this Codex account's history folder to check the earlier conversation, so nothing was sent yet. Your message is kept: press Resume or send again to retry.": "Rex Desk មិនអាចអានថតប្រវត្តិរបស់គណនី Codex នេះ ដើម្បីពិនិត្យការសន្ទនាមុនបានទេ ដូច្នេះមិនទាន់បានផ្ញើអ្វីនៅឡើយទេ។ សាររបស់អ្នកត្រូវបានរក្សាទុក៖ ចុច Resume ឬផ្ញើម្តងទៀត ដើម្បីសាកល្បងម្តងទៀត។",
+  "Running the installer closes Rex Desk, so let working agents finish first.": "ការដំណើរការកម្មវិធីដំឡើងនឹងបិទ Rex Desk ដូច្នេះសូមទុកឱ្យភ្នាក់ងារដែលកំពុងធ្វើការបញ្ចប់ការងារសិន។",
+  "The downloaded installer is gone, so the update could not run. Check for updates to download it again.": "កម្មវិធីដំឡើងដែលបានទាញយកបានបាត់ ដូច្នេះការអាប់ដេតមិនអាចដំណើរការបានទេ។ សូមពិនិត្យរកការអាប់ដេត ដើម្បីទាញយកវាម្តងទៀត។",
+  "The installer did not start. Press Install manually to run it yourself.": "កម្មវិធីដំឡើងមិនបានចាប់ផ្តើមទេ។ ចុច «ដំឡើងដោយដៃ» ដើម្បីដំណើរការវាដោយខ្លួនឯង។",
+  "The installer stopped: {0}": "កម្មវិធីដំឡើងបានឈប់៖ {0}",
+  "The update did not install. Press Install manually to run the installer yourself.": "ការអាប់ដេតមិនបានដំឡើងទេ។ ចុច «ដំឡើងដោយដៃ» ដើម្បីដំណើរការកម្មវិធីដំឡើងដោយខ្លួនឯង។",
+  "Rex Desk could not open the folder. Open it yourself: {0}": "Rex Desk មិនអាចបើកថតបានទេ។ សូមបើកវាដោយខ្លួនឯង៖ {0}",
+  "The installer is selected in the window that opened. Double-click it to run it.": "កម្មវិធីដំឡើងត្រូវបានជ្រើសរើសនៅក្នុងផ្ទាំងដែលបានបើក។ ចុចពីរដងលើវា ដើម្បីដំណើរការ។"
 }

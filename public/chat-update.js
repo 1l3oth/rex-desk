@@ -19,7 +19,7 @@ export function showUpdateCard(update) {
   if (document.documentElement.classList.contains('embed')) { card?.remove(); return; }
   // Shown from the moment a new version starts downloading (with how much has arrived), then as ready to install.
   // A new version that cannot download or install yet (the drive is full) shows too, with the reason, instead of nothing.
-  // An install that did not take (antivirus blocked it) shows first: what happened, and where the installer is to run it by hand.
+  // An install that did not take shows first: what is known about it, and where the installer is to run it by hand.
   const failed = !update?.downloading && update?.installFailed?.version ? update.installFailed : null;
   const loading = !failed && !update?.ready && update?.downloading, blocked = !failed && !update?.ready && !loading && update?.problem && update?.available?.version;
   const version = failed ? failed.version : update?.ready ? update.available?.version : loading ? update.downloading.version : blocked ? update.available.version : '', later = laterChoice();
@@ -47,17 +47,27 @@ export function showUpdateCard(update) {
   document.body.append(card);
 }
 
+// What is known about an update that did not install, in the person's language. The installer's own stop reason (its log) is
+// shown as it wrote it.
+function failedText(failed) {
+  if (failed.why === 'gone') return t('The downloaded installer is gone, so the update could not run. Check for updates to download it again.');
+  if (failed.why === 'not-started') return t('The installer did not start. Press Install manually to run it yourself.');
+  if (failed.stopped) return t`The installer stopped: ${failed.stopped}`;
+  if (failed.why === 'not-installed') return t('The update did not install. Press Install manually to run the installer yourself.');
+  return failed.reason || '';
+}
+
 const who = names => names.length === 1 ? names[0] : names.length === 2 ? t`${names[0]} and ${names[1]}` : t`${names[0]}, ${names[1]} and ${names.length - 2} more`;
 // The bottom of the card follows what is going on: free to update, agents working (updating would cut them off), or
 // waiting for them to finish. Only this part redraws, so an expanded list of changes stays open.
 function renderFoot(card, update) {
   const foot = card.querySelector('.uc-foot'), error = card.querySelector('.uc-error');
   if (card.dataset.failed === 'true' && update.installFailed) {
-    error.textContent = update.installFailed.reason; error.hidden = false;
+    error.textContent = failedText(update.installFailed); error.hidden = false;
     const key = `failed#${update.ready ? 1 : 0}`;
     if (foot.dataset.key !== key) {
       foot.dataset.key = key;
-      foot.innerHTML = `<p class="uc-hint"></p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button>${update.installFailed.installer ? `<button type="button" class="btn quiet" data-action="update-reveal">${t`Install manually`}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Try again`}</button>` : ''}</div>`;
+      foot.innerHTML = `<p class="uc-hint">${update.installFailed.installer ? t('Running the installer closes Rex Desk, so let working agents finish first.') : ''}</p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button>${update.installFailed.installer ? `<button type="button" class="btn quiet" data-action="update-reveal">${t`Install manually`}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Try again`}</button>` : ''}</div>`;
     }
     return;
   }
@@ -136,7 +146,12 @@ export async function whyUnreachable(api, failure, { tries = 4, pause = 2500 } =
 // Opens the folder of the installer that did not install, with the file selected, so the person can run it by hand.
 export async function revealInstaller(api) {
   const error = document.querySelector('#update-card .uc-error');
-  try { await api('/update/reveal', { method: 'POST' }); } catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
+  const hint = document.querySelector('#update-card .uc-hint');
+  try {
+    const shown = await api('/update/reveal', { method: 'POST' });
+    if (shown?.opened === false) { if (error) { error.textContent = t`Rex Desk could not open the folder. Open it yourself: ${shown.folder}`; error.hidden = false; } return; }
+    if (hint) hint.textContent = `${t('The installer is selected in the window that opened. Double-click it to run it.')} ${t('Running the installer closes Rex Desk, so let working agents finish first.')}`;
+  } catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
 export async function installUpdate(api) {
@@ -147,7 +162,7 @@ export async function installUpdate(api) {
   catch (failure) {
     // Agents still working, or the download went away: say why here and let the person try again.
     if (button) { button.disabled = false; button.textContent = t('Update now'); }
-    // The installer did not start (antivirus): a button opens its folder with the file selected, to run it by hand.
+    // The installer did not start: a button opens its folder with the file selected, to run it by hand.
     if (button && /installer did not start/i.test(failure.message) && !card.querySelector('[data-action="update-reveal"]')) { const manual = document.createElement('button'); manual.type = 'button'; manual.className = 'btn quiet'; manual.dataset.action = 'update-reveal'; manual.textContent = t('Install manually'); button.before(manual); }
     if (error) { error.textContent = await whyUnreachable(api, failure); error.hidden = false; return; }
     throw failure;
