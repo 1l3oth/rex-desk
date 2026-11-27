@@ -666,3 +666,34 @@ html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}
 .head-menu-pop .m-sheet-item .av{width:28px;height:28px}
 .head-menu-pop .m-sheet-text small{font-size:12px}
 .head-menu-pop .m-sheet-close{display:none}
+/* ===== L122: a calm, native sidebar. Rows share one height and one icon column, the selected row is a quiet tint,
+   Notifications (activity) is a bell at the top and Needs you (replies and approvals) leads the places. ===== */
+@media (min-width:761px){
+  .rail .item,.places .place{min-height:38px;padding:4px 8px;gap:10px;border-radius:8px}
+  .places{gap:0;margin:4px 0 0}
+  .places .place .av{width:30px;height:30px;background:none!important;box-shadow:none}
+  .places .place .av svg{width:17px;height:17px}
+  .places .place .av.icon{color:var(--muted)}.places .place .av.icon.warn{color:var(--warn)}
+  .rail .item.active,.places .place.active,.places .place.tile.active{background:color-mix(in srgb,var(--accent) 13%,transparent)!important;box-shadow:none!important}
+  .rail .item.active .name,.places .place.active>span{font-weight:550}
+  .rail .item:hover:not(.active),.places .place:hover:not(.active){background:color-mix(in srgb,var(--ink) 5%,transparent)}
+  .sec{margin-top:14px}
+}
+.rail-bell{position:relative;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
+.rail-bell:hover,.rail-bell.active{background:color-mix(in srgb,var(--ink) 7%,transparent);color:var(--ink)}
+.rail-bell b{position:absolute;top:1px;right:0;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--accent);color:var(--accent-ink,#fff);font-size:10px;font-weight:600;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
+.rail-empty{margin:2px 10px 6px;color:var(--muted);font-size:12.5px}
+/* The agent filter's status chips: a small segmented row under the search box. */
+.rail-states{display:flex;flex-wrap:wrap;gap:4px;margin:0 8px 6px}
+.state-chip{display:inline-flex;align-items:center;gap:4px;height:23px;padding:0 7px;border:1px solid var(--line);border-radius:7px;background:none;color:var(--muted);font:inherit;font-size:11.5px;white-space:nowrap;cursor:pointer}
+.state-chip:disabled{opacity:.45;cursor:default}
+.state-chip span{font-variant-numeric:tabular-nums;opacity:.75}
+.state-chip:hover:not(:disabled){color:var(--ink)}
+.state-chip.on{border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--ink)}
+.m-head .rail-states{margin:8px 0 0}
+@media (max-width:760px){.state-chip{height:30px;padding:0 12px;font-size:13.5px;border-radius:9px}}
+/* Devices carries a small amber dot while this computer has no name. */
+.rail-tools .tool.needs-name{position:relative}
+.rail-tools .tool.needs-name::after{content:"";position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 2px var(--solid)}
+.newpc-dialog{display:flex;flex-direction:column;gap:10px;width:360px;max-width:calc(100vw - 32px);padding:18px}
+.newpc-dialog h2{margin:0;font-size:15px}.newpc-dialog p{margin:0;font-size:13px}

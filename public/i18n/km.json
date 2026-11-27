@@ -2179,8 +2179,6 @@
  "The free model costs nothing (Fish Audio's fair use). The best model costs about {0} for each minute of speech.": "ម៉ូដែលឥតគិតថ្លៃមិនគិតថ្លៃទេ (ក្រោមការប្រើប្រាស់ដោយយុត្តិធម៌របស់ Fish Audio)។ ម៉ូដែលល្អបំផុតគិតប្រហែល {0} សម្រាប់រាល់នាទីនៃការនិយាយ។",
  "Kept. Every computer now shows this chat.": "បានរក្សាទុក។ កុំព្យូទ័រទាំងអស់ឥឡូវបង្ហាញការជជែកនេះ។",
  "This computer is now {0}.": "កុំព្យូទ័រនេះឥឡូវឈ្មោះ {0}។",
- "New computer": "កុំព្យូទ័រថ្មី",
- "Name it so you can tell your computers apart, like Home or Work.": "ដាក់ឈ្មោះវា ដើម្បីងាយស្គាល់កុំព្យូទ័ររបស់អ្នក ដូចជា Home ឬ Work។",
  "Offline · {0}": "ក្រៅបណ្ដាញ · {0}",
  "(this computer)": "(កុំព្យូទ័រនេះ)",
  "1 message": "សារ ១",
@@ -2884,5 +2882,14 @@
  "The agent starts fresh and reads a summary of this chat.": "ភ្នាក់ងារចាប់ផ្ដើមថ្មី ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
  "Hand off now? The agent stops, and a new chat starts with your next message and reads a summary of this one.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារនឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
  "Hand off to a new chat? The agent starts fresh with your next message and reads a summary of this one.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
- "Start a meeting with this agent and others.": "ចាប់ផ្ដើមកិច្ចប្រជុំជាមួយភ្នាក់ងារនេះ និងភ្នាក់ងារផ្សេងទៀត។"
+ "Start a meeting with this agent and others.": "ចាប់ផ្ដើមកិច្ចប្រជុំជាមួយភ្នាក់ងារនេះ និងភ្នាក់ងារផ្សេងទៀត។",
+ "Replies and approvals waiting for you": "ចម្លើយ និងការអនុម័តដែលកំពុងរង់ចាំអ្នក",
+ "Replies and approvals": "ចម្លើយ និងការអនុម័ត",
+ "No meeting rooms yet.": "មិនទាន់មានបន្ទប់ប្រជុំនៅឡើយទេ។",
+ "No agents yet.": "មិនទាន់មានភ្នាក់ងារនៅឡើយទេ។",
+ "Name this computer": "ដាក់ឈ្មោះកុំព្យូទ័រនេះ",
+ "Notifications: what your agents did": "ការជូនដំណឹង៖ អ្វីដែលភ្នាក់ងាររបស់អ្នកបានធ្វើ",
+ "Show agents": "បង្ហាញភ្នាក់ងារ",
+ "No agents match.": "គ្មានភ្នាក់ងារត្រូវគ្នាទេ។",
+ "So you can tell your computers apart, like Home or Work.": "ដើម្បីឱ្យអ្នកស្គាល់កុំព្យូទ័ររបស់អ្នកដាច់ពីគ្នា ដូចជា ផ្ទះ ឬ ការងារ។"
 }

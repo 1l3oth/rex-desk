@@ -3,7 +3,7 @@ import './layers.js';
 import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
-import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
+import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter, stateChipsHtml } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { sideTabsHtml, crewHtml, savedSideTab, saveSideTab } from '/chat-sidetabs.js';
@@ -189,6 +189,10 @@ function section(key, title, count, extra, body) {
 function toggleSection(key) { if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); try { localStorage.setItem('rex-desk-collapsed', JSON.stringify([...collapsed])); } catch { /* private window */ } renderAll(); }
 // An agent the stuck guard stopped (L117) reads Stopped, with an amber dot, wherever it is listed.
 const agentStopped = agent => Boolean(agent?.runId) && guardStopped(ui.snap?.runs?.find?.(run => run.id === agent.runId));
+// What the agent filter sorts by (L122): working, needs you, or stopped by the guard; idle agents have no state.
+const agentState = agent => agentStopped(agent) ? 'stopped' : ['busy', 'replying'].includes(agent?.status?.state) ? 'working' : agent?.status?.state === 'waiting' ? 'waiting' : '';
+// Notifications (activity) is a bell at the top of the list, apart from Needs you (replies and approvals).
+const railBell = unread => `<button type="button" class="rail-bell tile" data-action="nt-panel" title="${t`Notifications: what your agents did`}" aria-label="${t`Notifications`}">${SVG.bell}${unread ? `<b>${unread > 99 ? '99+' : unread}</b>` : ''}</button>`;
 const agentDot = (state, agent) => agentStopped(agent) ? 'warn' : ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good', offline: 'off' })[state] || '';
 
 // The Tasks row says how they stand without opening it: open, waiting on someone, done.
@@ -204,21 +208,19 @@ function renderRail() {
   // The Tasks badge counts work still to do: open and waiting, never done.
   const openTasks = snap.taskCounts ? (snap.taskCounts.open || 0) + (snap.taskCounts.waiting || 0) : tasks.filter(task => task.status !== 'done').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
-  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>${t`Rex Desk`}</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
+  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>${t`Rex Desk`}</strong></span><span class="spacer"></span>${railBell(snap.notices?.unread || 0)}</div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
       ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: t('Rex Agent'), sub: guardStopped(main) ? t('Stopped') : mainLive().state === 'idle' ? t('Asleep') : main ? stateLabel(main) : t('Not started'), badge: unreadFor(ui, 'main:'), live: mainLive(), stopped: guardStopped(main) })}
       <nav class="places" aria-label="${t`Places`}">${[
-        place('notices', 'bell', t('Notifications'), snap.notices?.unread || 0, true),
-        place('inbox', 'inbox', t('Needs you'), asks + tgUnread, true),
+        place('inbox', 'inbox', t('Needs you'), asks + tgUnread, true, t('Replies and approvals waiting for you'), t('Replies and approvals')),
         place('tasks', 'tasks', t('Tasks'), busy || openTasks, false, busy ? t`${busy} being worked on` : '', taskSummary(snap.taskCounts)),
         place('person', 'person', t('Knowledge'), 0),
         place('split', 'split', t('Split view'), 0),
       ].join('')}</nav>
     </div>
-    ${newComputerCard(snap)}
-    ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<button type="button" class="rail-cta" data-action="new-room">${t`New meeting room`}</button>`)}
-    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, stopped: agentStopped(agent) })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
-  </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot">${profileFoot()}</div></div>`;
+    ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<p class="rail-empty">${t`No meeting rooms yet.`}</p>`)}
+    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, stopped: agentStopped(agent) }), agentState) : `<p class="rail-empty">${t`No agents yet.`}</p>`)}
+  </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool${snap.devices?.self?.named === false ? ' needs-name' : ''}" data-open="devices" title="${snap.devices?.self?.named === false ? t`Name this computer` : t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot">${profileFoot()}</div></div>`;
 }
 
 // ---------- run conversation ----------
@@ -627,11 +629,14 @@ function renderAll(full = false) {
   // The sidebar is rebuilt only when something in it changed.
   // While the person types in the phone search box, only the list under it is redrawn, so the box keeps its focus.
   const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml;
+    // An open menu in the footer (the profile menu) stays as it is while the rest of the list is redrawn under it (L122).
+    const menu = document.getElementById('pf-menu'), keepFoot = menu && !menu.hidden ? rail.querySelector('.rail-foot') : null, focused = keepFoot?.contains(document.activeElement) ? document.activeElement : null;
     if (document.activeElement?.id === 'm-search' && rail.querySelector('.rail-scroll')) { const fresh = document.createElement('div'); fresh.innerHTML = railHtml; rail.querySelector('.rail-scroll').replaceWith(fresh.querySelector('.rail-scroll')); }
     else rail.innerHTML = railHtml;
+    if (keepFoot) { rail.querySelector('.rail-foot')?.replaceWith(keepFoot); ui.railHtml = ''; focused?.focus(); }
     const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; filterChats();
     // The agent filter keeps hiding what does not match, and keeps the cursor if the person was typing in it.
-    applyFilter(rail, ui.agentFilter);
+    applyFilter(rail, ui.agentFilter, ui.agentState);
     if (ui.filterFocused) { const box = rail.querySelector('[data-rail-filter]'); if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } } }
   renderStage(full);
   if (ui.profileId) { if ((ui.snap.specialists || []).some(item => item.id === ui.profileId)) drawProfile(); else closeProfile(); }
@@ -1292,12 +1297,6 @@ document.addEventListener('click', async event => {
 });
 
 // ---------- a personal chat with an agent: its profile and what was shared, on the right ----------
-// A computer Rex Desk has not seen before has no name yet: it asks for one, so every screen can tell your computers apart.
-function newComputerCard(snap) {
-  const self = snap.devices?.self; if (!self || self.named !== false) return '';
-  return `<form class="newpc" data-newpc><b>${t('New computer')}</b><span class="muted small">${t('Name it so you can tell your computers apart, like Home or Work.')}</span>
-    <div class="newpc-row"><input name="name" maxlength="40" value="${esc(self.name || '')}" aria-label="${t('Name of this computer')}"><button class="btn small primary">${t('Save')}</button></div></form>`;
-}
 // The sidebar line under an agent: what it is doing and the computer it runs on (named, and whether that one is on).
 function agentWhere(agent) {
   const where = agent.device || '', state = agent.status?.state;
@@ -1602,8 +1601,10 @@ function profileMenu({ who, image, name, plan, signedIn, free, updateNew }) {
   </div>`;
 }
 function closeProfileMenu() {
-  const menu = document.getElementById('pf-menu'); if (menu) menu.hidden = true;
+  const menu = document.getElementById('pf-menu'), open = menu && !menu.hidden; if (menu) menu.hidden = true;
   document.querySelector('[data-action="profile-toggle"]')?.setAttribute('aria-expanded', 'false');
+  // What changed while it was open is drawn once the click that closed it is done, so that click is never lost.
+  if (open && !ui.railHtml) setTimeout(() => renderAll(), 300);
 }
 function toggleProfileMenu() {
   const menu = document.getElementById('pf-menu'); if (!menu) return;
@@ -1856,7 +1857,7 @@ function phoneTabs(asks) {
   const tab = (attrs, label, icon, on = false, badge = 0) => `<button type="button" ${attrs} class="${on ? 'on' : ''}">${icon}${badge ? `<span class="tb-badge">${badge}</span>` : ''}<span>${label}</span></button>`;
   return `<nav class="m-tabs" aria-label="${t`Sections`}">
     ${tab('data-action="m-top"', t('Chats'), ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'), true)}
-    ${tab('data-open="inbox" data-id=""', t('Needs you'), ic('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'), false, asks)}
+    ${tab('data-open="inbox" data-id=""', t('Needs you'), ic('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>'), false, asks)}
     ${tab('data-open="tasks" data-id=""', t('Tasks'), ic('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'))}
     ${tab('data-open="jev" data-id=""', t('Jev'), ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'))}
     ${tab('data-action="settings-open"', t('Settings'), ic(SETTINGS_GEAR))}
@@ -1930,7 +1931,7 @@ function phoneHead() {
   return `<div class="m-head"><div class="m-bar"><button type="button" class="m-me" data-open="person" data-id="" aria-label="${t`About you`}">${me}</button><h2>${t`Chats`}</h2>
     <button type="button" class="m-round" data-action="nt-panel" aria-label="${t`Notifications`}">${phIcon('bell')}${unread ? `<span class="tb-badge">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
     <button type="button" class="m-round" data-action="m-more" aria-label="${t`More`}">${phIcon('more')}</button></div>
-    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="${t`Search`}" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label></div>`;
+    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="${t`Search`}" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label>${(ui.snap?.specialists || []).length > 3 ? stateChipsHtml(ctx, (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').map(agentState)) : ''}</div>`;
 }
 function phoneChats() {
   const snap = ui.snap, rows = [], last = new Map();
@@ -1944,20 +1945,21 @@ function phoneChats() {
   for (const agent of snap.specialists || []) {
     const run = runById(agent.runId), state = agent.status?.state;
     rows.push({ at: run?.updatedAt || agent.updatedAt || agent.createdAt || '', html: phoneRow('specialist', agent.id, avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(state, agent), agent.name,
-      [agentStopped(agent) ? t('Stopped') : agent.status?.label || t('Idle'), agent.projectSlug].filter(Boolean).join(' · '), run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
+      [agentStopped(agent) ? t('Stopped') : agent.status?.label || t('Idle'), agent.projectSlug].filter(Boolean).join(' · '), run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, agentState(agent)) });
   }
   rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
   const main = mainRun();
   const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', t('Rex Agent'), main ? stateLabel(main) : t('Your helper for everything'), main?.updatedAt || '', unreadFor(ui, 'main:'));
   return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>${t`No chat matches.`}</p></div>`;
 }
-function phoneRow(type, id, avatar, dot, name, sub, at, badge) {
-  return `<button type="button" class="m-row${badge ? ' unread' : ''}" data-open="${type}" data-id="${esc(id || '')}" data-name="${esc(String(name).toLowerCase())}">${withDot(avatar, dot)}<span class="m-text"><span class="m-top"><b>${esc(name)}</b>${at ? `<time>${esc(ago(at))}</time>` : ''}</span><span class="m-sub"><span>${esc(sub)}</span>${badge ? `<span class="m-badge">${badge}</span>` : ''}</span></span></button>`;
+function phoneRow(type, id, avatar, dot, name, sub, at, badge, state = '') {
+  return `<button type="button" class="m-row${badge ? ' unread' : ''}" data-open="${type}" data-id="${esc(id || '')}" data-name="${esc(String(name).toLowerCase())}" data-state="${state}">${withDot(avatar, dot)}<span class="m-text"><span class="m-top"><b>${esc(name)}</b>${at ? `<time>${esc(ago(at))}</time>` : ''}</span><span class="m-sub"><span>${esc(sub)}</span>${badge ? `<span class="m-badge">${badge}</span>` : ''}</span></span></button>`;
 }
 function filterChats() {
   const words = String(ui.chatFilter || '').trim().toLowerCase(), list = document.querySelector('.m-chats'); if (!list) return;
   let shown = 0;
-  for (const row of list.querySelectorAll('.m-row')) { const match = !words || row.dataset.name.includes(words); row.hidden = !match; if (match) shown += 1; }
+  // A status chip (Working, Needs you, Stopped) shows only the agents in that state.
+  for (const row of list.querySelectorAll('.m-row')) { const match = (!words || row.dataset.name.includes(words)) && (!ui.agentState || row.dataset.state === ui.agentState); row.hidden = !match; if (match) shown += 1; }
   const none = list.querySelector('.m-none'); if (none) none.hidden = shown > 0;
 }
 document.addEventListener('input', event => { if (event.target.id !== 'm-search') return; ui.chatFilter = event.target.value; filterChats(); });

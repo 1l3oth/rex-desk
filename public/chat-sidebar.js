@@ -14,9 +14,9 @@ function arrange(items, saved = {}) {
   return { pinned: pins.map(id => items.find(item => item.id === id)), rest: items.filter(item => !pins.includes(item.id)).sort(byOrder), pins };
 }
 
-const rowHtml = (ctx, kind, item, inner, pinned, search = '') => {
+const rowHtml = (ctx, kind, item, inner, pinned, search = '', state = '') => {
   const { esc } = ctx;
-  return `<div class="drag-row${pinned ? ' pinned' : ''}" draggable="true" data-drag-kind="${kind}" data-drag-id="${esc(item.id)}" data-search="${esc(search.toLowerCase())}">${inner}`
+  return `<div class="drag-row${pinned ? ' pinned' : ''}" draggable="true" data-drag-kind="${kind}" data-drag-id="${esc(item.id)}" data-search="${esc(search.toLowerCase())}"${kind === 'agents' ? ` data-state="${state}"` : ''}>${inner}`
     + `<button type="button" class="pin-btn${pinned ? ' on' : ''}" data-action="pin-toggle" data-kind="${kind}" data-id="${esc(item.id)}" title="${pinned ? t('Unpin') : t('Pin to the top')}" aria-label="${pinned ? t`Unpin ${esc(item.name)}` : t`Pin ${esc(item.name)} to the top`}" aria-pressed="${pinned}">${PIN}</button></div>`;
 };
 const subhead = (ctx, key, title, count, foldable) => {
@@ -31,15 +31,23 @@ const teams = list => {
   for (const agent of list) { const slug = agent.projectSlug || ''; if (!groups.has(slug)) groups.set(slug, []); groups.get(slug).push(agent); }
   return [...groups].sort(([left], [right]) => (left === '') - (right === '') || teamName(left).localeCompare(teamName(right)));
 };
-export function agentListHtml(ctx, agents, inner) {
+// The status chips (L122): Working, Needs you, Stopped, each with how many are in it. One is on at a time; pressing it
+// again shows every agent. A state no agent is in is dimmed and cannot be picked.
+export function stateChipsHtml(ctx, states) {
+  const on = ctx.ui.agentState || '', count = state => states.filter(item => item === state).length;
+  const chip = (state, label) => `<button type="button" class="state-chip${on === state ? ' on' : ''}" data-rail-state="${state}" aria-pressed="${on === state}"${count(state) || on === state ? '' : ' disabled'}>${label}<span>${count(state)}</span></button>`;
+  return `<div class="rail-states" role="group" aria-label="${t`Show agents`}">${chip('working', t('Working'))}${chip('waiting', t('Needs you'))}${chip('stopped', t('Stopped'))}</div>`;
+}
+export function agentListHtml(ctx, agents, inner, stateOf = () => '') {
   const { ui, esc } = ctx, saved = ui.snap.sidebar?.agents || {}, { pinned, rest } = arrange(agents, saved);
   const search = agent => `${agent.name} ${agent.projectSlug || ''}`;
-  const rows = (list, isPinned) => list.map(agent => rowHtml(ctx, 'agents', agent, inner(agent), isPinned, search(agent))).join('');
+  const rows = (list, isPinned) => list.map(agent => rowHtml(ctx, 'agents', agent, inner(agent), isPinned, search(agent), stateOf(agent))).join('');
   const local = rest.filter(here), away = rest.filter(agent => !here(agent));
-  const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>` : '';
+  const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>${stateChipsHtml(ctx, agents.map(stateOf))}` : '';
   return filter
     + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
     + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${ctx.isCollapsed?.(key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
+    + (filter ? `<p class="rail-empty rail-none" hidden>${t`No agents match.`}</p>` : '')
     + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
 }
 
@@ -54,9 +62,12 @@ export function roomListHtml(ctx, rooms, inner) {
 }
 
 // Hides the rows the filter does not match, without drawing the sidebar again (the cursor stays in the box).
-export function applyFilter(root, text) {
+export function applyFilter(root, text, state = '') {
   const words = String(text || '').toLowerCase().split(/\s+/).filter(Boolean);
-  for (const row of root.querySelectorAll('.drag-row[data-drag-kind="agents"]')) row.hidden = words.length > 0 && !words.every(word => row.dataset.search.includes(word));
+  for (const row of root.querySelectorAll('.drag-row[data-drag-kind="agents"]')) row.hidden = (words.length > 0 && !words.every(word => row.dataset.search.includes(word))) || Boolean(state && row.dataset.state !== state);
+  // A team with nothing left to show hides its heading too, so a filtered list has no empty groups.
+  for (const list of root.querySelectorAll('.drag-list[data-list="agents"]')) { const head = list.previousElementSibling; if (head?.matches('.sub-sec')) head.hidden = ![...list.children].some(row => !row.hidden); }
+  const none = root.querySelector?.('.rail-none'); if (none) none.hidden = [...root.querySelectorAll('.drag-row[data-drag-kind="agents"]')].some(row => !row.hidden);
 }
 
 // Saving: the order of every row of that kind as it shows now, and the pins.
@@ -134,6 +145,12 @@ export function initSidebarDrag(ctx) {
   document.addEventListener('focusin', event => { ctx.ui.filterFocused = Boolean(event.target.closest?.('[data-rail-filter]')); });
   document.addEventListener('input', event => {
     const box = event.target.closest?.('[data-rail-filter]'); if (!box) return;
-    ctx.ui.agentFilter = box.value; applyFilter(document, box.value);
+    ctx.ui.agentFilter = box.value; applyFilter(document, box.value, ctx.ui.agentState);
+  });
+  // A status chip: one at a time; the one that is on turns it off again.
+  document.addEventListener('click', event => {
+    const chip = event.target.closest?.('[data-rail-state]'); if (!chip) return;
+    const state = chip.dataset.railState; ctx.ui.agentState = ctx.ui.agentState === state ? '' : state;
+    ctx.renderAll();
   });
 }

@@ -74,15 +74,35 @@ export async function devicesAction(ctx, action, target) {
   }
   await refresh();
 }
+// The small naming dialog: the question, a name field filled with the computer's own name, then Not now and Save.
+export function nameComputer(ctx) {
+  return new Promise(resolve => {
+    const back = document.createElement('div'), self = ctx.ui.snap?.devices?.self || {};
+    back.className = 'dialog-back newpc-back';
+    back.innerHTML = `<form class="dialog newpc-dialog" role="dialog" aria-modal="true" aria-labelledby="newpc-title">
+      <h2 id="newpc-title">${t`Name this computer`}</h2><p class="muted">${t`So you can tell your computers apart, like Home or Work.`}</p>
+      <input name="name" maxlength="40" value="${ctx.esc(self.name || '')}" aria-label="${t`Name of this computer`}" autocomplete="off">
+      <div class="confirm-foot"><button type="button" class="btn" data-newpc-skip>${t`Not now`}</button><button class="btn primary">${t`Save`}</button></div></form>`;
+    const done = () => { back.remove(); document.removeEventListener('keydown', key, true); resolve(); };
+    const key = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); done(); } };
+    back.addEventListener('click', event => { if (event.target === back || event.target.closest('[data-newpc-skip]')) done(); });
+    back.querySelector('form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const name = event.target.elements.name.value.trim(); if (!name) return;
+      try { await ctx.api('/peers', { method: 'POST', data: { action: 'rename', name } }); ctx.toast(t`This computer is now ${name}.`); await ctx.refresh(); done(); } catch (error) { ctx.toast(error.message, true); }
+    });
+    document.addEventListener('keydown', key, true);
+    document.body.append(back); const box = back.querySelector('input'); box.focus(); box.select();
+  });
+}
 // The name saves when you leave the field or press Enter.
 export function initDevices(ctx) {
-  // The "New computer" card in the sidebar.
-  document.addEventListener('submit', event => {
-    if (!event.target.matches?.('[data-newpc]')) return;
-    event.preventDefault();
-    const name = event.target.elements.name.value.trim(); if (!name) return;
-    void ctx.api('/peers', { method: 'POST', data: { action: 'rename', name } }).then(() => { ctx.toast(t`This computer is now ${name}.`); return ctx.refresh(); }).catch(error => ctx.toast(error.message, true));
-  });
+  // A computer with no name yet (L122): Devices asks for one in a small dialog first, then opens as usual.
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-open="devices"]'); if (!button || ctx.ui.snap?.devices?.self?.named !== false || document.querySelector('.newpc-back')) return;
+    event.preventDefault(); event.stopPropagation();
+    void nameComputer(ctx).then(() => ctx.open('devices', ''));
+  }, true);
   document.addEventListener('keydown', event => { if (event.target.id === 'dev-name' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); } });
   document.addEventListener('focusout', event => {
     if (event.target.id !== 'dev-name') return;
