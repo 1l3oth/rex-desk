@@ -64,3 +64,7 @@ test('the desktop app shows one Notifications bell (L122)', () => {
   assert.match(read('glass.css'), /html\.has-win-bar \.rail-bell\{display:none\}/);
   assert.match(read('chat-notices.js'), /\.find\(item => item\.getClientRects\(\)\.length\)/, 'the pane opens under the bell that shows');
 });
+
+test('a hidden team heading really hides under the filter (L122)', () => {
+  assert.match(read('glass.css'), /\.sub-sec\[hidden\]\{display:none\}/);
+});

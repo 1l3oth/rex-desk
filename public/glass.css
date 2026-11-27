@@ -522,6 +522,8 @@ html,body{height:100%;overflow:hidden}
 html.has-win-bar .places .place[data-action="nt-panel"]{display:none}
 /* One bell only: the window bar has its own, so the sidebar one hides (L122). */
 html.has-win-bar .rail-bell{display:none}
+/* A team with no agent left under the filter hides its heading too. */
+.sub-sec[hidden]{display:none}
 @media (max-width:900px){.win-search span{display:none}.win-search{width:auto}}
 
 /* ===== Jump to anything (Ctrl+K). ===== */
