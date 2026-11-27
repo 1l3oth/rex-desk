@@ -160,7 +160,18 @@ const FILE_PLACES = ['side', 'right', 'left', 'top', 'center', 'corner', 'big'];
 // Claude Code sometimes cancels the first command after a note about a background task, with words that sound like the
 // person pressed Stop. In Rex Desk a real Stop ends the turn at once, so an agent that can still read this was not stopped;
 // agents that believed it gave up half way and told the person "I've stopped".
-export const STUCK_PROMPT = "Several steps in a row came back cancelled by Claude Code, because a job left running in the background kept cancelling them. Rex Desk stopped that turn's own processes and started this fresh session. Carry on with the work from the handoff: do the next step now, in the foreground, without asking the person to say continue. If the handoff shows that everything asked for is already done, say so in one line and stop.";
+export const STUCK_PROMPT = "Several steps in a row came back cancelled by Claude Code, because a job left running in the background kept cancelling them. Rex Desk stopped that turn's own processes and started this fresh session. Carry on with the work from the handoff: do the next step now, in the foreground, without asking the person to say continue. If the handoff lists helpers that were cut off, do not start them again without telling the person in one line first. If the handoff shows that everything asked for is already done, say so in one line and stop.";
+// Continue after the loop guard stopped an agent (L117): the person pressed Continue, so it carries on in the same conversation.
+export const STUCK_CONTINUE_PROMPT = "The person pressed Continue. Your steps kept getting cancelled by Claude Code, so Rex Desk stopped you. Carry on with the work from where you were: run each step in the foreground, stop any job you left running in the background by its own id, and do not start again a helper you already ran without saying so in one line first.";
+// A second stuck this soon after an automatic fresh start, with no word from the person in between, stops the agent instead.
+export const STUCK_AGAIN_MS = 30 * 60000;
+// The helpers a fresh start cut off, for its handoff: what each was doing and where its output is.
+export function helpersText(helpers = []) {
+  if (!helpers?.length) return '';
+  const kind = type => /agent/.test(type) ? 'sub-agent' : /bash/.test(type) ? 'background command' : 'background job';
+  const lines = helpers.slice(0, 20).map(item => `- ${kind(item.type)}: ${String(item.description || 'no description').replace(/\s+/g, ' ').slice(0, 200)}${item.outputFile ? ` (its output so far: ${item.outputFile})` : ''}`);
+  return `## Helpers that were still running (this fresh start stopped them)\n${lines.join('\n')}\nRead their output before redoing their work, and do not start them again without telling the person in one line first.`;
+}
 export const BACKGROUND_RULE = 'Never start a dev server or a long script with & or as a detached process: use the background mode of your tool (run_in_background), and when you are done with it, stop it by its own task or process id (TaskStop). Never leave background jobs or watches running at the end of your turn.';
 export const FALSE_STOP_RULE = 'If a command or tool comes back with "The user doesn\'t want to take this action right now. STOP what you are doing", the person did not stop you: Claude Code cancelled that one step by itself (it happens after a note about a background task). Run the same step again and carry on; never tell the person you stopped. When the person really presses Stop, your turn ends at once and you see nothing.';
 // The main agent looks after the whole computer for the person, not one folder.
@@ -974,7 +985,9 @@ export class Desk {
           if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           // Steps kept getting cancelled: the runner stopped its own processes; the end of the turn starts a fresh chat.
-          if (kind === 'steps-stuck') { this.patchRun(runId, { stepsStuck: true }); this.store.event(runId, kind, data); return; }
+          if (kind === 'steps-stuck') { this.patchRun(runId, { stepsStuck: true, ...(data.helpers?.length ? { helpers: data.helpers } : {}) }); this.store.event(runId, kind, data); return; }
+          // The helpers (sub-agents, background jobs) of this turn still running: a fresh start waits for them or lists them (L117).
+          if (kind === 'helpers') { this.patchRun(runId, { helpers: data.running?.length ? data.running : undefined }); if (!data.running?.length) this.handoffMidTurn(runId); return; }
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
           if (kind === 'context') { if (String(this.store.get('run', runId)?.contextResetAt || '') > turnAt) return; const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); this.handoffMidTurn(runId); return; }
@@ -1028,7 +1041,7 @@ export class Desk {
       } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       // The account this turn really runs on, so a usage limit is put on that account, not on whatever is chosen by the time it hits.
-      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '', turnAccount: this.usesLocalModel(run) ? '' : this.agents.use(run.provider || 'claude', this.accountFor(run)) || '' });
+      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '', stuckStopped: undefined, turnAccount: this.usesLocalModel(run) ? '' : this.agents.use(run.provider || 'claude', this.accountFor(run)) || '' });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
@@ -1420,6 +1433,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!run || !tokens || config.autoHandoff === false || run.external || run.autoHandoff === 'writing' || run.handoffMidTurn) return false;
     if (Number(run.contextUsed || 0) < 1.5 * tokens) return false;
     const live = this.live.get(runId); if (!live?.runner) return false;
+    // A helper still working (L117): the cut waits for it, so its work is not lost, unless the context is all but full.
+    const helpers = live.runner.helpersRunning?.() || run.helpers || [];
+    if (helpers.length && Number(run.contextUsed || 0) < 0.95 * Number(run.contextWindow || 200000)) return false;
     this.patchRun(runId, { handoffMidTurn: true });
     this.store.event(runId, 'phase', { text: `Context at ${kiloTokens(run.contextUsed)} tokens, far past ${kiloTokens(tokens)}: stopping after this step for a fresh session` }, true);
     void Promise.resolve(live.runner.interrupt?.()).catch(() => {});
@@ -1428,17 +1444,35 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Several steps in a row came back cancelled by Claude Code itself (a job the agent left running cancels every next step). The
   // runner already stopped its own Claude Code process tree; here the chat starts fresh with a handoff and carries on by itself,
   // without asking the person. At most three in a row without the person writing, like the automatic handoff.
-  async recoverStuck(runId) {
+  // Loop guard (L117): one automatic fresh start. A stuck again soon after it, with no word from the person in between, stops the
+  // agent with its conversation kept, and the chat says so in one line with a Continue button. No silent restarts.
+  async recoverStuck(runId, at = Date.now()) {
     const run = this.store.get('run', runId);
     this.patchRun(runId, { stepsStuck: undefined });
     if (!run || run.external || run.state === 'stopped') return false;
+    const last = Date.parse(run.stuckFreshAt || 0) || 0;
+    const spoke = last && this.store.events(runId, { visible: true, limit: 200 }).some(event => event.kind === 'human-message' && (Date.parse(event.createdAt) || 0) > last);
+    if (last && at - last < STUCK_AGAIN_MS && !spoke) {
+      this.patchRun(runId, { stuckStopped: new Date(at).toISOString(), helpers: undefined });
+      this.store.event(runId, 'stuck-stopped', { text: 'Steps kept getting cancelled again, so I stopped this agent. Its chat is kept.' }, true);
+      return false;
+    }
     await this.freshStart(runId, { reason: 'automatically, because several steps in a row were cancelled by Claude Code (a job left running in the background)', notice: 'Steps kept getting cancelled, so I started a fresh chat.' });
+    this.patchRun(runId, { stuckFreshAt: new Date(at).toISOString() });
     const waiting = this.store.get('run', runId);
     if (waiting?.queued?.length) { this.resumeQueued(runId, waiting); return true; }
     if (!waiting || (waiting.autoContinues || 0) >= 3) return false;
     this.patchRun(runId, { autoContinues: (waiting.autoContinues || 0) + 1 });
     void this.resume(runId, { silent: true, prompt: STUCK_PROMPT }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
     return true;
+  }
+  // Continue on the line the loop guard left: the agent goes on in the same conversation.
+  async continueStuck(runId) {
+    this.run(runId);
+    this.patchRun(runId, { stuckStopped: undefined, stuckFreshAt: undefined, autoContinues: 0 });
+    if (this.live.has(runId)) return { continued: false, working: true };
+    await this.resume(runId, { silent: true, prompt: STUCK_CONTINUE_PROMPT });
+    return { continued: true };
   }
   async autoHandoff(runId) {
     const run = this.store.get('run', runId), limit = this.store.config().autoHandoff ?? 0.85;
@@ -1548,6 +1582,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async freshStart(runId, { note = '', reason = '', notice = '' } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('This conversation lives in another app.');
+    // Helpers (sub-agents, background jobs) still running are named in the handoff with where their output goes, so the fresh
+    // chat knows they existed and does not start them again unseen (L117).
+    const helpers = this.live.get(runId)?.runner?.helpersRunning?.() || run.helpers || [];
     if (this.live.has(runId)) await this.stop(runId);
     const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     const name = agentId === 'main' ? 'Rex Agent' : agentId ? this.specialists.get(agentId)?.name || 'the agent' : run.title || 'the agent';
@@ -1560,11 +1597,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       note ? `## Your own handoff, written just before the fresh start\n${String(note).trim()}` : '',
       await this.handoffFacts(run, agentId),
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
+      helpersText(helpers),
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     if (agentId) this.distillHandoff(agentId, { note, task, lines, file });
-    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, helpers: undefined, stuckStopped: undefined, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
     this.store.event(runId, 'chat-cleared', { text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };
   }

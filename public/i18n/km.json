@@ -2874,5 +2874,12 @@
  "That does not look like a bot token. Copy it from @BotFather: it looks like 123456:ABC-...": "នោះមិនដូច token របស់បូតទេ។ សូមចម្លងវាពី @BotFather៖ វាមើលទៅដូច 123456:ABC-...",
  "Finish sign-in on the computer running Rex Desk.": "សូមបញ្ចប់ការចូលគណនីនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
  "Agents cannot use {0} until you sign in again.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។",
- "At the top of the screen, for chats you are not looking at.": "នៅខាងលើអេក្រង់ សម្រាប់ការជជែកដែលអ្នកមិនកំពុងមើល។"
+ "At the top of the screen, for chats you are not looking at.": "នៅខាងលើអេក្រង់ សម្រាប់ការជជែកដែលអ្នកមិនកំពុងមើល។",
+ "Steps kept getting cancelled again, so I stopped this agent. Its chat is kept.": "ជំហានត្រូវបានបោះបង់ម្ដងហើយម្ដងទៀត ដូច្នេះខ្ញុំបានបញ្ឈប់ភ្នាក់ងារនេះ។ ការជជែករបស់វានៅដដែល។",
+ "Continue": "បន្ត",
+ "Handoff: start a fresh chat that reads a summary of this one": "ប្រគល់បន្ត៖ ចាប់ផ្ដើមការជជែកថ្មីដែលអានសេចក្ដីសង្ខេបនៃការជជែកនេះ",
+ "Handoff": "ប្រគល់បន្ត",
+ "Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារកំពុងធ្វើការ៖ វានឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
+ "Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
+ "Handed off. Your next message starts a fresh chat.": "បានប្រគល់បន្ត។ សារបន្ទាប់របស់អ្នកចាប់ផ្ដើមការជជែកថ្មី។"
 }

@@ -1315,7 +1315,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
       if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app|voice))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app|voice|continue))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         // The agent comes to the computer you type on (unless its project runs only on its own computer), so the chat carries
@@ -1363,6 +1363,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
             return json(response, 200, desk.voiceMode(runId, input.on !== false));
           }
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
+          // Continue after the loop guard stopped the agent (L117).
+          if (action === 'continue') return json(response, 200, await desk.continueStuck(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));

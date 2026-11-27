@@ -188,3 +188,45 @@ test('a working reply makes no hidden memory turn; the next real message carries
     assert.doesNotMatch(prompts[1], /Quiet memory check/);
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('the token-limit cut waits while a helper still runs, and comes once it is done (L117)', async () => {
+  const store = new Store(temporary('handoff-helpers')), prompts = []; let cutAt = 0, step = 0;
+  const desk = new Desk(store, { root: temporary('handoff-helpers-root'), runnerFactory: options => {
+    let stopped = false;
+    return { async start(prompt) {
+      prompts.push(prompt);
+      if (prompts.length > 1) { options.event('context', { used: prompts.length === 2 ? 700000 : 12000, window: 1000000 }); options.event('agent-text', { text: prompts.length === 2 ? 'HANDOFF: half way.' : 'ok' }); return; }
+      options.event('helpers', { running: [{ id: 't1', type: 'local_agent', description: 'research' }] });
+      for (step = 1; step <= 50 && !stopped; step++) {
+        options.event('context', { used: 100000 * step, window: 1000000 });
+        if (step === 6) options.event('helpers', { running: [] });
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }, async interrupt() { cutAt = step; stopped = true; } };
+  } });
+  try {
+    const run = await desk.startWebTask('a long job with a helper');
+    await waitFor(() => store.events(run.id, { visible: true }).some(event => event.kind === 'chat-cleared'), 'the fresh start');
+    assert.equal(cutAt, 6, 'not at 300k while the helper ran, but right when it was done');
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('if the context is all but full, the cut goes ahead and the handoff lists the running helper (L117)', async () => {
+  const store = new Store(temporary('handoff-forced')), prompts = []; let cutAt = 0, step = 0;
+  const desk = new Desk(store, { root: temporary('handoff-forced-root'), runnerFactory: options => {
+    let stopped = false;
+    return { async start(prompt) {
+      prompts.push(prompt);
+      if (prompts.length > 1) { options.event('context', { used: prompts.length === 2 ? 960000 : 12000, window: 1000000 }); options.event('agent-text', { text: 'ok' }); return; }
+      options.event('helpers', { running: [{ id: 't1', type: 'local_agent', description: 'audit the docs', outputFile: 'D:\\work\\audit.jsonl' }] });
+      for (step = 1; step <= 20 && !stopped; step++) { options.event('context', { used: 100000 * step, window: 1000000 }); await new Promise(resolve => setTimeout(resolve, 10)); }
+    }, async interrupt() { cutAt = step; stopped = true; } };
+  } });
+  try {
+    const run = await desk.startWebTask('a long job');
+    await waitFor(() => store.events(run.id, { visible: true }).some(event => event.kind === 'chat-cleared'), 'the fresh start');
+    assert.equal(cutAt, 10, 'at 95% of the window');
+    const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
+    assert.match(handoff, /sub-agent: audit the docs \(its output so far: D:\\work\\audit\.jsonl\)/);
+  } finally { await desk.shutdown(); store.close(); }
+});

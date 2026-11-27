@@ -150,7 +150,40 @@ export async function endProcessTree(pid, { platform = process.platform, run = e
 
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
-  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
+  // A cancel while a helper (a sub-agent or a background job of this turn) is still running is Claude Code making room for that
+  // helper's finish notice, not a stuck agent (L117): the agent is told to run the step again, but it never counts toward
+  // STUCK_AFTER, so the turn and its helpers are never ended for it.
+  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; if (!this.helpersRunning().length) this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
+  // The helpers of this turn still running: background tasks Claude Code reported started and not yet settled, and foreground
+  // sub-agents whose result has not come back. Each says what it is and where its output goes.
+  helpersRunning() {
+    const list = [...(this.tasks?.values() || [])];
+    for (const [id, agent] of this.agentsOpen || []) if (!list.some(task => task.toolUseId === id)) list.push(agent);
+    return list;
+  }
+  noteTask(message) {
+    const tasks = (this.tasks ||= new Map()), early = message.tool_use_id ? `agent:${message.tool_use_id}` : '', placeholder = early ? tasks.get(early) : null;
+    if (message.subtype === 'task_started' && message.task_id && !message.skip_transcript) {
+      if (early) tasks.delete(early);
+      tasks.set(message.task_id, { id: message.task_id, toolUseId: message.tool_use_id || '', type: String(message.task_type || placeholder?.type || ''), description: String(message.description || '').slice(0, 200), outputFile: placeholder?.outputFile || '' });
+    } else if (message.subtype === 'task_notification') { tasks.delete(message.task_id); if (early) tasks.delete(early); }
+    else if (message.subtype === 'task_updated' && ['completed', 'failed', 'killed'].includes(message.patch?.status)) tasks.delete(message.task_id);
+    else return;
+    this.event('helpers', { running: this.helpersRunning() });
+  }
+  // An Agent step came back: launched in the background (its task runs on and says where its output goes), or done.
+  agentLaunched(toolUseId, said, description = '') {
+    const task = [...(this.tasks?.values() || [])].find(item => item.toolUseId === toolUseId);
+    if (!/Async agent launched/i.test(said)) { if (task) { this.tasks.delete(task.id); this.event('helpers', { running: this.helpersRunning() }); } return; }
+    const file = said.match(/output_file:\s*(\S+)/)?.[1] || '';
+    if (task) task.outputFile = file;
+    // The launch can come back before Claude Code reports the task started: it counts as running until its notice comes.
+    else (this.tasks ||= new Map()).set(`agent:${toolUseId}`, { id: `agent:${toolUseId}`, toolUseId, type: 'local_agent', description, outputFile: file });
+    this.event('helpers', { running: this.helpersRunning() });
+  }
+  // A helper sub-agent (local_agent) still working: the turn's reply is not its end, or ending Claude Code would kill it.
+  // A background command (a dev server) is not waited for: it can run for ever (see the result below).
+  agentsWorking() { return this.helpersRunning().some(task => task.type === 'local_agent' || task.type === 'agent'); }
   // Given once, right after the cancel, so the agent never has to work out for itself that the person did not stop it.
   takeCancelNote() { if (!this.cancelPending) return ''; this.cancelPending = false; return cancelNote(this.cancelCount); }
   // Says once per turn that the prompt was really taken (src/coordinator.js counts a scheduled message as sent on it).
@@ -252,6 +285,7 @@ export class ClaudeRunner {
         }
         continue;
       }
+      if (message.type === 'system' && /^task_(started|notification|updated)$/.test(message.subtype || '')) this.noteTask(message);
       if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
       // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
       if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });
@@ -269,7 +303,7 @@ export class ClaudeRunner {
         if (text) this.event(parent ? 'subagent-text' : 'agent-text', parent ? { parent, text: text.slice(0, 4000) } : { text });
         for (const block of content || []) if (block.type === 'tool_use') {
           if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id);
-          if (/^(Task|Agent)$/.test(block.name)) { (this.subagents ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: 'Agent', ...(parent ? { parent } : {}), input: { description: String(block.input?.description || '').slice(0, 200), type: String(block.input?.subagent_type || 'general-purpose'), model: String(block.input?.model || ''), prompt: String(block.input?.prompt || '').slice(0, 1500) } }); continue; }
+          if (/^(Task|Agent)$/.test(block.name)) { (this.subagents ||= new Set()).add(block.id); (this.agentsOpen ||= new Map()).set(block.id, { id: block.id, toolUseId: block.id, type: 'agent', description: String(block.input?.description || '').slice(0, 200), outputFile: '' }); this.event('agent-tool', { id: block.id, tool: 'Agent', ...(parent ? { parent } : {}), input: { description: String(block.input?.description || '').slice(0, 200), type: String(block.input?.subagent_type || 'general-purpose'), model: String(block.input?.model || ''), prompt: String(block.input?.prompt || '').slice(0, 1500) } }); continue; }
           const change = fileChange(block.name, block.input); if (change) (this.edits ||= new Map()).set(block.id, change.file);
           this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), ...(parent ? { parent } : {}), input: toolInput(block.input), ...(change ? { change } : {}) });
         }
@@ -284,7 +318,7 @@ export class ClaudeRunner {
       if (message.type === 'user') {
         for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
           if (block.type !== 'tool_result') continue;
-          if (this.subagents?.has(block.tool_use_id)) { const said = Array.isArray(block.content) ? block.content.map(part => part.text || '').join('\n') : String(block.content || ''); this.event('subagent-done', { id: block.tool_use_id, failed: Boolean(block.is_error), text: said.slice(0, 3000) }); continue; }
+          if (this.subagents?.has(block.tool_use_id)) { const opened = this.agentsOpen?.get(block.tool_use_id); this.agentsOpen?.delete(block.tool_use_id); const said = Array.isArray(block.content) ? block.content.map(part => part.text || '').join('\n') : String(block.content || ''); this.agentLaunched(block.tool_use_id, said, opened?.description || ''); this.event('subagent-done', { id: block.tool_use_id, failed: Boolean(block.is_error), text: said.slice(0, 3000) }); continue; }
           // A step Claude Code cancelled by itself: not shown as a failure, and the agent is told at once to run it again.
           if (block.is_error && cancelledByItself(block.content)) { this.noteCancelled(); continue; }
           this.cancelStreak = 0;
@@ -297,7 +331,7 @@ export class ClaudeRunner {
       }
       if (this.cancelStreak >= STUCK_AFTER) {
         this.stuck = true; this.cancelPending = false;
-        this.event('steps-stuck', { count: this.cancelStreak });
+        this.event('steps-stuck', { count: this.cancelStreak, ...(this.helpersRunning().length ? { helpers: this.helpersRunning() } : {}) });
         await (this.endTree || endProcessTree)(this.childPid);
         break;
       }
@@ -324,7 +358,9 @@ export class ClaudeRunner {
         // (a test, a dev server) is still going, and a stuck one held the turn open for good: the chat showed it still working,
         // and every new message waited for a step that never came. Leaving the loop ends Claude Code and its background tasks;
         // the next message starts a new turn in the same conversation.
-        if (!remote) break;
+        // Not while a helper sub-agent still works (L117): Claude Code gives the agent its finish notice in a new step, and
+        // that step's result ends the turn. The reply so far is already shown.
+        if (!remote && !this.agentsWorking()) break;
       }
     }
     if (skipped) this.event('agent-result', { result: '', subtype: skipped.subtype, cost: skipped.total_cost_usd, tokens: tokensOf(skipped.usage), steps: 0, durationMs: skipped.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });

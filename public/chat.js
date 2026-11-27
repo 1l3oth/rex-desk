@@ -227,6 +227,7 @@ function renderItems(items, run, live) {
       : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => attached.top + markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), uid: item.uid, time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
+      : item.role === 'stuck' ? `<div class="cleared stuck"><span>${t`Steps kept getting cancelled again, so I stopped this agent. Its chat is kept.`}</span>${run.stuckStopped && !live ? `<button type="button" class="btn small" data-action="stuck-continue">${t`Continue`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>${t`Needs attention`}</h4><div class="md">${markdown(item.text)}</div>${/is not installed|usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">${/is not installed/i.test(item.text) ? t`Install Claude Code` : t`Sign in again`}</button>` : ''}</div>`
       : note(`${esc(item.text)}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''} · ${hhmm(item.at)}`));
@@ -275,6 +276,8 @@ function transcript(all, runId = '') {
     if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: t('Agent'), input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
     if (event.kind === 'subagent-text') continue;
+    // The loop guard stopped the agent (L117): one line, with Continue while it is still stopped.
+    if (event.kind === 'stuck-stopped') { items.push({ role: 'stuck', at: event.createdAt }); continue; }
     if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt, sequence: event.sequence }); }
@@ -421,7 +424,9 @@ function stageModel() {
   ui.pinChat = personal ? `agent:${personal.id}` : null;
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
   const take = !personal && !run.inApp && chatTakers(ctx, run).length ? `<button class="btn small" data-action="move-to-chat" title="${t`Make this run an agent's personal chat: click the agent to see this work and keep talking`}">${t`Move to chat`}</button> ` : '';
-  const actions = take + appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a meeting with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
+  // Handoff (L117): a fresh chat on purpose, that first reads a handoff of this one. Not for a chat that lives in another app.
+  const handoff = run.external || run.inApp ? '' : `<button type="button" class="icon-btn head-add" data-action="handoff" title="${t`Handoff: start a fresh chat that reads a summary of this one`}" aria-label="${t`Handoff`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14h6M12.5 11.5 15 14l-2.5 2.5"/></svg></button> `;
+  const actions = take + appControl(run, live) + handoff + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a meeting with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
   return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? `<span class="chip working">${t`In Claude app`}</span>` : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
 }
@@ -762,6 +767,13 @@ async function clearAgent() {
   ui.drafts.set(key, ''); const box = document.getElementById('draft'); if (box && draftKey() === key) box.value = '';
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Cleared. Your next message starts a fresh session.')); await refresh();
 }
+// The Handoff button: like /clear, said as a handoff. Helpers still running are listed in the handoff (src/coordinator.js).
+async function handoffAgent() {
+  const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent conversation here.'), true);
+  const working = ['starting', 'running'].includes(run.state);
+  if (!await askConfirm(working ? t('Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.') : t('Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.'))) return;
+  await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Handed off. Your next message starts a fresh chat.')); await refresh();
+}
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent to stop here.'), true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
 // Escape stops the working agent in the open chat and drops your last message back into the input to edit and resend,
 // the way Claude Code does. It steps aside for the menus and panels that already use Escape (a slash/@ menu, the reply
@@ -851,6 +863,8 @@ document.addEventListener('click', async event => {
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'show-earlier') { ui.showEarlier = { ...(ui.showEarlier || {}), [ui.view.type === 'main' ? mainRun()?.id : ui.view.id]: true }; renderAll(true); }
     else if (action === 'move-to-chat') { const run = runById(ui.view.id); if (run) moveRunDialog(ctx, run); }
+    else if (action === 'handoff') await handoffAgent();
+    else if (action === 'stuck-continue') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (run) { await api(`/runs/${run.id}/continue`, { method: 'POST', data: {} }); await refresh(); } }
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
