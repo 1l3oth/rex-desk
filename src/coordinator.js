@@ -1460,13 +1460,29 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.store.event(runId, 'stuck-stopped', { text: 'This agent got stuck, so I stopped it. Your chat is kept.' }, true);
       return false;
     }
+    // The person wrote since the last fresh start: this is a new problem, so the carried-on count starts again.
+    if (run.stuckFreshAt && spoke && run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
+    // The person's last message goes into the fresh chat's prompt, so it is answered even when the handoff cut it short.
+    const asked = [...this.store.events(runId, { visible: true, limit: 200 })].reverse().find(event => event.kind === 'human-message')?.text || '';
     await this.freshStart(runId, { reason: 'automatically, because several steps in a row were cancelled by Claude Code (a job left running in the background)', notice: 'Steps kept getting cancelled, so I started a fresh chat.' });
     this.patchRun(runId, { stuckFreshAt: new Date(at).toISOString() });
     const waiting = this.store.get('run', runId);
-    if (waiting?.queued?.length) { this.resumeQueued(runId, waiting); return true; }
-    if (!waiting || (waiting.autoContinues || 0) >= 3) return false;
+    if (waiting?.queued?.length) { this.store.event(runId, 'stuck-resume', { result: 'queued-messages' }); this.resumeQueued(runId, waiting); return true; }
+    // Never silent: when the fresh chat does not carry on by itself, the chat says so in one line with Continue.
+    if (!waiting || (waiting.autoContinues || 0) >= 3) {
+      this.store.event(runId, 'stuck-resume', { result: 'skipped', autoContinues: waiting?.autoContinues || 0 });
+      if (waiting) { this.patchRun(runId, { stuckStopped: new Date(at).toISOString() }); this.store.event(runId, 'stuck-stopped', { text: 'This agent got stuck several times, so I stopped it. Your chat is kept.' }, true); }
+      return false;
+    }
     this.patchRun(runId, { autoContinues: (waiting.autoContinues || 0) + 1 });
-    void this.resume(runId, { silent: true, prompt: STUCK_PROMPT }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+    this.store.event(runId, 'phase', { text: 'Fresh chat: carrying on and answering your last message' }, true);
+    const prompt = asked ? `${STUCK_PROMPT}
+
+The person's last message, which still needs your answer (answer it now unless the handoff shows you already did):
+${asked}` : STUCK_PROMPT;
+    void this.resume(runId, { silent: true, prompt })
+      .then(started => this.store.event(runId, 'stuck-resume', { result: started?.state === 'queued' && !this.live.has(runId) ? 'waiting-in-queue' : 'started', state: started?.state }))
+      .catch(error => { this.store.event(runId, 'stuck-resume', { result: 'failed', message: error.message }); this.store.event(runId, 'error', { message: `The fresh chat could not carry on: ${error.message} Send a message to go on.` }, true); });
     return true;
   }
   // Continue on the line the loop guard left: the agent goes on in the same conversation.
@@ -2033,6 +2049,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // telegram: the Telegram chat this turn answers (src/telegram.js); every other resume, one from the app too, answers in the app.
   async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, telegram, sendId, ...picked } = {}) {
     let run = this.run(runId);
+    // The person wrote (an idle chat sends through here, not say): the count of fresh sessions that carried on by themselves
+    // starts again, or after three stuck restarts over a day every later one would end silently.
+    if (String(prompt).trim() && !silent && run.autoContinues) { this.patchRun(runId, { autoContinues: 0 }); run = this.run(runId); }
     const provider = aiProvider(picked.provider || run.provider || this.store.config().provider);
     if (run.external) throw new Error('Reconnect this conversation from the external AI using desk_connect.');
     if (this.live.has(runId)) throw new Error('Stop the active run before resuming.');

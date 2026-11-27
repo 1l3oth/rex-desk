@@ -338,3 +338,53 @@ test('a More sheet closes before its item opens, a guard stop wins over the slee
   assert.match(css, /@container \(max-width:880px\)\{\.head-actions:has\(\.head-more\[data-personal\]\) \.head-handoff/, 'narrow fold only for personal chats');
   assert.match(chat, /head-more"\$\{personal \? ' data-personal' : ''\}/);
 });
+
+test('a stuck restart starts a turn that answers the person\'s last message, and the chat says it carries on', async () => {
+  const store = new Store(temporary('stuck-answer')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-answer-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt);
+    if (prompts.length === 1) { options.event('agent-text', { text: 'Per instructions, retrying.' }); options.event('steps-stuck', { count: 3 }); return; }
+    options.event('agent-text', { text: 'Sent.' });
+  }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('I connected a bot, can you send me a message via that bot?');
+    await waitFor(() => prompts.length === 2, 'the fresh turn');
+    assert.match(prompts[1], /last message, which still needs your answer/);
+    assert.match(prompts[1], /I connected a bot, can you send me a message via that bot\?/);
+    assert.ok(store.events(run.id, { visible: true }).some(event => event.kind === 'phase' && /answering your last message/.test(event.text)));
+    await waitFor(() => store.events(run.id).find(event => event.kind === 'stuck-resume'), 'the resume log');
+    assert.equal(store.events(run.id).find(event => event.kind === 'stuck-resume').result, 'started');
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a stuck restart that does not carry on says so in one line with Continue, never silently', async () => {
+  const store = new Store(temporary('stuck-skip')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-skip-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt);
+    if (prompts.length === 1) { options.event('agent-text', { text: 'working' }); return; }
+    options.event('agent-text', { text: 'ok' });
+  }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('first');
+    await waitFor(() => store.get('run', run.id).state === 'finished' && !desk.live.has(run.id), 'the first turn'); await new Promise(resolve => setTimeout(resolve, 100));
+    desk.patchRun(run.id, { autoContinues: 3 });
+    const got = await desk.recoverStuck(run.id);
+    assert.equal(got, false);
+    assert.ok(store.events(run.id, { visible: true }).some(event => event.kind === 'stuck-stopped'));
+    assert.ok(store.get('run', run.id).stuckStopped);
+    assert.equal(store.events(run.id).find(event => event.kind === 'stuck-resume').result, 'skipped');
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a message sent to an idle chat resets the carried-on count, so later stuck restarts still carry on', async () => {
+  const store = new Store(temporary('stuck-reset')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-reset-root'), runnerFactory: options => ({ async start(prompt) { prompts.push(prompt); options.event('agent-text', { text: 'ok' }); }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('first');
+    await waitFor(() => store.get('run', run.id).state === 'finished' && !desk.live.has(run.id), 'the first turn'); await new Promise(resolve => setTimeout(resolve, 100));
+    desk.patchRun(run.id, { autoContinues: 3 });
+    await desk.resume(run.id, { prompt: 'hello again' });
+    assert.equal(store.get('run', run.id).autoContinues, 0);
+    await waitFor(() => store.get('run', run.id).state === 'finished' && prompts.length === 2, 'the second turn');
+  } finally { await desk.shutdown(); store.close(); }
+});
