@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { McpSignIn, SIGN_IN_HELP, emailFromIdToken } from '../src/mcp-signin.js';
 import { Toolbox, wantsSignIn } from '../src/toolbox.js';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { catalogItem } from '../src/connector-catalog.js';
+import { createApp } from '../src/server.js';
 
 // L30: Rex Desk signs in to a remote MCP server itself. A small local server plays the MCP server and its sign-in server.
 async function fakeServer({ expiresIn = 3600 } = {}) {
@@ -113,116 +117,261 @@ test('a sign-in never goes into the cloud copy', () => {
   assert.equal(Store.prototype.isPrivate.call({}, 'mcpauth', { id: 'x', sealed: 'y' }), true);
 });
 
-// Local fake Google-style OIDC server: no registration_endpoint (no DCR), OIDC discovery, client_secret required,
-// id_token email + userinfo fallback, revocation endpoint, and HTTP 200 on unauthenticated MCP ping.
+// Mock Google Drive MCP + Google OIDC transport using the real production URLs and DNS pinning (no loopback bypass).
 function fakeJwt(payload) {
   return `${Buffer.from('{"alg":"RS256"}').toString('base64url')}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
 }
-async function fakeGoogleServer({ includeIdToken = true, revokeFails = false, email = 'pkay@example.com' } = {}) {
-  const seen = { tokenCalls: [], userinfoCalls: 0, revocations: [], access: 'g-access-0', refresh: 'g-refresh-0', challenge: '' };
-  let base = '';
-  const server = http.createServer(async (request, response) => {
-    const url = new URL(request.url, base); let text = ''; for await (const part of request) text += part;
-    const json = (status, body, headers = {}) => response.writeHead(status, { 'content-type': 'application/json', ...headers }).end(JSON.stringify(body));
-    if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
-      return json(200, { resource: `${base}/mcp/v1`, authorization_servers: [base], scopes_supported: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.file'] });
-    }
+const GOOGLE_DRIVE_URL = 'https://drivemcp.googleapis.com/mcp/v1';
+const GOOGLE_ISSUER = 'https://accounts.google.com';
+const GOOGLE_OIDC = {
+  issuer: GOOGLE_ISSUER,
+  authorization_endpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  token_endpoint: 'https://oauth2.googleapis.com/token',
+  userinfo_endpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+  revocation_endpoint: 'https://oauth2.googleapis.com/revoke',
+  jwks_uri: 'https://www.googleapis.com/oauth2/v3/certs',
+  response_types_supported: ['code'],
+  subject_types_supported: ['public'],
+  id_token_signing_alg_values_supported: ['RS256'],
+  code_challenge_methods_supported: ['plain', 'S256'],
+  token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+};
+function jsonResponse(status, body, headers = {}) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+}
+function mockGoogleTransport({
+  includeIdToken = true,
+  revokeFails = false,
+  email = 'pkay@example.com',
+  prm = null,
+  oidc = null,
+  extraOidcByOrigin = {},
+} = {}) {
+  const seen = { asked: [], tokenCalls: [], userinfoCalls: 0, revocations: [], access: 'g-access-0', refresh: 'g-refresh-0', challenge: '' };
+  const prmDoc = {
+    resource: GOOGLE_DRIVE_URL,
+    authorization_servers: [GOOGLE_ISSUER],
+    scopes_supported: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.file'],
+    ...(prm || {}),
+  };
+  const oidcDoc = { ...GOOGLE_OIDC, ...(oidc || {}) };
+  const resolver = async () => [{ address: '142.250.190.78', family: 4 }];
+  const fetcher = async (target, init = {}) => {
+    const href = String(target), url = new URL(href);
+    seen.asked.push({ href, pin: init.pin ?? null, method: (init.method || 'GET').toUpperCase() });
+    if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) return jsonResponse(200, prmDoc);
     if (url.pathname === '/.well-known/openid-configuration') {
-      return json(200, {
-        issuer: base, authorization_endpoint: `${base}/o/oauth2/v2/auth`, token_endpoint: `${base}/token`,
-        userinfo_endpoint: `${base}/userinfo`, revocation_endpoint: `${base}/revoke`, jwks_uri: `${base}/certs`,
-        response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'],
-        code_challenge_methods_supported: ['plain', 'S256'], token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-      });
+      const override = extraOidcByOrigin[url.origin];
+      return jsonResponse(200, override || oidcDoc);
     }
-    if (url.pathname === '/token') {
-      const form = Object.fromEntries(new URLSearchParams(text));
-      seen.tokenCalls.push({ form, auth: request.headers.authorization || '' });
-      if (form.client_id !== 'google-cid' || form.client_secret !== 'google-csecret') return json(401, { error: 'invalid_client' });
+    if (href === oidcDoc.token_endpoint) {
+      const rawBody = init.body instanceof URLSearchParams ? init.body.toString() : String(init.body || '');
+      const form = Object.fromEntries(new URLSearchParams(rawBody));
+      seen.tokenCalls.push({ form, auth: new Headers(init.headers || {}).get('authorization') || '' });
+      if (form.client_id !== 'google-cid' || form.client_secret !== 'google-csecret') return jsonResponse(401, { error: 'invalid_client' });
       if (form.grant_type === 'authorization_code') {
-        if (createHash('sha256').update(form.code_verifier).digest('base64url') !== seen.challenge) return json(400, { error: 'invalid_grant' });
-        return json(200, { access_token: seen.access, refresh_token: seen.refresh, token_type: 'Bearer', expires_in: 300, ...(includeIdToken ? { id_token: fakeJwt({ sub: '123', email }) } : {}) });
+        if (createHash('sha256').update(form.code_verifier).digest('base64url') !== seen.challenge) return jsonResponse(400, { error: 'invalid_grant' });
+        return jsonResponse(200, { access_token: seen.access, refresh_token: seen.refresh, token_type: 'Bearer', expires_in: 300, ...(includeIdToken ? { id_token: fakeJwt({ sub: '123', email }) } : {}) });
       }
       if (form.grant_type === 'refresh_token') {
-        if (form.refresh_token !== seen.refresh) return json(400, { error: 'invalid_grant' });
+        if (form.refresh_token !== seen.refresh) return jsonResponse(400, { error: 'invalid_grant' });
         seen.access = `g-access-${seen.tokenCalls.length}`;
-        return json(200, { access_token: seen.access, token_type: 'Bearer', expires_in: 3600 });
+        return jsonResponse(200, { access_token: seen.access, token_type: 'Bearer', expires_in: 3600 });
       }
     }
-    if (url.pathname === '/userinfo') {
+    if (href === oidcDoc.userinfo_endpoint) {
       seen.userinfoCalls += 1;
-      if (request.headers.authorization !== `Bearer ${seen.access}`) return json(401, { error: 'invalid_token' });
-      return json(200, { sub: '123', email });
+      if (new Headers(init.headers || {}).get('authorization') !== `Bearer ${seen.access}`) return jsonResponse(401, { error: 'invalid_token' });
+      return jsonResponse(200, { sub: '123', email });
     }
-    if (url.pathname === '/revoke') {
-      seen.revocations.push(Object.fromEntries(new URLSearchParams(text)));
-      if (revokeFails) { response.destroy(); return; }
-      return json(200, {});
+    if (href === oidcDoc.revocation_endpoint || href === 'https://oauth2.googleapis.com/revoke') {
+      const rawBody = init.body instanceof URLSearchParams ? init.body.toString() : String(init.body || '');
+      seen.revocations.push(Object.fromEntries(new URLSearchParams(rawBody)));
+      if (revokeFails) throw new Error('network unreachable');
+      return jsonResponse(200, {});
     }
-    if (url.pathname === '/mcp/v1') return json(200, { jsonrpc: '2.0', id: 1, result: {} });
-    return json(404, { error: 'not_found' });
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  base = `http://127.0.0.1:${server.address().port}`;
-  return { base, url: `${base}/mcp/v1`, seen, close: () => { server.closeAllConnections(); server.close(); } };
+    if (url.pathname === '/mcp/v1') return jsonResponse(200, { jsonrpc: '2.0', id: 1, result: {} });
+    return jsonResponse(404, { error: 'not_found' });
+  };
+  return { url: GOOGLE_DRIVE_URL, seen, fetcher, resolver };
 }
 
-test('Google Drive pre-registered OAuth: no DCR, offline/select_account consent, no resource, client_secret, accountEmail, refresh, and signOut', async () => {
+test('Google Drive pre-registered OAuth: no DCR, offline/select_account consent, no resource, client_secret, accountEmail, refresh, and signOut outcome', async () => {
   const gdriveOAuth = catalogItem('googledrive').connect.oauth;
-  const fake = await fakeGoogleServer(), store = memoryStore();
+  const mock = mockGoogleTransport(), store = memoryStore();
   // Missing credentials fail cleanly with plain language.
-  const missing = new McpSignIn(store, { loopback: true, env: {} });
+  const missing = new McpSignIn(store, { fetcher: mock.fetcher, resolver: mock.resolver, env: {} });
   try {
-    await assert.rejects(() => missing.start('googledrive', fake.url, gdriveOAuth), /REX_GOOGLE_OAUTH_CLIENT_ID.*REX_GOOGLE_OAUTH_CLIENT_SECRET/);
+    await assert.rejects(() => missing.start('googledrive', mock.url, gdriveOAuth), /REX_GOOGLE_OAUTH_CLIENT_ID.*REX_GOOGLE_OAUTH_CLIENT_SECRET/);
   } finally { missing.stop(); }
 
-  const signIn = new McpSignIn(store, { loopback: true, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' } });
+  const signIn = new McpSignIn(store, { fetcher: mock.fetcher, resolver: mock.resolver, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' } });
   try {
-    const { url, done } = await signIn.start('googledrive', fake.url, gdriveOAuth);
-    const { asked, status } = await browser(fake, url);
+    const { url, done } = await signIn.start('googledrive', mock.url, gdriveOAuth);
+    const { asked, status } = await browser(mock, url);
     assert.equal(status, 200); await done;
     assert.equal(asked.get('client_id'), 'google-cid');
     assert.equal(asked.get('access_type'), 'offline');
     assert.equal(asked.get('prompt'), 'select_account consent');
     assert.equal(asked.get('scope'), 'https://www.googleapis.com/auth/drive.readonly openid email');
     assert.equal(asked.get('resource'), null, 'Google auth URL omits RFC 8707 resource');
-    assert.equal(fake.seen.tokenCalls[0].form.client_id, 'google-cid');
-    assert.equal(fake.seen.tokenCalls[0].form.client_secret, 'google-csecret');
-    assert.equal(fake.seen.tokenCalls[0].form.resource, undefined, 'Google token exchange omits RFC 8707 resource');
-    assert.equal(signIn.state(fake.url).state, 'connected');
-    assert.equal(signIn.state(fake.url).accountEmail, 'pkay@example.com');
+    assert.equal(mock.seen.tokenCalls[0].form.client_id, 'google-cid');
+    assert.equal(mock.seen.tokenCalls[0].form.client_secret, 'google-csecret');
+    assert.equal(mock.seen.tokenCalls[0].form.resource, undefined, 'Google token exchange omits RFC 8707 resource');
+    assert.equal(signIn.state(mock.url).state, 'connected');
+    assert.equal(signIn.state(mock.url).accountEmail, 'pkay@example.com');
     assert.doesNotMatch(JSON.stringify([...store.records.values()].map(({ sealed, ...rest }) => rest)), /g-access-|g-refresh-|google-csecret/);
     // Refresh sends client_secret, omits resource, and preserves accountEmail.
-    assert.equal(await signIn.refresh(fake.url), true);
-    assert.equal(fake.seen.tokenCalls[1].form.grant_type, 'refresh_token');
-    assert.equal(fake.seen.tokenCalls[1].form.client_secret, 'google-csecret');
-    assert.equal(fake.seen.tokenCalls[1].form.resource, undefined);
-    assert.equal(signIn.state(fake.url).accountEmail, 'pkay@example.com');
-    assert.equal((await signIn.authorize({ type: 'http', url: fake.url })).headers.Authorization, 'Bearer g-access-2');
-    // signOut clears local record and revokes best-effort.
-    await signIn.signOut(fake.url);
-    assert.equal(signIn.state(fake.url).state, '');
-    assert.equal(signIn.state(fake.url).accountEmail, undefined);
-    assert.equal(fake.seen.revocations.length, 1);
-    assert.equal(fake.seen.revocations[0].token, 'g-refresh-0');
-  } finally { signIn.stop(); fake.close(); }
+    assert.equal(await signIn.refresh(mock.url), true);
+    assert.equal(mock.seen.tokenCalls[1].form.grant_type, 'refresh_token');
+    assert.equal(mock.seen.tokenCalls[1].form.client_secret, 'google-csecret');
+    assert.equal(mock.seen.tokenCalls[1].form.resource, undefined);
+    assert.equal(signIn.state(mock.url).accountEmail, 'pkay@example.com');
+    assert.equal((await signIn.authorize({ type: 'http', url: mock.url })).headers.Authorization, 'Bearer g-access-2');
+    // signOut clears local record and reports revocation outcome.
+    const outcome = await signIn.signOut(mock.url);
+    assert.deepEqual(outcome, { localCleared: true, revocation: 'revoked', revoked: true, manageUrl: 'https://myaccount.google.com/permissions' });
+    assert.equal(signIn.state(mock.url).state, '');
+    assert.equal(signIn.state(mock.url).accountEmail, undefined);
+    assert.equal(mock.seen.revocations.length, 1);
+    assert.equal(mock.seen.revocations[0].token, 'g-refresh-0');
+  } finally { signIn.stop(); }
 });
 
-test('Google Drive accountEmail falls back to userinfo when id_token is absent, and signOut never fails on revocation network error', async () => {
+test('Google Drive accountEmail falls back to userinfo when id_token is absent, and signOut clears local state while reporting failed remote revocation', async () => {
   assert.equal(emailFromIdToken(fakeJwt({ email: 'a@b.com' })), 'a@b.com');
   assert.equal(emailFromIdToken('not-a-jwt'), '');
   const gdriveOAuth = catalogItem('googledrive').connect.oauth;
-  const fake = await fakeGoogleServer({ includeIdToken: false, revokeFails: true, email: 'fallback@example.com' });
-  const signIn = new McpSignIn(memoryStore(), { loopback: true, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' } });
+  const mock = mockGoogleTransport({ includeIdToken: false, revokeFails: true, email: 'fallback@example.com' });
+  const signIn = new McpSignIn(memoryStore(), { fetcher: mock.fetcher, resolver: mock.resolver, env: { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' } });
   try {
-    const { url, done } = await signIn.start('googledrive', fake.url, gdriveOAuth);
-    await browser(fake, url); await done;
-    assert.equal(fake.seen.userinfoCalls, 1);
-    assert.equal(signIn.state(fake.url).accountEmail, 'fallback@example.com');
-    // Revocation socket drops, yet signOut still succeeds cleanly and clears local state.
-    await assert.doesNotReject(() => signIn.signOut(fake.url));
-    assert.equal(signIn.state(fake.url).state, '');
-  } finally { signIn.stop(); fake.close(); }
+    const { url, done } = await signIn.start('googledrive', mock.url, gdriveOAuth);
+    await browser(mock, url); await done;
+    assert.equal(mock.seen.userinfoCalls, 1);
+    assert.equal(signIn.state(mock.url).accountEmail, 'fallback@example.com');
+    // Revocation fails over network, yet local credentials are cleared and failure + manageUrl are reported.
+    const outcome = await signIn.signOut(mock.url);
+    assert.deepEqual(outcome, { localCleared: true, revocation: 'failed', revoked: false, manageUrl: 'https://myaccount.google.com/permissions' });
+    assert.equal(signIn.state(mock.url).state, '');
+  } finally { signIn.stop(); }
+});
+
+test('pre-registered Google OAuth rejects wrong resource URL, fake issuer, and untrusted endpoints with plain errors', async () => {
+  const env = { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' };
+  const gdriveOAuth = catalogItem('googledrive').connect.oauth;
+
+  // 1) Wrong resource URL even when connector name is googledrive and oauth.provider is google.
+  {
+    const mock = mockGoogleTransport();
+    const signIn = new McpSignIn(memoryStore(), { fetcher: mock.fetcher, resolver: mock.resolver, env });
+    try {
+      await assert.rejects(() => signIn.start('googledrive', 'https://evil.example.test/mcp', gdriveOAuth), /not a supported Google MCP server/);
+      assert.deepEqual(mock.seen.asked, [], 'stops before sending any request when provider is mismatched with resource URL');
+    } finally { signIn.stop(); }
+  }
+
+  // 2) Wrong resource URL claiming Google issuer with no DCR: never gets Google's pre-registered client.
+  {
+    const mock = mockGoogleTransport({ prm: { resource: 'https://evil.example.test/mcp', authorization_servers: [GOOGLE_ISSUER] } });
+    const signIn = new McpSignIn(memoryStore(), { fetcher: mock.fetcher, resolver: mock.resolver, env });
+    try {
+      await assert.rejects(() => signIn.start('googledrive', 'https://evil.example.test/mcp'), /lets only apps it approved sign in/);
+      assert.deepEqual(mock.seen.tokenCalls, [], 'Google client credentials are never used for an unsupported resource URL');
+    } finally { signIn.stop(); }
+  }
+
+  // 3) Fake issuer advertised on supported Google Drive URL.
+  {
+    const mock = mockGoogleTransport({
+      prm: { authorization_servers: ['https://evil.example.test'] },
+      extraOidcByOrigin: {
+        'https://evil.example.test': {
+          ...GOOGLE_OIDC,
+          issuer: 'https://evil.example.test',
+        },
+      },
+    });
+    const signIn = new McpSignIn(memoryStore(), { fetcher: mock.fetcher, resolver: mock.resolver, env });
+    try {
+      await assert.rejects(() => signIn.start('googledrive', GOOGLE_DRIVE_URL, gdriveOAuth), /untrusted sign-in issuer/);
+    } finally { signIn.stop(); }
+  }
+
+  // 4) Untrusted token_endpoint, authorization_endpoint, revocation_endpoint, and userinfo_endpoint are each rejected.
+  const tamperedEndpoints = [
+    [{ token_endpoint: 'https://evil.example.test/token' }, /token address does not match/],
+    [{ authorization_endpoint: 'https://evil.example.test/auth' }, /sign-in page does not match/],
+    [{ revocation_endpoint: 'https://evil.example.test/revoke' }, /revocation address does not match/],
+    [{ userinfo_endpoint: 'https://evil.example.test/userinfo' }, /account info address does not match/],
+  ];
+  for (const [override, pattern] of tamperedEndpoints) {
+    const mock = mockGoogleTransport({ oidc: override });
+    const signIn = new McpSignIn(memoryStore(), { fetcher: mock.fetcher, resolver: mock.resolver, env });
+    try {
+      await assert.rejects(() => signIn.start('googledrive', GOOGLE_DRIVE_URL, gdriveOAuth), pattern);
+      assert.deepEqual(mock.seen.tokenCalls, []);
+    } finally { signIn.stop(); }
+  }
+});
+
+test('POST /api/mcp-sign-in/sign-out reports remote revocation outcome while always clearing local credentials', async () => {
+  const app = await createApp({ dataDirectory: mkdtempSync(path.join(os.tmpdir(), 'rex-desk-signout-')), port: 0, runnerFactory: () => ({}) });
+  const call = async (route, data) => {
+    const response = await fetch(app.address + route, { method: 'POST', headers: { 'x-rex-desk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    app.desk.toolbox.servers = () => ({ googledrive: { type: 'http', url: GOOGLE_DRIVE_URL } });
+    let failRevoke = false;
+    app.desk.mcpSignIn.resolver = async () => [{ address: '142.250.190.78', family: 4 }];
+    app.desk.mcpSignIn.fetcher = async href => {
+      if (String(href) === 'https://oauth2.googleapis.com/revoke') {
+        if (failRevoke) throw new Error('google offline');
+        return jsonResponse(200, {});
+      }
+      return jsonResponse(404, {});
+    };
+
+    // 1) Successful remote revocation
+    app.desk.mcpSignIn.save(GOOGLE_DRIVE_URL, 'googledrive', {
+      server: GOOGLE_ISSUER, metadata: GOOGLE_OIDC, client: { client_id: 'cid', client_secret: 'csec' },
+      revocationEndpoint: 'https://oauth2.googleapis.com/revoke', accessToken: 'acc-1', refreshToken: 'ref-1', expiresAt: Date.now() + 3600000,
+    }, 'connected', 'pkay@example.com');
+    const ok = await call('/api/mcp-sign-in/sign-out', { name: 'googledrive' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.localCleared, true);
+    assert.equal(ok.body.revocation, 'revoked');
+    assert.equal(ok.body.revoked, true);
+    assert.equal(ok.body.manageUrl, 'https://myaccount.google.com/permissions');
+    assert.equal(app.desk.mcpSignIn.record(GOOGLE_DRIVE_URL), null);
+
+    // 2) Failed remote revocation: local credentials still cleared, API tells UI it failed + where to revoke
+    failRevoke = true;
+    app.desk.mcpSignIn.save(GOOGLE_DRIVE_URL, 'googledrive', {
+      server: GOOGLE_ISSUER, metadata: GOOGLE_OIDC, client: { client_id: 'cid', client_secret: 'csec' },
+      revocationEndpoint: 'https://oauth2.googleapis.com/revoke', accessToken: 'acc-2', refreshToken: 'ref-2', expiresAt: Date.now() + 3600000,
+    }, 'connected', 'pkay@example.com');
+    const failed = await call('/api/mcp-sign-in/sign-out', { name: 'googledrive' });
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.localCleared, true);
+    assert.equal(failed.body.revocation, 'failed');
+    assert.equal(failed.body.revoked, false);
+    assert.equal(failed.body.manageUrl, 'https://myaccount.google.com/permissions');
+    assert.equal(app.desk.mcpSignIn.record(GOOGLE_DRIVE_URL), null, 'local credentials are cleared even when remote revoke fails');
+
+    // 3) Spoofed server named googledrive pointing at a non-Google URL does NOT receive Google OAuth metadata or credentials.
+    app.desk.toolbox.servers = () => ({ googledrive: { type: 'http', url: 'https://evil.example.test/mcp' } });
+    const spoofMock = mockGoogleTransport({ prm: { resource: 'https://evil.example.test/mcp', authorization_servers: [GOOGLE_ISSUER] } });
+    app.desk.mcpSignIn.fetcher = spoofMock.fetcher;
+    app.desk.mcpSignIn.resolver = spoofMock.resolver;
+    app.desk.mcpSignIn.env = { REX_GOOGLE_OAUTH_CLIENT_ID: 'google-cid', REX_GOOGLE_OAUTH_CLIENT_SECRET: 'google-csecret' };
+    const spoofed = await call('/api/mcp-sign-in/start', { name: 'googledrive' });
+    assert.equal(spoofed.status, 400);
+    assert.match(spoofed.body.error, /lets only apps it approved sign in/);
+    assert.deepEqual(spoofMock.seen.tokenCalls, []);
+  } finally {
+    await app.close();
+  }
 });
 
 test('mcpSignIns always includes saved catalog OAuth servers (like Google Drive) as needed even after HTTP 200 tools/list, and exposes accountEmail when connected', () => {

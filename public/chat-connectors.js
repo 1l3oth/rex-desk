@@ -29,7 +29,7 @@ export async function loadConnectors(ctx, state, draw) {
 const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? t('not synced yet') : minutes < 1 ? t('synced just now') : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
 
 // Remote MCP servers Rex Desk signs in to itself (L30): how each stands, with its actions.
-export function signInParts({ esc }, item) {
+export function signInParts({ esc }, item, signOutNote = null) {
   const name = esc(item.name);
   const email = item.accountEmail ? esc(item.accountEmail) : '';
   const bad = (text, title = '') => `<span class="tb-status bad"${title ? ` title="${title}"` : ''}><i aria-hidden="true"></i>${text}</span>`;
@@ -45,7 +45,10 @@ export function signInParts({ esc }, item) {
       button: `${switchBtn}<button type="button" class="btn small quiet" data-mcp-sign-out="${name}">${t`Sign out`}</button>`,
     };
   }
-  return { sub: item.error ? bad(esc(item.error)) : again ? bad(expired, email) : `<span>${t`Not signed in`}</span>`, button: `<button type="button" class="btn small primary" data-mcp-start="${name}">${again ? t`Sign in again` : t`Sign in`}</button>` };
+  const revokeNote = signOutNote
+    ? `${bad(esc(t`Signed out here, but ${signOutNote.label} could not revoke access remotely.`))}${/^https:\/\//.test(signOutNote.manageUrl || '') ? `<span>${t`Remove access in your account settings:`} <a href="${esc(signOutNote.manageUrl)}" target="_blank" rel="noopener noreferrer">${esc(signOutNote.manageUrl)}</a></span>` : `<span>${t`Remove Rex Desk in that app's account permissions if needed.`}</span>`}`
+    : '';
+  return { sub: item.error ? bad(esc(item.error)) : revokeNote || (again ? bad(expired, email) : `<span>${t`Not signed in`}</span>`), button: `<button type="button" class="btn small primary" data-mcp-start="${name}">${again ? t`Sign in again` : t`Sign in`}</button>` };
 }
 
 // One linked connection: its state line (or its failed sync, kept on its own row), then Sync, Change and Remove.
@@ -87,7 +90,7 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
     const kind = items.get(link.connectorId); if (!kind) continue;
     // Telegram needs a second step after the token: the person presses Start in the bot, then links that one chat.
     const tg = link.connectorId === 'telegram';
-    const signIn = link.server ? (data.signIns || []).find(item => item.name === link.server) : null, parts = signIn ? signInParts(ctx, signIn) : null;
+    const signIn = link.server ? (data.signIns || []).find(item => item.name === link.server) : null, parts = signIn ? signInParts(ctx, signIn, state.extra.signOutNotes?.[signIn.name]) : null;
     const sub = parts ? parts.sub : link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>`
       : tg ? `<span>${link.pairCode ? esc(t`Send ${link.pairCode} to your bot in Telegram, then tap Link.`) : link.linked ? esc(t`Linked to ${link.linkedName || t('your chat')}`) : esc(t`Tap Link to get a code to send to your bot.`)}</span>`
       : `<span>${esc(howLine(kind, true))}</span>`;
@@ -97,7 +100,7 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
   }
   // Servers added by hand (not from this list) that need a sign-in get a row of their own.
   const listed = new Set((data.links || []).filter(link => items.has(link.connectorId)).map(link => link.server));
-  const others = (data.signIns || []).filter(item => !listed.has(item.name)).map(item => { const parts = signInParts(ctx, item); return `<li class="tb-row cx-row"><div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${t`MCP`}</span></span>${parts.sub}</div>${parts.button ? `<div class="cx-actions">${parts.button}</div>` : ''}</li>`; });
+  const others = (data.signIns || []).filter(item => !listed.has(item.name)).map(item => { const parts = signInParts(ctx, item, state.extra.signOutNotes?.[item.name]); return `<li class="tb-row cx-row"><div class="tb-text"><span class="mk-name"><b>${esc(item.name)}</b><span class="mk-tag">${t`MCP`}</span></span>${parts.sub}</div>${parts.button ? `<div class="cx-actions">${parts.button}</div>` : ''}</li>`; });
   const hasTrackers = Boolean(trackers);
   const groups = (data.catalog?.groups || data.types).map(type => {
     const list = rows[type.id] || [], extra = type.id === 'tasks' ? trackers : '';
@@ -212,8 +215,21 @@ export async function connectorsClick(ctx, state, target, back, draw) {
       : '';
     if (mcpSignOut && !await askConfirm(t`Sign out of ${signOutLabel}? Agents cannot use it until you sign in again.`)) return true;
     try {
-      if (mcpStart) await startMcpSignIn(ctx, mcpStart);
-      else await api(`/mcp-sign-in/${mcpCancel ? 'cancel' : 'sign-out'}`, { method: 'POST', data: { name: mcpCancel || mcpSignOut } });
+      if (mcpStart) {
+        if (state.extra.signOutNotes) delete state.extra.signOutNotes[mcpStart];
+        await startMcpSignIn(ctx, mcpStart);
+      } else if (mcpCancel) {
+        await api('/mcp-sign-in/cancel', { method: 'POST', data: { name: mcpCancel } });
+      } else {
+        const outcome = await api('/mcp-sign-in/sign-out', { method: 'POST', data: { name: mcpSignOut } });
+        const notes = state.extra.signOutNotes ||= {};
+        if (outcome?.revocation === 'failed') {
+          notes[mcpSignOut] = { label: signOutLabel, manageUrl: outcome.manageUrl || '' };
+          toast(outcome.manageUrl ? t`Signed out here, but remote revoke failed. Remove access at ${outcome.manageUrl}.` : t`Signed out here, but remote revoke failed. Remove access in your account permissions.`, true);
+        } else {
+          delete notes[mcpSignOut];
+        }
+      }
     } catch (error) { toast(error.message, true); }
     await reload();
     // The browser comes back on its own: the row is looked at again until it does, while this page stays open.

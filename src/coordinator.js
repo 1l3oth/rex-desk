@@ -230,7 +230,7 @@ export class Desk {
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.
     this.toolbox.computer = () => this.peers.self.name;
     // Rex Desk signs in to remote MCP servers itself and keeps those sign-ins fresh for every agent (L30).
-    this.mcpSignIn = new McpSignIn(store, { changed: url => this.mcpSignInChanged(url), oauthFor: (name, url) => (catalogItem(name) || catalogItemByUrl(url))?.connect?.oauth });
+    this.mcpSignIn = new McpSignIn(store, { changed: url => this.mcpSignInChanged(url), oauthFor: (_name, url) => catalogItemByUrl(url)?.connect?.oauth });
     this.toolbox.signIn = this.mcpSignIn;
     // The browser agents use (Settings, Agents): downloaded on first use after a yes in Needs you.
     this.agentBrowser = new AgentBrowser(this); this.evidence.agentBrowser = () => this.agentBrowser;
@@ -419,7 +419,7 @@ export class Desk {
     let servers = {}; try { servers = this.toolbox.servers(); } catch { /* no config */ }
     return Object.entries(servers).flatMap(([name, config]) => {
       const url = addressOf(config); if (!url || carriesCredential(new URL(url))) return [];
-      const item = catalogItem(name) || catalogItemByUrl(url);
+      const item = catalogItemByUrl(url) || (catalogItem(name)?.connect?.fields?.includes('host') ? catalogItem(name) : null);
       const catalogOAuth = Boolean(item?.connect?.kind === 'remote-mcp' && item.connect.auth === 'oauth' && !Object.keys(config.headers || {}).length);
       const state = this.mcpSignIn.state(url), refused = Boolean(this.toolbox.failed.get(name)?.signIn);
       if (!state.state && !state.waiting && !refused && !catalogOAuth) return [];

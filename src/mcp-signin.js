@@ -17,27 +17,41 @@ const OVER = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client'])
 export const SIGN_IN_HELP = 'Needs sign-in. Ask the person to press Sign in for it in Rex Desk, Settings, Connectors. Rex Desk does the whole sign-in: never tell them to use a terminal, /mcp or a config file.';
 
 // Pre-registered OAuth providers that do not support RFC 7591 dynamic client registration.
-// Credentials stay in env/runtime config (never in public/connectors/catalog.json).
+// Credentials stay in env/runtime config (never in public/connectors/catalog.json) and are only
+// used for explicitly supported resource URLs whose discovered issuer and endpoints match this
+// hard-coded trusted configuration.
+function exactHttpsUrl(value) {
+  let url;
+  try { url = new URL(String(value)); } catch { return ''; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return '';
+  return url.href;
+}
+function normalizedBaseUrl(value) {
+  const href = exactHttpsUrl(value);
+  return href ? href.replace(/\/$/, '') : '';
+}
 const OAUTH_PROVIDERS = {
   google: {
     clientIdEnv: 'REX_GOOGLE_OAUTH_CLIENT_ID',
     clientSecretEnv: 'REX_GOOGLE_OAUTH_CLIENT_SECRET',
     scopesEnv: 'REX_GOOGLE_OAUTH_SCOPES',
-    matches({ provider, issuer, url }) {
-      if (provider === 'google') return true;
-      for (const value of [issuer, url]) {
-        if (!value) continue;
-        try {
-          const host = new URL(String(value)).hostname.toLowerCase();
-          if (host === 'accounts.google.com' || host === 'googleapis.com' || host.endsWith('.googleapis.com')) return true;
-        } catch { /* ignore */ }
-      }
-      return false;
+    resourceUrls: new Set(['https://drivemcp.googleapis.com/mcp/v1']),
+    issuers: new Set(['https://accounts.google.com']),
+    endpoints: {
+      authorization: new Set(['https://accounts.google.com/o/oauth2/v2/auth']),
+      token: new Set(['https://oauth2.googleapis.com/token']),
+      revocation: new Set(['https://oauth2.googleapis.com/revoke']),
+      userinfo: new Set([
+        'https://openidconnect.googleapis.com/v1/userinfo',
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+      ]),
     },
     includeResource: false,
     authParams: { access_type: 'offline', prompt: 'select_account consent' },
     defaultScopes: ['https://www.googleapis.com/auth/drive.readonly', 'openid', 'email'],
     revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+    managePermissionsUrl: 'https://myaccount.google.com/permissions',
+    unsupportedUrlMessage: 'This server address is not a supported Google MCP server, so Rex Desk will not use Google sign-in credentials there.',
     missingMessage: (name = 'Google') => `${name} sign-in needs Google OAuth client credentials (REX_GOOGLE_OAUTH_CLIENT_ID and REX_GOOGLE_OAUTH_CLIENT_SECRET) configured on this computer.`,
   },
 };
@@ -45,14 +59,24 @@ const normalizeScopes = value => {
   const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[\s,]+/) : [];
   return list.map(item => String(item || '').trim()).filter(Boolean).join(' ');
 };
-export function oauthProviderFor({ provider, issuer, url } = {}) {
+// Only explicitly supported resource URLs match a pre-registered provider; a connector name or
+// server-claimed issuer is never enough on its own.
+export function oauthProviderFor({ provider, url } = {}) {
+  const normalizedUrl = normalizedBaseUrl(url);
+  if (!normalizedUrl) return null;
   for (const [id, spec] of Object.entries(OAUTH_PROVIDERS)) {
-    if (spec.matches({ provider, issuer, url })) return { id, ...spec };
+    if (provider && provider !== id) continue;
+    if (spec.resourceUrls.has(normalizedUrl)) return { id, ...spec };
   }
   return null;
 }
-export function preRegisteredOAuthClient({ provider, issuer, url, env = process.env, oauthClients = {} } = {}) {
-  const spec = oauthProviderFor({ provider, issuer, url });
+export function trustedProviderEndpoint(spec, kind, value) {
+  const allowed = spec?.endpoints?.[kind];
+  if (!allowed) return false;
+  return allowed.has(exactHttpsUrl(value));
+}
+export function preRegisteredOAuthClient({ provider, url, env = process.env, oauthClients = {} } = {}) {
+  const spec = oauthProviderFor({ provider, url });
   if (!spec) return null;
   const configured = oauthClients?.[spec.id] || {};
   const clientId = String(configured.clientId ?? configured.client_id ?? env?.[spec.clientIdEnv] ?? '').trim();
@@ -96,6 +120,27 @@ const BY_CODE = {
 };
 // A message Rex Desk wrote itself, so it may be shown as it is.
 class Plain extends Error {}
+export function validatePreRegisteredOAuth(spec, { authorizationServerUrl = '', issuer = '', authorizationEndpoint = '', tokenEndpoint = '', revocationEndpoint = '', userinfoEndpoint = '' } = {}) {
+  if (!spec) return;
+  if (authorizationServerUrl && !spec.issuers.has(normalizedBaseUrl(authorizationServerUrl))) {
+    throw new Plain('This server named an untrusted sign-in issuer, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!spec.issuers.has(normalizedBaseUrl(issuer))) {
+    throw new Plain('This server named an untrusted sign-in issuer, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!trustedProviderEndpoint(spec, 'authorization', authorizationEndpoint)) {
+    throw new Plain('The sign-in page does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!trustedProviderEndpoint(spec, 'token', tokenEndpoint)) {
+    throw new Plain('The token address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (revocationEndpoint && !trustedProviderEndpoint(spec, 'revocation', revocationEndpoint)) {
+    throw new Plain('The revocation address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (userinfoEndpoint && !trustedProviderEndpoint(spec, 'userinfo', userinfoEndpoint)) {
+    throw new Plain('The account info address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+}
 export const signInError = error => {
   if (error instanceof Plain) return error.message;
   const code = String(error?.errorCode || error?.constructor?.errorCode || '');
@@ -225,6 +270,32 @@ export function nodeFetch(target, init = {}) {
 // the person's own loopback server (no pin) uses the platform fetch unchanged.
 const pinnedTransport = (target, init = {}) => init.pin ? nodeFetch(target, init) : fetch(target, init);
 
+// Resolve a host once and refuse it if it is private: a literal private address, or a name the injected resolver maps to
+// one (so a public name pointed at a private IP is caught too). Returns the resolved address to pin the connection to, so
+// the address checked is the address reached. Fails closed: a name that does not resolve (lookup error or empty answer)
+// is refused, never left to an unpinned fetch that could reach an unchecked address.
+async function resolvePublicAddress(host, what, resolver) {
+  const inside = () => new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+  if (privateHost(host)) throw inside();
+  let addresses; try { addresses = await resolver(host); } catch { addresses = null; }
+  if (!addresses?.length) throw new Plain(`The ${what} this server named could not be checked, so Rex Desk did not sign in there.`);
+  if (addresses.some(entry => privateHost(entry.address))) throw inside();
+  return { address: addresses[0].address, family: addresses[0].family };
+}
+
+// Guarded, DNS-pinned discovery fetch shared by mcp-signin and connector-catalog: every request and every redirect hop is
+// checked (secure, no credential in the URL, resolved to a public IP when off-origin) and pinned before it is sent.
+export function discoveryFetch({ fetcher = pinnedTransport, loopback = false, ms = ASK_MS, resolver = host => dns.lookup(host, { all: true }), home = '' } = {}) {
+  const check = async address => {
+    const url = safeAddress(address, 'sign-in information address', loopback);
+    if (carriesCredential(url)) throw new Plain('The sign-in information address this server named has a key or password in it, so Rex Desk does not sign in there.');
+    if (loopback) return null;
+    if (home && url.origin === home) return null;
+    return resolvePublicAddress(url.hostname, 'sign-in information address', resolver);
+  };
+  return checkedFetch(fetcher, check, ms);
+}
+
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
@@ -259,6 +330,9 @@ export class McpSignIn {
 
   // ---- signing in ----
   async discover(url, oauth = {}, name = '') {
+    if (oauth?.provider && Object.hasOwn(OAUTH_PROVIDERS, oauth.provider) && !oauthProviderFor({ provider: oauth.provider, url })) {
+      throw new Plain(OAUTH_PROVIDERS[oauth.provider].unsupportedUrlMessage);
+    }
     // The person's own server, and its own same-origin sign-in endpoints, may be private; every other destination must be public.
     const home = originOf(url);
     // The server's 401 may name where its metadata is; without that the well-known addresses are tried (the SDK does both).
@@ -268,32 +342,44 @@ export class McpSignIn {
       const response = await this.fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }), signal: AbortSignal.timeout(15000), redirect: 'manual' });
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
-    const check = async address => { this.endpoint(address, 'sign-in information address'); return this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
     let discoveredRevocation = '';
-    const discoveryFetch = checkedFetch(this.fetcher, check, this.ms);
+    const guardedDiscovery = discoveryFetch({ fetcher: this.fetcher, loopback: this.loopback, ms: this.ms, resolver: this.resolver, home });
     const captureMeta = async (target, init) => {
-      const response = await discoveryFetch(target, init);
+      const response = await guardedDiscovery(target, init);
       if (response.ok && /\/\.well-known\/(?:openid-configuration|oauth-authorization-server)/i.test(String(target))) {
-        try { const data = await response.clone().json(); if (typeof data?.revocation_endpoint === 'string') discoveredRevocation = data.revocation_endpoint; } catch { /* ignore */ }
+        try { const data = await response.clone().json(); if (data?.authorization_endpoint) discoveredRevocation = typeof data.revocation_endpoint === 'string' ? data.revocation_endpoint : ''; } catch { /* ignore */ }
       }
       return response;
     };
     const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: captureMeta });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
+    const discoveredRevocationEndpoint = metadata.revocation_endpoint || discoveredRevocation || '';
+    const userinfoEndpoint = metadata.userinfo_endpoint || '';
+    const pre = preRegisteredOAuthClient({ provider: oauth?.provider, url, env: this.env, oauthClients: this.oauthClients });
+    if (pre?.provider) {
+      validatePreRegisteredOAuth(pre.provider, {
+        authorizationServerUrl: info.authorizationServerUrl,
+        issuer: metadata.issuer,
+        authorizationEndpoint: metadata.authorization_endpoint,
+        tokenEndpoint: metadata.token_endpoint,
+        revocationEndpoint: discoveredRevocationEndpoint,
+        userinfoEndpoint,
+      });
+    }
     // Every address the server named is checked like the one the person added: secure, with no key or password in it, and
     // never a private or loopback destination off the server's own origin.
     await this.named(info.authorizationServerUrl, 'sign-in server', home);
     for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) await this.named(metadata[key], what, home);
+    if (discoveredRevocationEndpoint) await this.named(discoveredRevocationEndpoint, 'revocation address', home);
+    if (userinfoEndpoint) await this.named(userinfoEndpoint, 'account info address', home);
     if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
-    const pre = preRegisteredOAuthClient({ provider: oauth?.provider, issuer: metadata.issuer || info.authorizationServerUrl, url, env: this.env, oauthClients: this.oauthClients });
     let client = null;
-    if (metadata.registration_endpoint) {
-      await this.named(metadata.registration_endpoint, 'registration address', home);
-    } else if (pre?.client) {
+    if (pre?.provider) {
+      if (!pre.client) throw new Plain(pre.provider.missingMessage(name || 'This server'));
       client = pre.client;
-    } else if (pre?.provider) {
-      throw new Plain(pre.provider.missingMessage(name || 'This server'));
+    } else if (metadata.registration_endpoint) {
+      await this.named(metadata.registration_endpoint, 'registration address', home);
     } else {
       throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
     }
@@ -307,8 +393,7 @@ export class McpSignIn {
     const explicitScope = pre?.scopes || normalizeScopes(oauth?.scopes) || normalizeScopes(pre?.provider?.defaultScopes);
     const scope = explicitScope || challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined;
     const authParams = { ...(pre?.provider?.authParams || {}), ...(oauth?.authParams || {}) };
-    const revocationEndpoint = metadata.revocation_endpoint || discoveredRevocation || (!this.loopback ? pre?.provider?.revocationEndpoint : '') || '';
-    const userinfoEndpoint = metadata.userinfo_endpoint || '';
+    const revocationEndpoint = discoveredRevocationEndpoint || pre?.provider?.revocationEndpoint || '';
     return { server: info.authorizationServerUrl, metadata, resource: resourceValue, scope, client, authParams, revocationEndpoint, userinfoEndpoint };
   }
   async fetchAccountEmail(userinfoEndpoint, accessToken, home) {
@@ -394,14 +479,7 @@ export class McpSignIn {
   // the address checked is the address reached. Fails closed: a name that does not resolve (lookup error or empty answer)
   // is refused, never left to an unpinned fetch that could reach an unchecked address. Only home / loopback destinations
   // skip this (ensurePublic returns before calling here), so a private server the person set up themselves still signs in.
-  async publicAddress(host, what) {
-    const inside = () => new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
-    if (privateHost(host)) throw inside();
-    let addresses; try { addresses = await this.resolver(host); } catch { addresses = null; }
-    if (!addresses?.length) throw new Plain(`The ${what} this server named could not be checked, so Rex Desk did not sign in there.`);
-    if (addresses.some(entry => privateHost(entry.address))) throw inside();
-    return { address: addresses[0].address, family: addresses[0].family };
-  }
+  async publicAddress(host, what) { return resolvePublicAddress(host, what, this.resolver); }
   // Check a request that would reach an address the server named, and give back the resolved address to pin the connection
   // to so the one resolution that passed the check is the one the socket uses. The server the person configured (home) and
   // its own same-origin endpoints may be private, so a private server they set up still signs in (no pin, reached as named);
@@ -421,17 +499,21 @@ export class McpSignIn {
   }
   pinned(address, what, home, ms = this.ms) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms, guard: to => this.ensurePublic(to, what, home) }); }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
-  signOut(url) {
+  async signOut(url) {
     this.cancel(url);
     const record = this.record(url), secret = record && this.secret(record);
     if (record) { this.store.delete(KIND, record.id); this.changed(url); }
-    const endpoint = secret?.revocationEndpoint || secret?.metadata?.revocation_endpoint || '';
+    const provider = oauthProviderFor({ url });
+    const manageUrl = provider?.managePermissionsUrl || '';
+    const endpoint = secret?.revocationEndpoint || secret?.metadata?.revocation_endpoint || (secret && provider?.revocationEndpoint) || '';
     const token = secret?.refreshToken || secret?.accessToken || '';
-    if (!endpoint || !token) return Promise.resolve(false);
-    return this.revoke(url, endpoint, token, secret?.client);
+    if (!endpoint || !token) return { localCleared: Boolean(record), revocation: 'none', revoked: false, ...(manageUrl ? { manageUrl } : {}) };
+    const revoked = await this.revoke(url, endpoint, token, secret?.client, provider);
+    return { localCleared: Boolean(record), revocation: revoked ? 'revoked' : 'failed', revoked, ...(manageUrl ? { manageUrl } : {}) };
   }
-  async revoke(url, endpoint, token, client) {
+  async revoke(url, endpoint, token, client, provider = oauthProviderFor({ url })) {
     try {
+      if (provider && !trustedProviderEndpoint(provider, 'revocation', endpoint)) return false;
       const form = new URLSearchParams({ token });
       if (client?.client_id) form.set('client_id', client.client_id);
       if (client?.client_secret) form.set('client_secret', client.client_secret);
@@ -456,6 +538,8 @@ export class McpSignIn {
     const record = this.record(url), secret = record && this.secret(record);
     if (!secret || record.status === 'expired') return false;
     if (!secret.refreshToken) { if (secret.expiresAt && secret.expiresAt <= Date.now()) this.expire(record); return false; }
+    const provider = oauthProviderFor({ url });
+    if (provider && !trustedProviderEndpoint(provider, 'token', secret.metadata?.token_endpoint)) return false;
     try {
       const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, ...(secret.resource ? { resource: secret.resource } : {}), fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
       // Signed out or signed in again while this ran: the old answer is dropped.

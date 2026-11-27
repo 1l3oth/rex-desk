@@ -7,7 +7,7 @@ import path from 'node:path';
 import { connectServer, plainError } from './toolbox.js';
 import { assertBotFree, botIdOf } from './bot-use.js';
 import { KEY_FLOOR, KEY_TOO_SHORT } from './mcp-guard.js';
-import { addressOf, preRegisteredOAuthClient } from './mcp-signin.js';
+import { addressOf, discoveryFetch, preRegisteredOAuthClient, validatePreRegisteredOAuth } from './mcp-signin.js';
 
 // A field that holds a secret, so a value too short to tell from ordinary text is refused (L30). An address, a folder or a
 // webhook is not a key, so it is never length-checked.
@@ -57,9 +57,16 @@ export function serverConfig(item, values = {}) {
   return { type: 'http', url, ...(values.token ? { headers: { Authorization: `Bearer ${values.token}` } } : {}) };
 }
 
-// Does the server support OAuth (with dynamic client registration or a pre-registered OAuth client)? Read from its metadata.
-async function signInWay(url, fetcher) {
-  const target = new URL(url), get = async address => { const response = await fetcher(address, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }); return response.ok ? response.json() : null; };
+// Does the server support OAuth (with dynamic client registration or a pre-registered OAuth client)? Read from its metadata
+// using the same guarded, DNS-pinned discovery transport as mcp-signin (including on redirects).
+async function signInWay(url, { fetcher, resolver, loopback = false } = {}) {
+  const target = new URL(url);
+  const guarded = discoveryFetch({ fetcher, resolver, loopback, ms: 8000, home: target.origin });
+  const get = async address => {
+    const response = await guarded(address, { headers: { Accept: 'application/json' } });
+    if (!response.ok) { await response.body?.cancel?.().catch(() => {}); return null; }
+    return response.json();
+  };
   const resource = await get(`${target.origin}/.well-known/oauth-protected-resource${target.pathname.replace(/\/$/, '')}`).catch(() => null) || await get(`${target.origin}/.well-known/oauth-protected-resource`).catch(() => null);
   const issuer = resource?.authorization_servers?.[0] || target.origin;
   const issuerUrl = new URL(issuer), issuerPath = issuerUrl.pathname.replace(/\/$/, '');
@@ -77,26 +84,39 @@ async function signInWay(url, fetcher) {
       ];
   let meta = null;
   for (const address of metaUrls) { meta = await get(address).catch(() => null); if (meta?.authorization_endpoint) break; }
-  return { oauth: Boolean(meta?.authorization_endpoint), register: Boolean(meta?.registration_endpoint), issuer: meta?.issuer || issuer };
+  return { oauth: Boolean(meta?.authorization_endpoint), register: Boolean(meta?.registration_endpoint), authorizationServerUrl: issuer, issuer: meta?.issuer || issuer, metadata: meta };
 }
 
 const result = (ok, method, extra = {}) => ({ ok, method, needs: '', tools: null, error: '', ...extra });
 
-async function probeOAuth(item, config, { fetcher, env, oauthClients, tools = null }) {
-  const way = await signInWay(config.url, fetcher).catch(() => ({ oauth: false, register: false, issuer: '' }));
+async function probeOAuth(item, config, { fetcher, resolver, env, oauthClients, tools = null }) {
+  const way = await signInWay(config.url, { fetcher, resolver }).catch(() => ({ oauth: false, register: false, authorizationServerUrl: '', issuer: '', metadata: null }));
   const extra = tools !== null ? { tools } : {};
-  if (way.oauth && way.register) return result(true, 'oauth', { needs: 'sign-in', ...extra });
-  if (way.oauth) {
-    const pre = preRegisteredOAuthClient({ provider: item.connect.oauth?.provider, issuer: way.issuer, url: config.url, env, oauthClients });
-    if (pre?.client) return result(true, 'oauth', { needs: 'sign-in', ...extra });
-    if (pre?.provider) return result(false, 'oauth', { error: pre.provider.missingMessage(item.name) });
-    return result(false, 'oauth', { error: `${item.name} lets only apps it approved sign in, so Rex Desk cannot connect it yet.` });
+  const pre = preRegisteredOAuthClient({ provider: item.connect.oauth?.provider, url: config.url, env, oauthClients });
+  if (way.oauth && pre?.provider) {
+    try {
+      validatePreRegisteredOAuth(pre.provider, {
+        authorizationServerUrl: way.authorizationServerUrl,
+        issuer: way.metadata?.issuer || way.issuer,
+        authorizationEndpoint: way.metadata?.authorization_endpoint,
+        tokenEndpoint: way.metadata?.token_endpoint,
+        revocationEndpoint: way.metadata?.revocation_endpoint || '',
+        userinfoEndpoint: way.metadata?.userinfo_endpoint || '',
+      });
+    } catch (error) {
+      return result(false, 'oauth', { error: error.message });
+    }
+    if (pre.client) return result(true, 'oauth', { needs: 'sign-in', ...extra });
+    return result(false, 'oauth', { error: pre.provider.missingMessage(item.name) });
   }
+  if (way.oauth && way.register) return result(true, 'oauth', { needs: 'sign-in', ...extra });
+  if (way.oauth) return result(false, 'oauth', { error: `${item.name} lets only apps it approved sign in, so Rex Desk cannot connect it yet.` });
   return result(false, 'oauth', { error: `${item.name} asked for a sign-in Rex Desk could not find.` });
 }
 
 // Connect for real and say what happened: { ok, method, needs, tools, error }. Nothing is written anywhere.
-export async function probe(item, input = {}, { connect = connectServer, fetcher = fetch, env = process.env, oauthClients = {} } = {}) {
+export async function probe(item, input = {}, { connect = connectServer, fetcher, resolver, env = process.env, oauthClients = {} } = {}) {
+  const httpFetch = fetcher || fetch;
   if (!item) return result(false, '', { error: 'Rex Desk does not know that app.' });
   if (item.phase !== 1) return result(false, '', { error: item.note || 'Not ready to connect yet.' });
   let values; try { values = readValues(item, input); } catch (error) { return result(false, '', { error: error.message }); }
@@ -110,7 +130,7 @@ export async function probe(item, input = {}, { connect = connectServer, fetcher
           const { tools = [] } = await client.listTools();
           // Some OAuth MCP servers (such as Google Drive) return HTTP 200 on tools/list without auth and require OAuth on tools/call.
           if (kind === 'remote-mcp' && item.connect.auth === 'oauth' && !values.token) {
-            return await probeOAuth(item, config, { fetcher, env, oauthClients, tools: tools.length });
+            return await probeOAuth(item, config, { fetcher, resolver, env, oauthClients, tools: tools.length });
           }
           return result(true, kind, { tools: tools.length });
         } finally { await client.close?.().catch(() => {}); }
@@ -118,7 +138,7 @@ export async function probe(item, input = {}, { connect = connectServer, fetcher
         const message = String(error?.message || error);
         // No token and the server asks for a sign-in: fine when the server lets a new app register or has a pre-registered OAuth client.
         if (kind === 'remote-mcp' && !values.token && (Number(error?.code) === 401 || /401|unauthori[sz]ed|unauthenticated|invalid_token|authenticat/i.test(message))) {
-          return await probeOAuth(item, config, { fetcher, env, oauthClients });
+          return await probeOAuth(item, config, { fetcher, resolver, env, oauthClients });
         }
         if (Number(error?.code) === 401 || Number(error?.code) === 403) return result(false, kind, { error: values.token ? `${item.name} did not take that token.` : `${item.name} wants a sign-in Rex Desk could not make.` });
         if (Number(error?.code) >= 400) return result(false, kind, { error: `${item.name} answered with error ${error.code}.` });
@@ -127,18 +147,18 @@ export async function probe(item, input = {}, { connect = connectServer, fetcher
     }
     if (kind === 'webhook') {
       if (!/^https:\/\/(discord\.com|discordapp\.com|ptb\.discord\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[\w-]+$/.test(values.webhookUrl)) return result(false, kind, { error: 'Paste the whole webhook address. It starts with https://discord.com/api/webhooks/.' });
-      const response = await fetcher(values.webhookUrl, { signal: AbortSignal.timeout(10000) });
+      const response = await httpFetch(values.webhookUrl, { signal: AbortSignal.timeout(10000) });
       if (!response.ok) return result(false, kind, { error: response.status === 401 || response.status === 404 ? 'Discord does not know that webhook. Copy it again from the channel settings.' : `Discord answered ${response.status}.` });
       const hook = await response.json().catch(() => ({}));
       return result(true, kind, { label: hook.name || '' });
     }
     if (kind === 'token' && item.id === 'telegram') {
-      const response = await fetcher(`https://api.telegram.org/bot${encodeURIComponent(values.botToken)}/getMe`, { signal: AbortSignal.timeout(10000) });
+      const response = await httpFetch(`https://api.telegram.org/bot${encodeURIComponent(values.botToken)}/getMe`, { signal: AbortSignal.timeout(10000) });
       const data = await response.json().catch(() => ({}));
       return data.ok ? result(true, kind, { label: data.result?.username ? `@${data.result.username}` : '' }) : result(false, kind, { error: 'Telegram does not know that bot token. Copy it again from @BotFather.' });
     }
     if (kind === 'token' && item.id === 'trello') {
-      const response = await fetcher(`https://api.trello.com/1/members/me?fields=username&key=${encodeURIComponent(values.apiKey)}&token=${encodeURIComponent(values.token)}`, { signal: AbortSignal.timeout(10000) });
+      const response = await httpFetch(`https://api.trello.com/1/members/me?fields=username&key=${encodeURIComponent(values.apiKey)}&token=${encodeURIComponent(values.token)}`, { signal: AbortSignal.timeout(10000) });
       if (!response.ok) return result(false, kind, { error: 'Trello did not take that key and token. Make the token with the same key.' });
       const data = await response.json().catch(() => ({}));
       return result(true, kind, { label: data.username || '' });

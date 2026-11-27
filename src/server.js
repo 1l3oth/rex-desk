@@ -1129,9 +1129,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (!address) return json(response, 400, { error: 'That server is not connected on this computer.' });
         if (mcpAuth[1] === 'start' && response.rexRemote) return json(response, 409, { error: 'Finish sign-in on the computer running Rex Desk.' });
         try {
-          if (mcpAuth[1] === 'start') { const item = catalogItem(name) || catalogItemByUrl(address); const started = await desk.mcpSignIn.start(name, address, item?.connect?.oauth); notify(); return json(response, 200, { url: started.url, signIns: signInsFor(desk, response) }); }
-          if (mcpAuth[1] === 'cancel') desk.mcpSignIn.cancel(address); else await desk.mcpSignIn.signOut(address);
-          notify(); return json(response, 200, { signIns: signInsFor(desk, response) });
+          if (mcpAuth[1] === 'start') { const item = catalogItemByUrl(address); const started = await desk.mcpSignIn.start(name, address, item?.connect?.oauth); notify(); return json(response, 200, { url: started.url, signIns: signInsFor(desk, response) }); }
+          if (mcpAuth[1] === 'cancel') { desk.mcpSignIn.cancel(address); notify(); return json(response, 200, { signIns: signInsFor(desk, response) }); }
+          const outcome = await desk.mcpSignIn.signOut(address);
+          notify(); return json(response, 200, { signIns: signInsFor(desk, response), ...outcome });
         } catch (error) { return json(response, 400, { error: error.message }); }
       }
       if (url.pathname === '/api/connectors' && request.method === 'GET') {

@@ -2887,5 +2887,10 @@
  "The agent starts fresh and reads a summary of this chat.": "ភ្នាក់ងារចាប់ផ្ដើមថ្មី ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
  "Hand off now? The agent stops, and a new chat starts with your next message and reads a summary of this one.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារនឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
  "Hand off to a new chat? The agent starts fresh with your next message and reads a summary of this one.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
- "Start a meeting with this agent and others.": "ចាប់ផ្ដើមកិច្ចប្រជុំជាមួយភ្នាក់ងារនេះ និងភ្នាក់ងារផ្សេងទៀត។"
+ "Start a meeting with this agent and others.": "ចាប់ផ្ដើមកិច្ចប្រជុំជាមួយភ្នាក់ងារនេះ និងភ្នាក់ងារផ្សេងទៀត។",
+ "Signed out here, but {0} could not revoke access remotely.": "បានចាកចេញនៅទីនេះ ប៉ុន្តែ {0} មិនអាចដកសិទ្ធិចូលប្រើពីចម្ងាយបានទេ។",
+ "Remove access in your account settings:": "ដកសិទ្ធិចូលប្រើក្នុងការកំណត់គណនីរបស់អ្នក:",
+ "Remove Rex Desk in that app's account permissions if needed.": "ដក Rex Desk ចេញក្នុងសិទ្ធិគណនីរបស់កម្មវិធីនោះ ប្រសិនបើចាំបាច់។",
+ "Signed out here, but remote revoke failed. Remove access at {0}.": "បានចាកចេញនៅទីនេះ ប៉ុន្តែការដកសិទ្ធិពីចម្ងាយបានបរាជ័យ។ ដកសិទ្ធិចូលប្រើនៅ {0}។",
+ "Signed out here, but remote revoke failed. Remove access in your account permissions.": "បានចាកចេញនៅទីនេះ ប៉ុន្តែការដកសិទ្ធិពីចម្ងាយបានបរាជ័យ។ ដកសិទ្ធិចូលប្រើក្នុងការកំណត់សិទ្ធិគណនីរបស់អ្នក។"
 }

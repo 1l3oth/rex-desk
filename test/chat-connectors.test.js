@@ -242,6 +242,7 @@ test('connectorsClick uses connector display name in Sign out confirmation while
   const listeners = new Map();
   globalThis.document = {
     activeElement: null,
+    documentElement: {},
     createElement: () => {
       const el = {
         className: '',
@@ -296,6 +297,106 @@ test('connectorsClick uses connector display name in Sign out confirmation while
     assert.doesNotMatch(dialogs[0], /Sign out of googledrive\?/);
     assert.deepEqual(calls[0], { route: '/mcp-sign-in/sign-out', opts: { method: 'POST', data: { name: 'googledrive' } } });
   } finally {
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+  }
+});
+
+test('connectorsClick shows revocation failure warning and Google permissions link when remote sign-out fails, in English and Khmer', async () => {
+  useLanguage('en');
+  const prevDocument = globalThis.document;
+  globalThis.document = {
+    activeElement: null,
+    documentElement: {},
+    createElement: () => {
+      const el = {
+        className: '',
+        innerHTML: '',
+        _click: null,
+        addEventListener(type, fn) { if (type === 'click') el._click = fn; },
+        remove() {},
+        querySelector(sel) {
+          if (sel === '[data-confirm="yes"]') {
+            return { focus() { queueMicrotask(() => el._click?.({ target: { closest: q => (q === '[data-confirm]' ? { dataset: { confirm: 'yes' } } : null) } })); } };
+          }
+          return null;
+        },
+      };
+      return el;
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    body: { append() {} },
+  };
+  try {
+    const toasts = [];
+    const state = {
+      extra: {
+        connectors: {
+          types: [{ id: 'docs', name: 'Docs and files' }],
+          connectors: [],
+          connections: [],
+          accounts: [],
+          links: [{ id: 'link-gd', connectorId: 'googledrive', name: 'Google Drive', server: 'googledrive' }],
+          catalog: { groups: [{ id: 'docs', name: 'Docs and files' }], items: [GOOGLE_DRIVE_ITEM] },
+          signIns: [{ name: 'googledrive', state: 'connected', waiting: false, link: '', error: '', accountEmail: 'pkay@gmail.com' }],
+        },
+      },
+    };
+    const ctx = {
+      api: async route => {
+        if (route === '/mcp-sign-in/sign-out') {
+          return {
+            localCleared: true,
+            revocation: 'failed',
+            revoked: false,
+            manageUrl: 'https://myaccount.google.com/permissions',
+            signIns: [{ name: 'googledrive', state: 'needed', waiting: false, link: '', error: '' }],
+          };
+        }
+        if (route === '/connectors') {
+          return { ...state.extra.connectors, signIns: [{ name: 'googledrive', state: 'needed', waiting: false, link: '', error: '' }] };
+        }
+        return {};
+      },
+      toast: (text, bad) => toasts.push({ text, bad }),
+      refresh: async () => {},
+    };
+    const button = { dataset: { mcpSignOut: 'googledrive' } };
+    const target = { closest: sel => (sel === '[data-mcp-sign-out]' ? button : null) };
+    await connectorsClick(ctx, state, target, { isConnected: true }, () => {});
+    assert.equal(toasts.length, 1);
+    assert.equal(toasts[0].bad, true);
+    assert.match(toasts[0].text, /remote revoke failed.*https:\/\/myaccount\.google\.com\/permissions/);
+    assert.deepEqual(state.extra.signOutNotes.googledrive, { label: 'Google Drive', manageUrl: 'https://myaccount.google.com/permissions' });
+
+    const enHtml = connectorsHtml({ ui: { snap: {} }, esc }, state, { sources: [] });
+    assert.match(enHtml, /Signed out here, but Google Drive could not revoke access remotely\./);
+    assert.match(enHtml, /<a href="https:\/\/myaccount\.google\.com\/permissions" target="_blank" rel="noopener noreferrer">https:\/\/myaccount\.google\.com\/permissions<\/a>/);
+    assert.match(enHtml, /data-mcp-start="googledrive"[^>]*>Sign in<\/button>/);
+    assert.doesNotMatch(enHtml, /\sstyle=|\son\w+=/i);
+
+    const km = loadLanguage('km');
+    useLanguage('km', km);
+    const kmHtml = connectorsHtml({ ui: { snap: {} }, esc }, state, { sources: [] });
+    assert.match(kmHtml, /បានចាកចេញនៅទីនេះ ប៉ុន្តែ Google Drive មិនអាចដកសិទ្ធិចូលប្រើពីចម្ងាយបានទេ។/);
+    assert.match(kmHtml, /ដកសិទ្ធិចូលប្រើក្នុងការកំណត់គណនីរបស់អ្នក:/);
+    assert.match(kmHtml, /https:\/\/myaccount\.google\.com\/permissions/);
+
+    // Subsequent sign-out with revocation: 'revoked' clears the failure note.
+    useLanguage('en');
+    const okCtx = {
+      api: async route => (route === '/mcp-sign-in/sign-out'
+        ? { localCleared: true, revocation: 'revoked', revoked: true, manageUrl: 'https://myaccount.google.com/permissions', signIns: [] }
+        : { ...state.extra.connectors, signIns: [{ name: 'googledrive', state: 'needed', waiting: false, link: '', error: '' }] }),
+      toast: (text, bad) => toasts.push({ text, bad }),
+      refresh: async () => {},
+    };
+    await connectorsClick(okCtx, state, target, { isConnected: true }, () => {});
+    assert.equal(state.extra.signOutNotes.googledrive, undefined);
+    assert.equal(toasts.length, 1, 'no error toast when remote revocation succeeds');
+  } finally {
+    useLanguage('en');
     if (prevDocument === undefined) delete globalThis.document;
     else globalThis.document = prevDocument;
   }
