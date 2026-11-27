@@ -3,7 +3,7 @@ import './layers.js';
 import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
-import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter, stateChipsHtml } from '/chat-sidebar.js';
+import { agentListHtml, agentToolsHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter, stateChipsHtml } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { sideTabsHtml, crewHtml, savedSideTab, saveSideTab } from '/chat-sidetabs.js';
@@ -138,7 +138,9 @@ const TILE_NAMES = { notices: t('Alerts'), inbox: t('Needs'), tasks: t('Tasks'),
 function place(type, icon, name, count = 0, warn = false, hint = '', sub = '') {
   // The bell opens a dropdown instead of a screen; it keeps the "tile" class the dropdown places itself by.
   const bell = type === 'notices', active = bell ? Boolean(document.querySelector('.nt-pane')) : ui.view.type === type;
-  return `<button type="button" class="place${bell ? ' tile' : ''}${active ? ' active' : ''}" ${bell ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`} ${active ? 'aria-current="page"' : ''} title="${esc(hint || name)}">${iconAv(icon, warn && count ? 'warn' : '')}<span>${esc(name)}${sub ? `<small class="place-sub">${esc(sub)}</small>` : ''}</span>${count ? `<b class="${warn ? 'warn' : ''}">${count > 99 ? '99+' : count}</b>` : ''}</button>`;
+  // A small icon with its name, state and count in the tooltip: the places are rarely opened, the agents below get the room.
+  const label = [name, sub || hint].filter(Boolean).join(' · ');
+  return `<button type="button" class="place${bell ? ' tile' : ''}${active ? ' active' : ''}" ${bell ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`} ${active ? 'aria-current="page"' : ''} title="${esc(label)}" aria-label="${esc(count ? `${label}, ${count}` : label)}">${iconAv(icon, warn && count ? 'warn' : '')}${count ? `<b class="${warn ? 'warn' : ''}">${count > 99 ? '99+' : count}</b>` : ''}</button>`;
 }
 function tile(type, avatar, name, sub, badge = 0, warn = false) {
   // The bell opens a dropdown list instead of a screen.
@@ -219,7 +221,7 @@ function renderRail() {
       ].join('')}</nav>
     </div>
     ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<p class="rail-empty">${t`No meeting rooms yet.`}</p>`)}
-    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, stopped: agentStopped(agent) }), agentState) : `<p class="rail-empty">${t`No agents yet.`}</p>`)}
+    ${section('agents', t('Agents'), agents.length, agentToolsHtml(ctx, agents) + plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, stopped: agentStopped(agent) }), agentState) : `<p class="rail-empty">${t`No agents yet.`}</p>`)}
   </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool${snap.devices?.self?.named === false ? ' needs-name' : ''}" data-open="devices" title="${snap.devices?.self?.named === false ? t`Name this computer` : t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot">${profileFoot()}</div></div>`;
 }
 
@@ -622,7 +624,7 @@ function composerHint(run, working) {
 // A selector that finds the same button again after the sidebar is drawn anew.
 function focusKey(element) {
   const target = element.closest?.('button,a,[tabindex]'); if (!target) return '';
-  const parts = ['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-sec', 'data-kind'].filter(name => target.hasAttribute(name)).map(name => `[${name}="${CSS.escape(target.getAttribute(name))}"]`);
+  const parts = ['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-rail-tool', 'data-sec', 'data-kind'].filter(name => target.hasAttribute(name)).map(name => `[${name}="${CSS.escape(target.getAttribute(name))}"]`);
   return parts.length ? parts.join('') : '';
 }
 function renderAll(full = false) {

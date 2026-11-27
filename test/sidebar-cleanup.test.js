@@ -41,8 +41,8 @@ test('an active agent filter shows and can be cleared at every list size, deskto
   assert.doesNotMatch(html({}), /rail-states/, 'six agents and no filter: no filter controls');
   for (const ui of [{ agentState: 'stopped' }, { agentFilter: 'zzz' }]) {
     const out = html(ui);
-    assert.match(out, /class="rail-states"/, `${JSON.stringify(ui)}: the chips still show`);
-    assert.match(out, /data-rail-filter="agents"/, `${JSON.stringify(ui)}: the filter box still shows`);
+    if (ui.agentState) assert.match(out, /class="rail-states"/, `${JSON.stringify(ui)}: the chips still show`);
+    if (ui.agentFilter) assert.match(out, /data-rail-filter="agents"/, `${JSON.stringify(ui)}: the filter box still shows`);
     assert.match(out, /No agents match\. <button type="button" class="rail-clear" data-rail-clear>Clear<\/button>/, 'an empty result offers Clear');
   }
   assert.match(html({ agentState: 'stopped' }), /class="state-chip on" data-rail-state="stopped" aria-pressed="true">/, 'the Stopped chip that is on stays enabled to turn off');
@@ -56,7 +56,7 @@ test('a sidebar redraw keeps focus on the button that had it, like the profile b
   const chat = read('chat.js');
   assert.match(chat, /const refocus = !keepFoot && rail\.contains\(document\.activeElement\) \? focusKey\(document\.activeElement\) : '';/);
   assert.match(chat, /if \(refocus && !rail\.contains\(document\.activeElement\)\) rail\.querySelector\(refocus\)\?\.focus\(\{ preventScroll: true \}\);/);
-  assert.match(chat, /\['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-sec', 'data-kind'\]/);
+  assert.match(chat, /\['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-rail-tool', 'data-sec', 'data-kind']/);
   assert.match(chat, /closeProfileMenu\(\); document\.querySelector\('\[data-action="profile-toggle"\]'\)\?\.focus\(\);/, 'Escape puts focus on the profile button first');
 });
 
@@ -67,4 +67,23 @@ test('the desktop app shows one Notifications bell (L122)', () => {
 
 test('a hidden team heading really hides under the filter (L122)', () => {
   assert.match(read('glass.css'), /\.sub-sec\[hidden\]\{display:none\}/);
+});
+
+test('search and the state filter sit as two small icons in the Agents header and open on a click (L122 feedback)', async () => {
+  const { agentListHtml, agentToolsHtml } = await import('../public/chat-sidebar.js');
+  const esc = value => String(value ?? '');
+  const agents = Array.from({ length: 9 }, (_, index) => ({ id: `a${index}`, name: `Agent ${index}`, status: { state: 'idle' } }));
+  const html = ui => agentListHtml({ ui: { snap: {}, ...ui }, esc, isCollapsed: () => false }, agents, agent => agent.name, () => '');
+  assert.doesNotMatch(html({}), /rail-filter|rail-states/, 'closed by default, even with many agents');
+  assert.match(html({ agentSearchOpen: true }), /data-rail-filter="agents"/);
+  assert.doesNotMatch(html({ agentSearchOpen: true }), /rail-states/);
+  assert.match(html({ agentStatesOpen: true }), /class="rail-states"/);
+  const tools = agentToolsHtml({ ui: { agentState: 'working' } }, agents);
+  assert.match(tools, /data-rail-tool="search" title="Filter agents or projects" aria-label="Filter agents or projects" aria-expanded="false"/);
+  assert.match(tools, /class="sec-tool open on" data-rail-tool="states"/, 'a state in use keeps its row open and marks the icon');
+  assert.equal(agentToolsHtml({ ui: {} }, agents.slice(0, 1)), '', 'one agent needs no search');
+  const chat = read('chat.js');
+  assert.match(chat, /agentToolsHtml\(ctx, agents\) \+ plus\('spec-new', t\('New agent'\)\)/);
+  assert.match(chat, /title="\$\{esc\(label\)\}" aria-label=/, 'places are icons with their name in the tooltip');
+  assert.match(read('glass.css'), /\.sec-add\{[^}]*background:var\(--accent\)/, 'the add button is the primary colour');
 });

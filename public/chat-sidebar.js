@@ -38,13 +38,25 @@ export function stateChipsHtml(ctx, states) {
   const chip = (state, label) => `<button type="button" class="state-chip${on === state ? ' on' : ''}" data-rail-state="${state}" aria-pressed="${on === state}"${count(state) || on === state ? '' : ' disabled'}>${label}<span>${count(state)}</span></button>`;
   return `<div class="rail-states" role="group" aria-label="${t`Show agents`}">${chip('working', t('Working'))}${chip('waiting', t('Needs you'))}${chip('stopped', t('Stopped'))}</div>`;
 }
+// Search and the status filter are rarely used, so they sit as two small icons in the Agents header and open on a click; the
+// list of agents keeps the room. One that is in use (text typed, a state on) stays open and its icon shows it is on.
+const SEARCH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>';
+const FILTER_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>';
+export const searchOpen = ui => Boolean(ui.agentSearchOpen || ui.agentFilter);
+export const statesOpen = ui => Boolean(ui.agentStatesOpen || ui.agentState);
+export function agentToolsHtml(ctx, agents) {
+  const { ui } = ctx; if (agents.length < 2 && !ui.agentFilter && !ui.agentState) return '';
+  const tool = (name, icon, label, open, on) => `<button type="button" class="sec-tool${open ? ' open' : ''}${on ? ' on' : ''}" data-rail-tool="${name}" title="${label}" aria-label="${label}" aria-expanded="${open}">${icon}</button>`;
+  return tool('search', SEARCH_ICON, t('Filter agents or projects'), searchOpen(ui), Boolean(ui.agentFilter)) + tool('states', FILTER_ICON, t('Show agents'), statesOpen(ui), Boolean(ui.agentState));
+}
 export function agentListHtml(ctx, agents, inner, stateOf = () => '') {
   const { ui, esc } = ctx, saved = ui.snap.sidebar?.agents || {}, { pinned, rest } = arrange(agents, saved);
   const search = agent => `${agent.name} ${agent.projectSlug || ''}`;
   const rows = (list, isPinned) => list.map(agent => rowHtml(ctx, 'agents', agent, inner(agent), isPinned, search(agent), stateOf(agent))).join('');
   const local = rest.filter(here), away = rest.filter(agent => !here(agent));
   // An active filter always shows, at any list size, so it can be seen and cleared (L122).
-  const filter = agents.length > 6 || ui.agentFilter || ui.agentState ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>${stateChipsHtml(ctx, agents.map(stateOf))}` : '';
+  const box = searchOpen(ui) ? `<label class="rail-filter">${SEARCH_ICON}<input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>` : '';
+  const filter = box + (statesOpen(ui) ? stateChipsHtml(ctx, agents.map(stateOf)) : '');
   return filter
     + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
     + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${ctx.isCollapsed?.(key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
@@ -147,6 +159,23 @@ export function initSidebarDrag(ctx) {
   document.addEventListener('input', event => {
     const box = event.target.closest?.('[data-rail-filter]'); if (!box) return;
     ctx.ui.agentFilter = box.value; applyFilter(document, box.value, ctx.ui.agentState);
+  });
+  // The search and filter icons in the Agents header open and close their row; an open search box takes the cursor, and
+  // closing one that is in use clears it, so nothing stays filtered out of sight.
+  document.addEventListener('click', event => {
+    const tool = event.target.closest?.('[data-rail-tool]'); if (!tool) return;
+    const ui = ctx.ui;
+    const search = tool.dataset.railTool === 'search', open = search ? !searchOpen(ui) : !statesOpen(ui);
+    if (search) { ui.agentSearchOpen = open; if (!open) ui.agentFilter = ''; }
+    else { ui.agentStatesOpen = open; if (!open) ui.agentState = ''; }
+    ctx.renderAll();
+    if (search && open) document.querySelector('[data-rail-filter="agents"]')?.focus();
+  });
+  // Escape in an empty search box closes it again.
+  document.addEventListener('keydown', event => {
+    const box = event.target.closest?.('[data-rail-filter="agents"]'); if (!box || event.key !== 'Escape' || box.value) return;
+    ctx.ui.agentSearchOpen = false; ctx.ui.filterFocused = false; ctx.renderAll();
+    document.querySelector('[data-rail-tool="search"]')?.focus();
   });
   // A status chip: one at a time; the one that is on turns it off again.
   document.addEventListener('click', event => {

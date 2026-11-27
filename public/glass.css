@@ -702,3 +702,18 @@ html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}
 .rail-tools .tool.needs-name::after{content:"";position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 2px var(--solid)}
 .newpc-dialog{display:flex;flex-direction:column;gap:10px;width:360px;max-width:calc(100vw - 32px);padding:18px}
 .newpc-dialog h2{margin:0;font-size:15px}.newpc-dialog p{margin:0;font-size:13px}
+/* Places as one row of small icons, names in the tooltip, so the agents get the room (L122 feedback). */
+.rail .places{flex-direction:row;flex-wrap:wrap;gap:2px;margin:4px 0 2px;padding:0 4px}
+.rail .places .place,.rail .places .place.tile{position:relative;flex:none;display:grid;place-items:center;width:34px;height:30px;min-height:0;padding:0;gap:0;border-radius:8px;box-shadow:none}
+.rail .places .place .av{width:30px;height:30px;margin:0;background:none!important;box-shadow:none;color:var(--muted)}
+.rail .places .place .av svg{width:17px;height:17px}
+.rail .places .place .av.warn{color:var(--warn)}
+.rail .places .place:hover:not(.active) .av,.rail .places .place.active .av{color:var(--ink)}
+.rail .places .place.active{background:color-mix(in srgb,var(--accent) 16%,transparent)!important;box-shadow:none!important}
+.rail .places .place b{position:absolute;top:0;right:0;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--accent);color:var(--accent-ink,#fff);font-size:9.5px;line-height:15px}
+.rail .places .place b.warn{background:var(--warn);color:#1b1300}
+/* Search and filter in the Agents header: small quiet icons; the add button is the one primary action. */
+.sec-tool{display:grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer}
+.sec-tool:hover,.sec-tool.open{background:color-mix(in srgb,var(--ink) 8%,transparent);color:var(--ink)}
+.sec-tool.on{color:var(--accent)}
+@media (min-width:761px){.sec-add{display:grid;place-items:center;width:22px;height:22px;margin-left:2px;padding:0 0 1px;border-radius:6px;background:var(--accent);color:var(--accent-ink,#fff);font-size:16px;font-weight:500}.sec-add:hover{background:color-mix(in srgb,var(--accent) 85%,#fff);color:var(--accent-ink,#fff)}}
