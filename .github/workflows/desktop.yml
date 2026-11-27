@@ -169,6 +169,8 @@ jobs:
         run: |
           codesign --verify --deep --strict --verbose=2 "desktop/src-tauri/target/release/bundle/macos/Rex Desk.app"
           codesign -dv "desktop/src-tauri/target/release/bundle/macos/Rex Desk.app" 2>&1 | grep -E "Signature|Identifier|Sealed"
+          # Tauri signs the app with Hardened Runtime, which blocks the microphone unless the app carries this entitlement.
+          codesign -d --entitlements - "desktop/src-tauri/target/release/bundle/macos/Rex Desk.app" 2>&1 | grep -q audio-input || { echo "::error::The Mac app has no microphone entitlement."; exit 1; }
       # The Mac app cannot update itself from a .dmg; it downloads this packed copy of the app and swaps it in.
       - name: Pack the Mac app for self-update
         if: runner.os == 'macOS'
