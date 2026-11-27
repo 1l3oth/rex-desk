@@ -245,7 +245,11 @@ FunctionEnd
   ; stopped first, the way the in-app update already does it. The installer is a 32-bit program, so its PowerShell
   ; cannot read the path of a 64-bit process through Get-Process; Win32_Process gives it.
   ; What is still running from the install folder afterwards goes to the log, so a folder held open can be traced.
-  nsExec::ExecToStack `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$f = '$INSTDIR\'; $$q = { @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }) }; for ($$i = 0; $$i -lt 20; $$i++) { $$p = & $$q; if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }; $$left = & $$q; if ($$left.Count) { 'still running from the install folder: ' + (($$left | ForEach-Object { $$_.Name + ' ' + $$_.ProcessId }) -join ', ') } else { 'nothing is left running from the install folder' }"`
+  ; The folder goes in through an environment variable, never inside the script text, so a path such as
+  ; D:\O'Brien\Rex Desk cannot break the quoting. The PowerShell started below inherits it. Each lookup is wrapped in @()
+  ; again where it is used: a single process comes back unwrapped, and its Count reads as nothing, so it was skipped.
+  System::Call 'kernel32::SetEnvironmentVariableW(w "REX_INSTALL_DIR", w "$INSTDIR\")'
+  nsExec::ExecToStack `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$f = $$env:REX_INSTALL_DIR;$$q = { @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }) }; for ($$i = 0; $$i -lt 20; $$i++) { $$p = @(& $$q); if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }; $$left = @(& $$q); if ($$left.Count) { 'still running from the install folder: ' + (($$left | ForEach-Object { $$_.Name + ' ' + $$_.ProcessId }) -join ', ') } else { 'nothing is left running from the install folder' }"`
   Pop $RexOk
   Pop $RexErr
   ${Do}

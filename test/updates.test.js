@@ -169,7 +169,15 @@ test('an update that did not take is told on the next start with only what is kn
   settings('0.3.0'); write(path.join(folder, 'install-update.log'), '2026-11-25T10:00:00 server: installing 0.3.0\r\n');
   let failed = open('0.2.0').status().installFailed;
   assert.equal(failed.version, '0.3.0'); assert.equal(failed.installer, installerFile);
-  assert.equal(failed.why, 'not-started'); assert.match(failed.reason, /^The installer did not start\. Press Install manually/);
+  // Only "installing" in the log: logging is best effort, so a missing line is no proof the installer never started.
+  assert.equal(failed.why, 'not-installed'); assert.equal(failed.reason, 'The update did not install. Press Install manually to run the installer yourself.');
+  write(path.join(folder, 'install-update.log'), '');
+  assert.equal(open('0.2.0').status().installFailed.why, 'not-installed', 'an empty log claims nothing');
+  rmSync(path.join(folder, 'install-update.log'));
+  assert.equal(open('0.2.0').status().installFailed.why, 'not-installed', 'no log at all claims nothing');
+  write(path.join(folder, 'install-update.log'), 'x server: installing 0.3.0\r\nx server: the installer did not start: spawn EPERM\r\n');
+  failed = open('0.2.0').status().installFailed;
+  assert.equal(failed.why, 'not-started', 'the recorded launch error is said'); assert.match(failed.reason, /^The installer did not start\. Press Install manually/);
   write(path.join(folder, 'install-update.log'), 'x server: the server started the installer (process 1)\r\n');
   failed = open('0.2.0').status().installFailed;
   assert.equal(failed.why, 'not-installed'); assert.equal(failed.stopped, '');
@@ -249,4 +257,14 @@ test('Install manually shows the installer selected in a visible Explorer window
   // An installer outside the updates folder is never shown.
   windows.state.installFailed = { installer: path.join(data, 'elsewhere.exe') }; write(path.join(data, 'elsewhere.exe'), 'x');
   assert.throws(() => windows.reveal(), /not in the updates folder/);
+});
+
+test('Windows installer: the install folder reaches PowerShell through an environment variable, and one leftover process is still counted', async () => {
+  const { readFileSync: read } = await import('node:fs');
+  const hooks = read(new URL('../desktop/src-tauri/windows/hooks.nsh', import.meta.url), 'utf8');
+  const command = hooks.match(/nsExec::ExecToStack `(powershell\.exe[^`]+)`/)[1];
+  assert.doesNotMatch(command, /\$INSTDIR/, "the path is never inside the script text, so D:\O'Brien\Rex Desk cannot break its quotes");
+  assert.match(command, /\$\$f = \$\$env:REX_INSTALL_DIR;/);
+  assert.match(hooks, /SetEnvironmentVariableW\(w "REX_INSTALL_DIR", w "\$INSTDIR\\"\)'\r?\n\s*nsExec::ExecToStack `powershell/);
+  assert.match(command, /\$\$p = @\(& \$\$q\);/); assert.match(command, /\$\$left = @\(& \$\$q\);/);
 });

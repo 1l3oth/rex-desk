@@ -2,6 +2,10 @@ import { t } from './i18n.js';
 // The card that tells the person a new version is downloaded and checked. Nothing installs until they press Update now;
 // Later hides the card for a day, and the button in Settings stays.
 const LATER = 'rex-desk-update-later', SHOWN = 4;
+// The folder of an installer that Explorer could not open, kept for the card's version until the card is dismissed or a
+// later Install manually opens it: a card refresh (every few seconds) must not take the path away while the person reads it.
+let revealFailed = null, lastFailed = null;
+export const revealNote = version => revealFailed?.version === version ? revealFailed.text : '';
 const laterChoice = () => { try { return JSON.parse(localStorage.getItem(LATER) || '{}'); } catch { return {}; } };
 const ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/></svg>';
 const CLOSE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
@@ -63,7 +67,8 @@ const who = names => names.length === 1 ? names[0] : names.length === 2 ? t`${na
 function renderFoot(card, update) {
   const foot = card.querySelector('.uc-foot'), error = card.querySelector('.uc-error');
   if (card.dataset.failed === 'true' && update.installFailed) {
-    error.textContent = failedText(update.installFailed); error.hidden = false;
+    lastFailed = update.installFailed;
+    error.textContent = revealNote(card.dataset.version) || failedText(update.installFailed); error.hidden = false;
     const key = `failed#${update.ready ? 1 : 0}`;
     if (foot.dataset.key !== key) {
       foot.dataset.key = key;
@@ -129,6 +134,7 @@ export function updateShow(update) {
 export function updateLater() {
   const card = document.getElementById('update-card'); if (!card) return;
   try { localStorage.setItem(LATER, JSON.stringify({ version: card.dataset.version, until: Date.now() + 24 * 3600000 })); } catch { /* private window */ }
+  revealFailed = null;
   card.remove();
 }
 
@@ -149,7 +155,13 @@ export async function revealInstaller(api) {
   const hint = document.querySelector('#update-card .uc-hint');
   try {
     const shown = await api('/update/reveal', { method: 'POST' });
-    if (shown?.opened === false) { if (error) { error.textContent = t`Rex Desk could not open the folder. Open it yourself: ${shown.folder}`; error.hidden = false; } return; }
+    const version = document.getElementById('update-card')?.dataset.version || '';
+    if (shown?.opened === false) {
+      revealFailed = { version, text: t`Rex Desk could not open the folder. Open it yourself: ${shown.folder}` };
+      if (error) { error.textContent = revealFailed.text; error.hidden = false; }
+      return;
+    }
+    if (revealFailed) { revealFailed = null; if (error && document.getElementById('update-card')?.dataset.failed === 'true') error.textContent = failedText(lastFailed || {}); }
     if (hint) hint.textContent = `${t('The installer is selected in the window that opened. Double-click it to run it.')} ${t('Running the installer closes Rex Desk, so let working agents finish first.')}`;
   } catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }

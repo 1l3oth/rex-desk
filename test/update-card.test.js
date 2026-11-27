@@ -24,3 +24,22 @@ test('the update card has a state for an install antivirus blocked, with a butto
   assert.match(code, /did not install/); assert.match(code, /data-action="update-reveal"/); assert.match(code, /api\('\/update\/reveal'/);
   assert.match(chat, /'update-reveal'\) await revealInstaller\(api\)/);
 });
+
+test('the folder path after Explorer could not open stays on the card until it is dismissed or Install manually works', async () => {
+  const { revealInstaller, revealNote, updateLater } = await import('../public/chat-update.js');
+  const error = { textContent: '', hidden: true }, hint = { textContent: '' };
+  const card = { dataset: { version: '0.3.0', failed: 'true' }, removed: false, remove() { this.removed = true; } };
+  const saved = globalThis.document;
+  globalThis.document = { querySelector: q => q.endsWith('.uc-error') ? error : q.endsWith('.uc-hint') ? hint : null, getElementById: () => (card.removed ? null : card) };
+  try {
+    await revealInstaller(async () => ({ opened: false, folder: String.raw`D:\O'Brien\Rex Desk\updates` }));
+    assert.equal(error.textContent, String.raw`Rex Desk could not open the folder. Open it yourself: D:\O'Brien\Rex Desk\updates`);
+    assert.equal(revealNote('0.3.0'), error.textContent, 'kept for this version, so a card refresh shows it again');
+    assert.equal(revealNote('0.4.0'), '', 'not for another version');
+    await revealInstaller(async () => ({ opened: true }));
+    assert.equal(revealNote('0.3.0'), '', 'a retry that opened the folder clears it');
+    await revealInstaller(async () => ({ opened: false, folder: 'D:/x' }));
+    updateLater();
+    assert.equal(revealNote('0.3.0'), '', 'dismissing the card clears it');
+  } finally { globalThis.document = saved; }
+});

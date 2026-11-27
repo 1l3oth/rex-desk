@@ -99,8 +99,8 @@ export class Updates {
     this.state.installFailed = this.lastInstall();
   }
   // The last install this copy started (install-update.json names its version). Still on an older version now means it did not
-  // take. Only what is known is said: the installer is gone, it never started, or it stopped and its own log line says why
-  // (the installer writes each step and its stop reason to install-update.log). No cause is guessed. A finished install (this
+  // take. Only what is known is said: the installer is gone, its launch failed (the server wrote the error), or it stopped
+  // and its own log line says why (the installer writes each step and its stop reason to install-update.log). No cause is guessed. A finished install (this
   // copy is that version or newer) is forgotten.
   // why: gone, not-started or not-installed, for the card to say it in the person's language; stopped: the installer's own reason.
   lastInstall() {
@@ -111,7 +111,8 @@ export class Updates {
     let log = ''; try { log = readFileSync(path.join(this.directory, 'install-update.log'), 'utf8'); } catch { /* never written */ }
     const installer = String(settings.installer || ''), gone = !installer || !existsSync(installer);
     const stopped = (log.match(/installer: stopped: (.+)/g) || []).at(-1)?.replace(/^installer: stopped: /, '').trim() || '';
-    const why = gone ? 'gone' : !/started the installer/.test(log) ? 'not-started' : 'not-installed';
+    // The log is best effort, so a missing line proves nothing: "did not start" only when the launch error was written.
+    const why = gone ? 'gone' : !stopped && /server: the installer did not start:/.test(log) ? 'not-started' : 'not-installed';
     const reason = why === 'gone' ? 'The downloaded installer is gone, so the update could not run. Check for updates to download it again.'
       : why === 'not-started' ? 'The installer did not start. Press Install manually to run it yourself.'
         : stopped ? `The installer stopped: ${stopped}` : 'The update did not install. Press Install manually to run the installer yourself.';
