@@ -22,8 +22,9 @@ export function agyCommand(env = process.env) {
 }
 
 // The Rex Desk tools reach agy through its own MCP list (it ignores servers handed over in the session), installed once from Setup.
-export function antigravityMcpInstalled(home = os.homedir()) {
-  try { return Boolean(JSON.parse(readFileSync(path.join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8')).mcpServers?.rex_desk); } catch { return false; }
+export function antigravityMcpInstalled(home = os.homedir(), profile = '') {
+  const geminiDir = profile ? path.join(profile, '.gemini') : path.join(home, '.gemini');
+  try { return Boolean(JSON.parse(readFileSync(path.join(geminiDir, 'config', 'mcp_config.json'), 'utf8')).mcpServers?.rex_desk); } catch { return false; }
 }
 
 // Signed in when agy can list the account's models; the list is the proof, nothing is read from the sign-in itself.
