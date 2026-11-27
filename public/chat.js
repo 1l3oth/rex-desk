@@ -3,7 +3,7 @@ import './layers.js';
 import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
-import { agentListHtml, agentToolsHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter, stateChipsHtml } from '/chat-sidebar.js';
+import { agentListHtml, agentToolsHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter, stateChipsHtml, filtering as agentFiltering } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { sideTabsHtml, crewHtml, savedSideTab, saveSideTab } from '/chat-sidetabs.js';
@@ -185,7 +185,8 @@ const iconAv = (name, tone = '') => `<span class="av sm icon ${tone}">${SVG[name
 const withDot = (avatar, dot) => `<span class="avwrap">${avatar}${dot ? `<span class="sdot ${dot}"></span>` : ''}</span>`;
 const collapsed = (() => { try { return new Set(JSON.parse(localStorage.getItem('rex-desk-collapsed') || '[]')); } catch { return new Set(); } })();
 function section(key, title, count, extra, body) {
-  const shut = collapsed.has(key);
+  // A search or state filter on the agents opens a folded Agents section too, without changing what is saved.
+  const shut = collapsed.has(key) && !(key === 'agents' && agentFiltering(ui));
   return `<div class="sec ${shut ? 'shut' : ''}"><div class="sec-head"><button type="button" class="sec-toggle" data-action="sec-toggle" data-sec="${key}" aria-expanded="${!shut}"><span class="chev" aria-hidden="true">▾</span>${esc(title)}${count !== '' ? `<span class="cnt">${count}</span>` : ''}</button>${extra}</div>${shut ? '' : `<div class="sec-body">${body}</div>`}</div>`;
 }
 function toggleSection(key) { if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); try { localStorage.setItem('rex-desk-collapsed', JSON.stringify([...collapsed])); } catch { /* private window */ } renderAll(); }

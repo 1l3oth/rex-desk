@@ -87,3 +87,22 @@ test('search and the state filter sit as two small icons in the Agents header an
   assert.match(chat, /title="\$\{esc\(label\)\}" aria-label=/, 'places are icons with their name in the tooltip');
   assert.match(read('glass.css'), /\.sec-add\{[^}]*background:var\(--accent\)/, 'the add button is the primary colour');
 });
+
+test('a search or state filter shows matching agents inside folded teams, and clearing it folds them back unchanged (0.0.135 review)', async () => {
+  const { agentListHtml } = await import('../public/chat-sidebar.js');
+  const esc = value => String(value ?? '');
+  const agents = [{ id: 'a', name: 'Writer', projectSlug: 'site', status: { state: 'idle' } }, { id: 'b', name: 'Tester', projectSlug: 'site', status: { state: 'idle' } }, { id: 'c', name: 'Planner', status: { state: 'idle' } }];
+  const saved = new Set(['team-site', 'team-none']), asked = [];
+  const html = ui => agentListHtml({ ui: { snap: {}, ...ui }, esc, isCollapsed: key => { asked.push(key); return saved.has(key); } }, agents, agent => agent.name, agent => agent.id === 'b' ? 'stopped' : '');
+  assert.doesNotMatch(html({}), /Writer|Planner/, 'folded teams hide their agents');
+  for (const ui of [{ agentFilter: 'writ' }, { agentState: 'stopped' }]) {
+    const out = html(ui);
+    assert.match(out, /Writer/, `${JSON.stringify(ui)}: the folded team shows its agents`);
+    assert.match(out, /data-sec="team-site" aria-expanded="true"/);
+  }
+  assert.doesNotMatch(html({ agentFilter: '' }), /Writer/, 'cleared: folded again');
+  assert.deepEqual([...saved], ['team-site', 'team-none'], 'the saved folds are untouched');
+  const sidebar = readFileSync(new URL('../public/chat-sidebar.js', import.meta.url), 'utf8');
+  assert.match(sidebar, /if \(was !== filtering\(ctx\.ui\)\) \{ ctx\.ui\.filterFocused = true; ctx\.renderAll\(\); \}/, 'the first letter typed draws the list again');
+  assert.match(readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8'), /collapsed\.has\(key\) && !\(key === 'agents' && agentFiltering\(ui\)\)/);
+});

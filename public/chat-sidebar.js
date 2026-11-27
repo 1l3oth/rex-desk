@@ -19,8 +19,12 @@ const rowHtml = (ctx, kind, item, inner, pinned, search = '', state = '') => {
   return `<div class="drag-row${pinned ? ' pinned' : ''}" draggable="true" data-drag-kind="${kind}" data-drag-id="${esc(item.id)}" data-search="${esc(search.toLowerCase())}"${kind === 'agents' ? ` data-state="${state}"` : ''}>${inner}`
     + `<button type="button" class="pin-btn${pinned ? ' on' : ''}" data-action="pin-toggle" data-kind="${kind}" data-id="${esc(item.id)}" title="${pinned ? t('Unpin') : t('Pin to the top')}" aria-label="${pinned ? t`Unpin ${esc(item.name)}` : t`Pin ${esc(item.name)} to the top`}" aria-pressed="${pinned}">${PIN}</button></div>`;
 };
+// While a search or state filter is on, folded teams open so a match inside one shows; the saved fold is not changed, so
+// clearing the filter brings each team back as it was (0.0.135 review).
+export const filtering = ui => Boolean(ui?.agentFilter || ui?.agentState);
+const folded = (ctx, key) => !(key.startsWith('team-') || key === 'agents-away') || !filtering(ctx.ui) ? Boolean(ctx.isCollapsed?.(key)) : false;
 const subhead = (ctx, key, title, count, foldable) => {
-  const shut = foldable && ctx.isCollapsed?.(key);
+  const shut = foldable && folded(ctx, key);
   return `<button type="button" class="sub-sec${shut ? ' shut' : ''}" ${foldable ? `data-action="sec-toggle" data-sec="${key}" aria-expanded="${!shut}"` : 'tabindex="-1"'} data-drop-pin="${key === 'pinned-agents' || key === 'pinned-rooms' ? 'yes' : ''}">${foldable ? '<span class="chev" aria-hidden="true">▾</span>' : ''}${title}<span class="cnt">${count}</span></button>`;
 };
 
@@ -59,9 +63,9 @@ export function agentListHtml(ctx, agents, inner, stateOf = () => '') {
   const filter = box + (statesOpen(ui) ? stateChipsHtml(ctx, agents.map(stateOf)) : '');
   return filter
     + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
-    + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${ctx.isCollapsed?.(key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
+    + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${folded(ctx, key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
     + (filter ? `<p class="rail-empty rail-none" hidden>${t`No agents match.`} <button type="button" class="rail-clear" data-rail-clear>${t`Clear`}</button></p>` : '')
-    + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
+    + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${folded(ctx, 'agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
 }
 
 export function roomListHtml(ctx, rooms, inner) {
@@ -158,7 +162,10 @@ export function initSidebarDrag(ctx) {
   document.addEventListener('focusin', event => { ctx.ui.filterFocused = Boolean(event.target.closest?.('[data-rail-filter]')); });
   document.addEventListener('input', event => {
     const box = event.target.closest?.('[data-rail-filter]'); if (!box) return;
-    ctx.ui.agentFilter = box.value; applyFilter(document, box.value, ctx.ui.agentState);
+    // Typing the first letter or clearing the last one draws the list again, so folded teams open while searching and fold back
+    // after; the box keeps the cursor (filterFocused).
+    const was = filtering(ctx.ui); ctx.ui.agentFilter = box.value;
+    if (was !== filtering(ctx.ui)) { ctx.ui.filterFocused = true; ctx.renderAll(); } else applyFilter(document, box.value, ctx.ui.agentState);
   });
   // The search and filter icons in the Agents header open and close their row; an open search box takes the cursor, and
   // closing one that is in use clears it, so nothing stays filtered out of sight.
