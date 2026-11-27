@@ -525,6 +525,16 @@ html.has-win-bar .rail-bell{display:none}
 /* A team with no agent left under the filter hides its heading too. */
 .sub-sec[hidden]{display:none}
 @media (max-width:900px){.win-search span{display:none}.win-search{width:auto}}
+/* A narrow window keeps the bar on one line: only search shrinks, and the window buttons never get pushed off the edge. */
+.win-bar{min-width:0;white-space:nowrap}
+.win-bar .win-brand,.win-bar .win-btn,.win-bell,.win-update,.win-working,.win-bar .solid-box.compact{flex:none}
+.win-bar .win-brand b{white-space:nowrap}
+.win-search{flex:0 1 auto;min-width:32px;overflow:hidden}
+.win-fill{min-width:0}
+/* 760 px and below: no slider (it stays in Settings, General) and no Ctrl K hint; search is a 32 px icon. */
+@media (max-width:760px){.win-bar .solid-box.compact,.win-search kbd{display:none}.win-search{width:32px;padding:0;justify-content:center}}
+/* 600 px and below: the Update and working words hide but stay readable to screen readers; dot, icon and tooltip remain. */
+@media (max-width:600px){.win-update,.win-working{position:relative;padding:0 9px}.win-update span,.win-working span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 
 /* ===== Jump to anything (Ctrl+K). ===== */
 .cp-back{position:fixed;inset:0;z-index:95;display:flex;justify-content:center;align-items:flex-start;padding-top:min(14vh,140px);background:rgba(6,9,16,.35)}
