@@ -259,33 +259,41 @@ test('Install manually shows the installer selected in a visible Explorer window
   assert.throws(() => windows.reveal(), /not in the updates folder/);
 });
 
-test('Windows installer: the install folder reaches PowerShell through an environment variable, and one leftover process is still counted', async () => {
+// The command that closes programs in the install folder, as the installer runs it ($$ in NSIS is one $).
+const closeCommand = async () => {
   const { readFileSync: read } = await import('node:fs');
   const hooks = read(new URL('../desktop/src-tauri/windows/hooks.nsh', import.meta.url), 'utf8');
-  const written = hooks.split(/\r?\n/).filter(line => /^\s*FileWrite \$RexFile `/.test(line));
-  const script = written.map(line => line.replace(/^\s*FileWrite \$RexFile `/, '').replace(/\$\\r\$\\n`$/, '')).join('\n');
-  assert.equal(written.length, 9);
-  for (const line of written) assert.ok(line.trim().length < 1000, 'one NSIS string holds at most 1024 characters, so no line may be cut short');
-  assert.doesNotMatch(script, /\$INSTDIR/, String.raw`the path is never inside the script text, so D:\O'Brien\Rex Desk cannot break its quotes`);
-  assert.match(hooks, /nsExec::ExecToStack `powershell\.exe -NoProfile -ExecutionPolicy Bypass -File "\$PLUGINSDIR\\rex-close\.ps1"`/);
-  assert.match(script, /\$\$p = @\(& \$\$q\);/); assert.match(script, /\$\$left = @\(& \$\$q\)/);
+  const found = hooks.match(/nsExec::ExecToStack `(powershell\.exe -NoProfile -Command "([^"`]*)")`/);
+  assert.ok(found, 'one fixed -Command, run from memory');
+  return { hooks, full: found[1].replaceAll('$$', '$'), script: found[2].replaceAll('$$', '$') };
+};
+
+test('Windows installer: the folder reaches PowerShell only through REX_INSTALL_DIR, the command fits one NSIS string, and no script file is used', async () => {
+  const { hooks, full, script } = await closeCommand();
+  assert.ok(full.length < 950, `one NSIS string holds at most 1024 characters, so the command is never cut short (${full.length})`);
+  assert.doesNotMatch(script, /INSTDIR|PLUGINSDIR/, String.raw`the path is never inside the script text, so D:\O'Brien\Rex Desk cannot break its quotes`);
+  assert.doesNotMatch(hooks, /rex-close\.ps1|-File "|FileWrite \$RexFile `/, 'no script file on disk that could change before PowerShell reads it');
+  assert.match(script, /^\$f=\(\[string\]\$env:REX_INSTALL_DIR\)\.Trim\(\);/);
+  assert.match(script, /\$p=@\(&\$q\);/); assert.match(script, /\$l=@\(&\$q\);/);
 });
 
-test('Windows installer: an empty, unset or drive-root folder stops no program, and only programs inside the folder match', async () => {
-  const { readFileSync: read } = await import('node:fs');
-  const hooks = read(new URL('../desktop/src-tauri/windows/hooks.nsh', import.meta.url), 'utf8');
+test('Windows installer: an empty, unset or drive-root folder stops no program, only programs inside the folder match, and each is stopped through its own handle', async () => {
+  const { hooks, script } = await closeCommand();
   const block = hooks.slice(hooks.indexOf('StrLen $RexT1 "$INSTDIR"'), hooks.indexOf('nsExec::ExecToStack `powershell.exe'));
   // The installer: a short folder (empty or a drive root) or a variable that did not read back as written skips the step.
   assert.match(block, /\$\{If\} \$RexT1 <= 3/);
   assert.match(block, /SetEnvironmentVariableW\(w "REX_INSTALL_DIR", w "\$INSTDIR\\"\) i \.s'\r?\n\s*Pop \$RexResult\r?\n\s*ReadEnvStr \$RexT2 REX_INSTALL_DIR/);
   assert.match(block, /\$\{If\} \$RexResult == 0\r?\n\s*\$\{OrIf\} \$RexT2 != "\$INSTDIR\\"/);
   assert.match(hooks, /\$\{If\} \$RexOk != ""\r?\n\s*!insertmacro RexNote "skipped closing programs, nothing was stopped: \$RexOk"\r?\n\s*\$\{Else\}\r?\n\s*nsExec::ExecToStack/);
-  // The script itself: every check comes before any program is listed, each one exits, and the match is plain text on "<folder>\".
-  const script = block.split(/\r?\n/).filter(line => /^\s*FileWrite \$RexFile `/.test(line)).join('\n');
+  // The command: every check comes before any program is listed, each one exits, and the match is plain text on "<folder>\".
   const list = script.indexOf('Get-CimInstance');
-  for (const check of [/-notmatch '\^\[A-Za-z\]:\\\\\[\^\\\\\]'/, /GetFullPath/, /GetPathRoot/]) { const at = script.search(check); assert.ok(at > 0 && at < list, String(check)); }
+  for (const check of ["-notmatch '^[A-Za-z]:\\\\[^\\\\]'", 'GetFullPath', 'GetPathRoot']) { const at = script.indexOf(check); assert.ok(at > 0 && at < list, check); }
   assert.equal((script.slice(0, list).match(/exit 3/g) || []).length, 3);
-  assert.match(script, /\$\$f = \$\$f \+ '\\'/);
-  assert.match(script, /ExecutablePath\.StartsWith\(\$\$f, \[StringComparison\]::OrdinalIgnoreCase\)/);
-  assert.doesNotMatch(script, /ExecutablePath -like|ExecutablePath -match|-Filter/, 'no wildcard or pattern match on the path');
+  assert.match(script, /\$f\+='\\';\$q=/);
+  assert.match(script, /\$_\.ExecutablePath\.StartsWith\(\$f,'OrdinalIgnoreCase'\)/);
+  assert.doesNotMatch(script, /-like|-Filter|Stop-Process/, 'no wildcard match, and no stop by process ID');
+  // A process is held open first (its ID cannot go to another program while the handle is open), its path is checked
+  // again under that ID, and Kill goes through that same handle.
+  assert.match(script, /\$h=\[Diagnostics\.Process\]::GetProcessById\(\$c\.ProcessId\);\$null=\$h\.Handle;if\(@\(&\$q\|\?\{\$_\.ProcessId -eq \$c\.ProcessId\}\)\.Count\)\{\$h\.Kill\(\)\}/);
 });
+

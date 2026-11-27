@@ -246,9 +246,11 @@ FunctionEnd
   ; cannot read the path of a 64-bit process through Get-Process; Win32_Process gives it.
   ; What is still running from the install folder afterwards goes to the log, so a folder held open can be traced.
   ; The folder goes in through an environment variable, never inside the script text, so a path such as
-  ; D:\O'Brien\Rex Desk cannot break the quoting. The script is a file written line by line: one NSIS string holds at
-  ; most 1024 characters, so a longer -Command was cut short. Each lookup is wrapped in @() again where it is used: a
-  ; single process comes back unwrapped, and its Count reads as nothing, so it was skipped.
+  ; D:\O'Brien\Rex Desk cannot break the quoting. The script is fixed text run from memory, no file on disk that could
+  ; change before PowerShell reads it. One NSIS string holds at most 1024 characters, so it is kept short (a test checks
+  ; it). Each lookup is wrapped in @(): a single process comes back unwrapped, and its Count reads as nothing.
+  ; A program is stopped only through an open handle: the handle is opened first, which keeps Windows from giving its
+  ; process ID to another program, then its path is checked again under that ID, and Kill uses that same handle.
   ; An empty folder would match every program on the computer, so nothing is listed or stopped unless the folder is a
   ; real folder below a drive and the variable reads back exactly as written. The script checks it again itself (empty,
   ; unset, relative or a drive root stops nothing) and only matches programs inside "<folder>\", so a sibling such as
@@ -266,28 +268,10 @@ FunctionEnd
       StrCpy $RexOk "the install folder could not be handed to PowerShell"
     ${EndIf}
   ${EndIf}
-  ${If} $RexOk == ""
-    InitPluginsDir
-    ClearErrors
-    FileOpen $RexFile "$PLUGINSDIR\rex-close.ps1" w
-    FileWrite $RexFile `$$f = ([string]$$env:REX_INSTALL_DIR).Trim()$\r$\n`
-    FileWrite $RexFile `if ($$f -notmatch '^[A-Za-z]:\\[^\\]' -and $$f -notmatch '^\\\\[^\\]+\\[^\\]+\\[^\\]') { 'skipped closing programs, nothing was stopped: the install folder is empty, relative or a drive root'; exit 3 }$\r$\n`
-    FileWrite $RexFile `try { $$f = [IO.Path]::GetFullPath($$f).TrimEnd('\') } catch { 'skipped closing programs, nothing was stopped: the install folder is not a valid path'; exit 3 }$\r$\n`
-    FileWrite $RexFile `if ($$f.Length -le 3 -or [IO.Path]::GetPathRoot($$f).TrimEnd('\') -eq $$f) { 'skipped closing programs, nothing was stopped: the install folder is a drive root'; exit 3 }$\r$\n`
-    FileWrite $RexFile `$$f = $$f + '\'$\r$\n`
-    FileWrite $RexFile `$$q = { @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }) }$\r$\n`
-    FileWrite $RexFile `for ($$i = 0; $$i -lt 20; $$i++) { $$p = @(& $$q); if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }$\r$\n`
-    FileWrite $RexFile `$$left = @(& $$q)$\r$\n`
-    FileWrite $RexFile `if ($$left.Count) { 'still running from the install folder: ' + (($$left | ForEach-Object { $$_.Name + ' ' + $$_.ProcessId }) -join ', ') } else { 'nothing is left running from the install folder' }$\r$\n`
-    FileClose $RexFile
-    ${If} ${Errors}
-      StrCpy $RexOk "the close script could not be written"
-    ${EndIf}
-  ${EndIf}
   ${If} $RexOk != ""
     !insertmacro RexNote "skipped closing programs, nothing was stopped: $RexOk"
   ${Else}
-  nsExec::ExecToStack `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\rex-close.ps1"`
+  nsExec::ExecToStack `powershell.exe -NoProfile -Command "$$f=([string]$$env:REX_INSTALL_DIR).Trim();$$s='skipped, nothing stopped: folder is ';if($$f -notmatch '^[A-Za-z]:\\[^\\]' -and $$f -notmatch '^\\\\[^\\]+\\[^\\]+\\[^\\]'){$$s+'empty, relative or a drive root';exit 3};try{$$f=[IO.Path]::GetFullPath($$f).TrimEnd('\')}catch{$$s+'not a valid path';exit 3};if($$f.Length -le 3 -or [IO.Path]::GetPathRoot($$f).TrimEnd('\') -eq $$f){$$s+'a drive root';exit 3};$$f+='\';$$q={@(Get-CimInstance Win32_Process|?{$$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f,'OrdinalIgnoreCase')})};for($$i=0;$$i -lt 20;$$i++){$$p=@(&$$q);if(!$$p.Count){break};foreach($$c in $$p){try{$$h=[Diagnostics.Process]::GetProcessById($$c.ProcessId);$$null=$$h.Handle;if(@(&$$q|?{$$_.ProcessId -eq $$c.ProcessId}).Count){$$h.Kill()}}catch{}};sleep -m 300};$$l=@(&$$q);if($$l.Count){'still running: '+(($$l|%{$$_.Name+' '+$$_.ProcessId})-join', ')}else{'nothing left running'}"`
   Pop $RexOk
   Pop $RexErr
   ${Do}
@@ -299,7 +283,7 @@ FunctionEnd
       ${Break}
     ${EndIf}
   ${Loop}
-  !insertmacro RexNote "closing Rex Desk (exit $RexOk): $RexErr"
+  !insertmacro RexNote "closing programs in the install folder (exit $RexOk): $RexErr"
   ${EndIf}
   ; A backup left by an install that never finished: when the new copy was checked and marked, only the clean-up was
   ; lost; otherwise the backup is the last copy that worked and goes back first.
