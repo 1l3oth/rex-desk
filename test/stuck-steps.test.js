@@ -316,3 +316,14 @@ test('a new message clears the guard stop, so the chat no longer shows Stopped (
     assert.match(chat, /: personal \? \(guardStopped\(run\) \? `<span class="chip warn">\$\{t\('Stopped'\)\}<\/span>` : ''\)/, "an agent's own chat shows the amber Stopped chip, and no chip otherwise");
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a guard stop reads Stopped in the profile, the sidebar and the phone chat list too, never Asleep beside it (L117 review)', () => {
+  const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
+  assert.match(chat, /const agentStopped = agent => Boolean\(agent\?\.runId\) && guardStopped\(/);
+  assert.match(chat, /const agentDot = \(state, agent\) => agentStopped\(agent\) \? 'warn'/, 'amber dot in the lists');
+  assert.match(chat, /if \(agentStopped\(agent\)\) return \[t\('Stopped'\), where\]/, 'the sidebar line');
+  assert.match(chat, /agentStopped\(agent\) \? t\('Stopped'\) : agent\.status\?\.label \|\| t\('Idle'\)/, 'the phone chat list');
+  assert.match(chat, /esc\(guardStopped\(run\) \? t\('Stopped'\) : agent\.status\?\.label \|\| stateLabel\(run\)\)/, 'the profile header');
+  // Every action the header hides for room is still in the More menu, with its words.
+  for (const action of ['app-on', 'chat-to-room', 'chat-info', 'handoff']) assert.match(chat, new RegExp(`hidden\\('${action}'\\)`), action);
+});

@@ -2883,5 +2883,6 @@
  "Hand off to a new chat": "ប្រគល់បន្តទៅការជជែកថ្មី",
  "The agent starts fresh and reads a summary of this chat.": "ភ្នាក់ងារចាប់ផ្ដើមថ្មី ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
  "Hand off now? The agent stops, and a new chat starts with your next message and reads a summary of this one.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារនឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
- "Hand off to a new chat? The agent starts fresh with your next message and reads a summary of this one.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។"
+ "Hand off to a new chat? The agent starts fresh with your next message and reads a summary of this one.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
+ "Start a meeting with this agent and others.": "ចាប់ផ្ដើមកិច្ចប្រជុំជាមួយភ្នាក់ងារនេះ និងភ្នាក់ងារផ្សេងទៀត។"
 }
