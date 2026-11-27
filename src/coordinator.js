@@ -32,7 +32,7 @@ import { promisify } from 'node:util';
 import { promptHints, currentBase } from './connectors.js';
 import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels, keepLines } from './store.js';
 import { Sources } from './providers.js';
-import { AgentProfiles, conversationHere, canonical as canonicalProfile } from './agents.js';
+import { AgentProfiles, conversationHere, codexThreadHere, canonical as canonicalProfile } from './agents.js';
 import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
 import { Files } from './files.js';
@@ -191,8 +191,8 @@ const LOOP_REST = 10 * 60000;
 // the new session introduce itself again instead of answering, so handoffs leave it out. The flag, not the words, marks it.
 const isGreeting = event => event.kind === 'human-message' && event.greeting === true;
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false, diskWatch = false } = {}) {
-    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false, diskWatch = false, threadHere } = {}) {
+    this.threadHere = threadHere; this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
     // The models on this computer (Ollama, LM Studio, Colibri…) are looked up a moment after start and every two minutes,
@@ -1011,7 +1011,7 @@ export class Desk {
           if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
           // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
           if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
-          if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
+          if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId, sessionAccount: this.store.get('run', runId)?.turnAccount || '' });
           // Steps kept getting cancelled: the runner stopped its own processes; the end of the turn starts a fresh chat.
           if (kind === 'steps-stuck') { this.patchRun(runId, { stepsStuck: true, ...(data.helpers?.length ? { helpers: data.helpers } : {}) }); this.store.event(runId, kind, data); return; }
           // The helpers (sub-agents, background jobs) of this turn still running: a fresh start waits for them or lists them (L117).
@@ -1629,7 +1629,27 @@ ${asked}` : STUCK_PROMPT;
     if (asks.length) parts.push(`Open in Needs you:\n${asks.join('\n')}`);
     return parts.length ? `## Facts from Rex Desk (read from git and the task list when this was written)\n${parts.join('\n\n')}` : '';
   }
-  async freshStart(runId, { note = '', reason = '', notice = '' } = {}) {
+  // Why a chat's session cannot be reopened, as the fresh start to make instead, or null when it can. A Claude conversation
+  // started on another computer is not here. A Codex thread lives in one account's CODEX_HOME only: after the person (or the
+  // usage-limit switch) moves the agent to another Codex account, or back, that account has no rollout for it and Codex
+  // answers "no rollout found for thread id". The chat then goes on in a fresh thread that reads a handoff of this chat, so the
+  // message is kept and the agent still knows what was said. Claude accounts copy the conversation over instead (carrySession).
+  sessionAway(run, provider) {
+    if (run.provider !== provider || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || ''))) return null;
+    if (provider === 'claude') return !this.runnerFactory && !conversationHere(run.sessionId)
+      ? { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' } : null;
+    if (provider !== 'codex') return null;
+    const here = this.threadHere || (this.runnerFactory ? null : codexThreadHere); if (!here) return null;
+    const account = this.usesLocalModel(run) ? '' : this.agents.use('codex', this.accountFor(run)) || '';
+    if (here(run.sessionId, account)) return null;
+    // Chats from before sessionAccount was kept: moved when another Codex account on this computer holds the thread.
+    const others = () => { try { return ['', ...this.agents.profiles('codex').map(item => item.profile)].filter(item => canonicalProfile(item || '') !== canonicalProfile(account)); } catch { return []; } };
+    const moved = run.sessionAccount !== undefined ? canonicalProfile(run.sessionAccount || '') !== canonicalProfile(account) : others().some(item => here(run.sessionId, item));
+    return moved
+      ? { why: 'codex-account', reason: 'because the chat moved to another Codex account, which keeps its own history', notice: 'This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.' }
+      : { why: 'codex-missing', reason: 'because Codex could not find its earlier conversation on this account', notice: 'Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.' };
+  }
+  async freshStart(runId, { note = '', reason = '', notice = '', why = '' } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('This conversation lives in another app.');
     // Helpers (sub-agents, background jobs) still running are named in the handoff with where their output goes, so the fresh
@@ -1652,8 +1672,8 @@ ${asked}` : STUCK_PROMPT;
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     if (agentId) this.distillHandoff(agentId, { note, task, lines, file });
-    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, helpers: undefined, stuckStopped: undefined, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
-    this.store.event(runId, 'chat-cleared', { text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
+    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, helpers: undefined, stuckStopped: undefined, sessionId: undefined, sessionAccount: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.store.event(runId, 'chat-cleared', { ...(why ? { why } : {}), text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
@@ -2097,14 +2117,15 @@ ${asked}` : STUCK_PROMPT;
       prompt = [...(run.queued || []), String(prompt).trim()].filter(Boolean).join('\n'); silent = true;
       this.patchRun(runId, { queued: [], freshRetry: undefined, freshBatch: [prompt], ...this.sentMark(runId, sendId) }); run = this.run(runId);
     }
-    if (starting || (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId))) {
+    const away = starting ? null : this.sessionAway(run, provider);
+    if (starting || away) {
       if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(starting ? { queued: true } : {}) }, true);
       if (starting) { if (String(prompt).trim()) this.patchRun(runId, { queued: [...(this.run(runId).queued || []), String(prompt).trim()], ...this.sentMark(runId, sendId) }); return this.run(runId); }
       (this.starting ||= new Set()).add(runId);
       // The message waits on the run itself (freshBatch) until the agent is queued with it, not only in memory: a Rex Desk that
       // closes during the fresh start keeps it for a retry (keepFreshBatches).
       if (!run.freshBatch && String(prompt).trim()) this.patchRun(runId, { freshBatch: [String(prompt).trim()], ...this.sentMark(runId, sendId) });
-      void this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' })
+      void this.freshStart(runId, away)
         .then(() => { this.starting.delete(runId); return this.resume(runId, { prompt, targetBranch, execution, silent: true, roomTurn, greeting, telegram, ...picked }); })
         .catch(error => {
           // Nothing is dropped: the first message goes back in front of the ones that waited, ready for a retry.

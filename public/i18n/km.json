@@ -2904,5 +2904,7 @@
  "Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at {0}.": "គ្មានអ្វីនៅលើកុំព្យូទ័រនេះត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។",
  "To sign it out, press Sign out first.": "ដើម្បីចាកចេញពីវា សូមចុច ចាកចេញ ជាមុនសិន។",
  "Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at {0}. To sign out now, add this account again, then choose Sign out.": "បានដកចេញពី Rex Desk តែប៉ុណ្ណោះ។ គ្មានអ្វីត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។ ដើម្បីចាកចេញឥឡូវនេះ សូមបន្ថែមគណនីនេះម្ដងទៀត រួចជ្រើស ចាកចេញ។",
- "This account was removed from Rex Desk before. Its earlier folder was found at {0}, so it is back.": "គណនីនេះធ្លាប់ត្រូវបានដកចេញពី Rex Desk ពីមុន។ បានរកឃើញថតពីមុនរបស់វានៅ {0} ដូច្នេះវាត្រឡប់មកវិញហើយ។"
+ "This account was removed from Rex Desk before. Its earlier folder was found at {0}, so it is back.": "គណនីនេះធ្លាប់ត្រូវបានដកចេញពី Rex Desk ពីមុន។ បានរកឃើញថតពីមុនរបស់វានៅ {0} ដូច្នេះវាត្រឡប់មកវិញហើយ។",
+  "This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.": "ការជជែកនេះបានផ្លាស់ទៅគណនី Codex ផ្សេង ដែលរក្សាប្រវត្តិរបស់ខ្លួនដាច់ដោយឡែក។ វាបន្តក្នុងវគ្គថ្មី ដែលអានសេចក្តីសង្ខេបនៃការជជែកនេះជាមុនសិន។",
+  "Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.": "Codex រកមិនឃើញការសន្ទនាមុននៅលើគណនីនេះទេ។ វាបន្តក្នុងវគ្គថ្មី ដែលអានសេចក្តីសង្ខេបនៃការជជែកនេះជាមុនសិន។"
 }

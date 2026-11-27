@@ -161,6 +161,20 @@ export function conversationHere(sessionId, { roots = { home, appData }, profile
   return false;
 }
 
+// Whether a Codex thread can be reopened on this account. Each Codex account (CODEX_HOME) keeps its own threads: the rollout
+// file under sessions/YYYY/MM/DD and Codex's own thread databases beside it. A chat that moved to another account, or back,
+// finds no rollout there ("no rollout found for thread id"), so it starts a fresh thread with a handoff instead. Nothing is
+// copied into any account: copying the rollout alone would leave Codex's databases without it. Only names are read.
+export function codexThreadHere(threadId, codexHome = '', { roots = { home } } = {}) {
+  if (!threadId) return false;
+  const sessions = path.join(codexHome || path.join(roots.home, '.codex'), 'sessions'), tail = `-${String(threadId).toLowerCase()}.jsonl`;
+  const names = folder => { try { return readdirSync(folder, { withFileTypes: true }); } catch { return []; } };
+  for (const year of names(sessions)) if (year.isDirectory()) for (const month of names(path.join(sessions, year.name))) if (month.isDirectory())
+    for (const day of names(path.join(sessions, year.name, month.name))) if (day.isDirectory())
+      if (names(path.join(sessions, year.name, month.name, day.name)).some(file => file.isFile() && file.name.toLowerCase().endsWith(tail))) return true;
+  return false;
+}
+
 function capture(command, args, env, timeout) {
   return new Promise(resolve => {
     execFile(command, args, { env, windowsHide: true, timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) =>

@@ -238,7 +238,7 @@ function renderItems(items, run, live) {
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => attached.top + markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), uid: item.uid, time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
-      : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
+      : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(clearedText(item))}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'stuck' ? `<div class="stuck-note" role="status"><svg class="stuck-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg><span class="stuck-text">${t`This agent got stuck, so I stopped it. Your chat is kept.`}</span>${run.stuckStopped && !live ? `<button type="button" class="btn small" data-action="stuck-continue">${t`Continue working`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>${t`Needs attention`}</h4><div class="md">${markdown(item.text)}</div>${/is not installed|usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">${/is not installed/i.test(item.text) ? t`Install Claude Code` : t`Sign in again`}</button>` : ''}</div>`
@@ -283,7 +283,7 @@ function transcript(all, runId = '') {
   const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event])), subs = new Map();
   let lastSwitch = null;
   for (const event of events) {
-    if (event.kind === 'chat-cleared') { const item = { role: 'cleared', text: event.text, at: event.createdAt, earlier: hasEarlier, tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; continue; }
+    if (event.kind === 'chat-cleared') { const item = { role: 'cleared', text: event.text, why: event.why, at: event.createdAt, earlier: hasEarlier, tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; continue; }
     // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
     if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: t('Agent'), input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
@@ -612,11 +612,17 @@ function drawSide(html, extra = '') {
   side.className = `side${html ? ' on' : ''} ${extra}`.trim();
   const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.atTop ? 0 : keep.top;
 }
+// The fresh-start notes Rex Desk writes itself, in the person's language; any other note shows as it was written.
+function clearedText(event) {
+  if (event.why === 'codex-account') return t('This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.');
+  if (event.why === 'codex-missing') return t('Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.');
+  return event.text;
+}
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 // The message box names the AI the next message goes to: the one picked under the box, else the chat's own.
 function composerHint(run, working) {
   // Local AI runs through Claude Code: switching between them keeps the same conversation.
-  const picked = ui.providerPick?.[draftKey()], next = picked === 'local' ? 'claude' : picked || (run.provider === 'codex' ? 'claude' : run.provider);
+  const picked = ui.providerPick?.[draftKey()], next = picked === 'local' ? 'claude' : picked || run.provider || 'claude';
   const name = id => (id === 'claude' && (picked === 'local' || (!picked && String(run.model || '').startsWith('local:'))) ? t('Local AI') : provider(id));
   if (working) return t`Message ${name(run.provider)}…`;
   return next !== run.provider ? t`Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : t`Message ${name(next)}. It picks up where it left off…`;
