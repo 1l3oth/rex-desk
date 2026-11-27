@@ -260,17 +260,24 @@ try {
   const top = app.store.list('task').find(task => task.title === posts[0].title);
   await app.desk.startTask({ taskId: top.id, repositoryId: app.store.config().repositories[0].id });
   let question;
-  for (let attempt = 0; attempt < 120 && !question; attempt++) { question = app.store.list('interaction').find(item => item.state === 'pending'); if (!question) await new Promise(resolve => setTimeout(resolve, 250)); }
+  // Up to 2 minutes (it was 30 s and missed once on this laptop), stopping at once when the synthetic agent failed.
+  for (const askBy = Date.now() + 2 * 60000; Date.now() < askBy && !question && !failures.length;) { question = app.store.list('interaction').find(item => item.state === 'pending'); if (!question) await new Promise(resolve => setTimeout(resolve, 250)); }
+  assert.deepEqual(failures.map(error => error.message), []);
   assert.ok(question, 'The agent asked its question');
   app.desk.answer(question.id, { action: 'accept', content: { answer: 'Keep the current project selected' } });
+  // The run opens a browser, records video and runs the regression command: on a slow CI machine that took over the old 60 s,
+  // and the check failed with the run still 'running'. It waits up to 5 minutes for the run to settle, and stops at once when
+  // the synthetic agent itself failed; a run still working at the end fails with its last steps, so a real hang stays visible.
   let worker;
-  for (let attempt = 0; attempt < 200; attempt++) {
+  const settleBy = Date.now() + 5 * 60000;
+  while (Date.now() < settleBy) {
     worker = app.store.list('run').find(run => run.role === 'worker');
-    if (worker?.state === 'ready_for_review' || worker?.state === 'failed') break;
+    if (['ready_for_review', 'failed', 'stopped'].includes(worker?.state) || failures.length) break;
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   assert.deepEqual(failures.map(error => error.message), []);
-  assert.equal(worker.state, 'ready_for_review', worker.error);
+  const lastSteps = () => worker ? app.store.events(worker.id, { limit: 200 }).slice(-8).map(event => `${event.kind}${event.tool ? ` ${event.tool}` : ''}${event.text ? `: ${String(event.text).slice(0, 120)}` : ''}`).join('\n') : 'no worker run';
+  assert.equal(worker?.state, 'ready_for_review', `${worker?.error || `The run is still ${worker?.state || 'missing'} after 5 minutes.`}\nLast steps:\n${lastSteps()}`);
   assert.equal(await git(repository, ['branch', '--show-current']), 'develop');
   assert.ok(readFileSync(path.join(repository, 'page.html'), 'utf8').includes('Not fixed'), 'The person\'s own checkout is untouched');
   const artifacts = app.store.list('artifact').filter(artifact => artifact.runId === worker.id);
