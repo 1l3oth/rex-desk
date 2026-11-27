@@ -1,6 +1,6 @@
 import { AI_PROVIDERS, aiProvider, providerTitle, profileKey } from './codex.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -167,6 +167,22 @@ function capture(command, args, env, timeout) {
       resolve({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error }));
   });
 }
+// The conversation history each AI keeps inside a profile folder: kept when the account is removed (L123).
+const HISTORY = { claude: ['projects', 'history.jsonl', 'todos'], codex: ['sessions', 'archived_sessions', 'history.jsonl'] };
+// Every link (symlink or junction) under a folder, deepest first, without following any of them.
+function linksIn(folder) {
+  const found = [], walk = at => { for (const entry of readdirSync(at, { withFileTypes: true })) { const full = path.join(at, entry.name); if (entry.isSymbolicLink() || lstatSync(full).isSymbolicLink()) found.push(full); else if (entry.isDirectory()) walk(full); } };
+  walk(folder); return found.reverse();
+}
+// The same files with the same sizes (and links as links) in both places.
+function sameTree(from, to) {
+  const a = lstatSync(from), b = lstatSync(to);
+  if (a.isSymbolicLink() || b.isSymbolicLink()) return a.isSymbolicLink() && b.isSymbolicLink();
+  if (!a.isDirectory()) return !b.isDirectory() && a.size === b.size;
+  if (!b.isDirectory()) return false;
+  const there = new Set(readdirSync(to));
+  return readdirSync(from).every(entry => there.has(entry) && sameTree(path.join(from, entry), path.join(to, entry)));
+}
 export function parseClaudeStatus(output) {
   const start = output.indexOf('{');
   if (start < 0) return null;
@@ -181,7 +197,7 @@ export function parseClaudeStatus(output) {
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound } = {}) { this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound, files = {} } = {}) { this.files = { rm: rmSync, rename: renameSync, cp: cpSync, ...files }; this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // The OpenRouter key: the one saved in Settings (encrypted, shared with Jev), else OPENROUTER_API_KEY from the launch environment.
   openrouterKey() { const saved = this.store.get?.('secret', 'openrouter'); try { return saved ? this.store.decrypt(saved) : process.env.OPENROUTER_API_KEY || ''; } catch { return ''; } }
   withKey(provider, env) { return provider === 'openrouter' ? openrouterEnvironment(env, this.openrouterKey(), this.store.directory ? openrouterHome(this.store.directory) : '') : env; }
@@ -202,7 +218,7 @@ export class AgentProfiles {
   async alternative(provider, current) {
     if (provider === 'openrouter') return null;
     const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
-    for (const item of discoverProfiles(provider, { configured: current })) {
+    for (const item of this.profiles(provider, { configured: current })) {
       if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
       const status = await this.status(provider, item.profile, { refresh: true }).catch(() => null);
       if (status?.loggedIn) return { profile: item.profile, label: status.label, account: status.account, plan: status.plan };
@@ -244,7 +260,7 @@ export class AgentProfiles {
   }
   async overview({ refresh = false } = {}) {
     const providers = await Promise.all(AI_PROVIDERS.map(async provider => {
-      const selected = this.selected(provider), profiles = discoverProfiles(provider, { configured: selected });
+      const selected = this.selected(provider), profiles = this.profiles(provider, { configured: selected });
       const statuses = await Promise.all(profiles.map(item => this.status(provider, item.profile, { refresh })));
       // The same account signed in in two folders (Orca keeps its own copy of each sign-in) is one account: it shows once,
       // as the folder in use, otherwise the first one found (the person's own folders come before Orca's).
@@ -258,7 +274,7 @@ export class AgentProfiles {
       const savedMissing = Boolean(saved && typeof saved === 'string' && !directory(saved));
       return [provider, { selected, saved, savedMissing, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
         mcpEverywhere: profiles.every(item => this.mcpInstalled(provider, item.profile)),
-        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile), removable: this.removable(provider, item.profile) })).filter((item, index) => keep[index]) }];
+        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile), removable: this.removable(provider, item.profile), removeMode: this.removeMode(provider, item.profile) })).filter((item, index) => keep[index]) }];
     }));
     return Object.fromEntries(providers);
   }
@@ -379,17 +395,50 @@ export class AgentProfiles {
     const folder = path.join(roots.home, '.config', `${aiProvider(provider)}-${slug}`);
     if (existsSync(folder)) throw new Error(`There is already a profile called ${slug}.`);
     mkdirSync(folder, { recursive: true });
+    this.recordOwned(provider, folder);
     const shared = path.join(roots.home, '.config', 'claude-code-shared-history');
     if (provider === 'claude' && existsSync(shared)) { try { symlinkSync(shared, path.join(folder, 'projects'), 'junction'); } catch {} }
     return { profile: folder, label: profileLabel(provider, folder) };
   }
-  // A profile folder Rex Desk made itself (addProfile): ~/.config/<provider>-<name>, never the default ~/.claude, ~/.codex or
-  // ~/.gemini, never the shared conversation history, never a folder another tool made (Orca, ~/.claude-*).
-  removable(provider, profile, { roots = this.roots } = {}) {
+  // Rex Desk's own record of the profile folders it made (L123): the folder's real path and its file id, kept in the database.
+  // Remove deletes a folder only when this record proves Rex Desk made it; a name like ~/.config/claude-work proves nothing (another
+  // tool can make the same name).
+  ownedRecord() { try { return this.store.get?.('accounts', 'owned') || { id: 'owned', folders: {} }; } catch { return { id: 'owned', folders: {} }; } }
+  recordOwned(provider, folder) {
+    try {
+      const real = canonical(realpathSync.native(folder)), record = this.ownedRecord();
+      this.store.put?.('accounts', 'owned', { ...record, folders: { ...record.folders, [real]: { provider: aiProvider(provider), real, ino: String(statSync(folder, { bigint: true }).ino), at: new Date().toISOString() } } });
+    } catch {}
+  }
+  // Accounts the person took off the list whose folder Rex Desk could not prove it made: the folder stays, the list skips it.
+  hiddenRecord() { try { return this.store.get?.('accounts', 'hidden') || { id: 'hidden', folders: {} }; } catch { return { id: 'hidden', folders: {} }; } }
+  hidden(provider, profile) { return Boolean(profile) && this.hiddenRecord().folders?.[canonical(profile)]?.provider === aiProvider(provider); }
+  hideProfile(provider, profile) { const record = this.hiddenRecord(); this.store.put?.('accounts', 'hidden', { ...record, folders: { ...record.folders, [canonical(profile)]: { provider: aiProvider(provider), at: new Date().toISOString() } } }); this.invalidate(provider); }
+  profiles(provider, options) { return discoverProfiles(provider, options).filter(item => !this.hidden(provider, item.profile)); }
+  // A folder shaped like one Rex Desk adds: ~/.config/<provider>-<name>, never the default ~/.claude, ~/.codex or ~/.gemini,
+  // never the shared conversation history, never anything deeper. The shape alone never allows a delete.
+  addedShape(provider, profile, roots = this.roots) {
     if (!profile || provider === 'openrouter' || provider === 'gemini') return false;
     const config = canonical(path.join(roots.home, '.config')), folder = canonical(profile), name = folder.slice(config.length + 1);
     return folder.startsWith(`${config}/`) && !name.includes('/') && name.startsWith(`${aiProvider(provider)}-`) && name.length > aiProvider(provider).length + 1 && !/shared-history/i.test(name);
   }
+  // Proof Rex Desk made this folder: its record, a real folder (not a junction or link), whose real path is the path itself and
+  // whose file id is the one recorded when it was made.
+  owned(provider, profile, roots = this.roots) {
+    if (!this.addedShape(provider, profile, roots)) return false;
+    try {
+      const entry = this.ownedRecord().folders?.[canonical(profile)];
+      if (!entry || entry.provider !== aiProvider(provider)) return false;
+      const stat = lstatSync(profile);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+      const real = canonical(realpathSync.native(profile));
+      return real === canonical(profile) && real === entry.real && String(statSync(profile, { bigint: true }).ino) === entry.ino;
+    } catch { return false; }
+  }
+  // What Remove does to an account: 'delete' (Rex Desk made the folder: it is deleted, its history kept), 'hide' (no proof Rex
+  // Desk made it, like an account added before this record existed: it leaves Rex Desk's list and its folder stays), or ''.
+  removeMode(provider, profile, { roots = this.roots } = {}) { return !this.addedShape(provider, profile, roots) ? '' : this.owned(provider, profile, roots) ? 'delete' : 'hide'; }
+  removable(provider, profile, options) { return Boolean(this.removeMode(provider, profile, options)); }
   // Signs one account out with the CLI's own sign-out. Gemini (Antigravity) only signs out inside its prompt: a window opens with
   // agy and the line to type. The cached status is dropped, so the list shows Signed out at once.
   async signOut(provider, profile) {
@@ -397,11 +446,18 @@ export class AgentProfiles {
     const name = providerTitle(provider), executable = cli(provider), env = profileEnvironment(provider, profile);
     if (!this.found(executable)) throw new Error(`${name} is not installed on this computer, so there is nothing to sign out of.`);
     if (provider === 'gemini') { this.openLogoutWindow(executable, env); this.invalidate(provider); return { window: true }; }
-    const result = await this.run(executable.command, [...executable.args, ...logoutArgs[provider]], env, 30000);
+    const result = await this.run(executable.command, [...executable.args, ...logoutArgs[provider]], env, 30000).catch(error => ({ code: -1, stdout: '', stderr: '', error }));
     this.invalidate(provider);
+    // Signed out only when the sign-out command worked and the CLI's own status then says not signed in. A status that cannot be
+    // read, or a sign-out that failed, is never taken as signed out.
+    const check = await this.run(executable.command, [...executable.args, ...statusArgs[provider]], env, 30000).catch(error => ({ code: -1, stdout: '', stderr: '', error }));
+    const text = `${check.stdout || ''}\n${check.stderr || ''}`, parsed = provider === 'codex' ? null : parseClaudeStatus(check.stdout || '');
+    const stillIn = provider === 'codex' ? codexStatus(check).loggedIn : Boolean(parsed?.loggedIn);
+    const confirmedOut = !check.error && (provider === 'codex' ? /not logged in/i.test(text) : parsed !== null && parsed.loggedIn === false);
+    this.invalidate(provider);
+    if (stillIn) throw new Error(`${name} did not sign out: ${(result.stderr || result.stdout || 'no reason given').trim().slice(0, 200)}`);
+    if (result.code !== 0 || result.error || !confirmedOut) throw new Error('Rex Desk could not confirm the sign-out. Press Check again to see if this account is still signed in.');
     for (const [key, value] of this.standIn) if (canonical(value || '') === canonical(profile || '')) this.standIn.delete(key);
-    const after = await this.status(provider, profile, { refresh: true }).catch(() => null);
-    if (after?.loggedIn) throw new Error(`${name} did not sign out: ${(result.stderr || result.stdout || 'no reason given').trim().slice(0, 200)}`);
     return { signedOut: true };
   }
   openLogoutWindow(executable, env) {
@@ -419,15 +475,40 @@ export class AgentProfiles {
     }
     child.on('error', () => {}); child.unref();
   }
-  // Deletes a profile folder Rex Desk made. Its "projects" link to the shared history is taken away first (only the link), so the
-  // shared conversations are never touched.
-  deleteProfile(provider, profile, { roots = this.roots } = {}) {
-    if (!this.removable(provider, profile, { roots })) throw new Error('Only an account added in Rex Desk can be removed here. The main account stays.');
-    const folder = path.resolve(profile), link = path.join(folder, 'projects');
-    try { if (lstatSync(link).isSymbolicLink()) { unlinkSync(link); if (existsSync(link)) throw new Error('The shared history link could not be taken away, so nothing was deleted.'); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    rmSync(folder, { recursive: true, force: true });
+  // Removing a folder Rex Desk made, in two steps so nothing is lost on the way (L123). detachProfile copies the account's own
+  // conversation history out and checks the copy, then moves the folder aside under a hidden name: one rename, so if it fails
+  // nothing changed. purgeProfile then deletes the moved folder, taking links away first (only the link, never what it points
+  // to). Shared history, the default folder and other tools' folders are never touched.
+  detachProfile(provider, profile, { roots = this.roots } = {}) {
+    if (this.removeMode(provider, profile, { roots }) !== 'delete') throw new Error('Rex Desk cannot prove it made this account\'s folder, so it will not delete it.');
+    const folder = path.resolve(profile), name = path.basename(folder), stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const items = (HISTORY[aiProvider(provider)] || []).map(item => path.join(folder, item)).filter(item => { try { return !lstatSync(item).isSymbolicLink(); } catch { return false; } });
+    let kept = '';
+    if (items.length) {
+      kept = path.join(roots.home, '.config', 'rex-desk-kept-history', `${name}-${stamp}`);
+      try {
+        mkdirSync(kept, { recursive: true });
+        for (const item of items) this.files.cp(item, path.join(kept, path.basename(item)), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+        for (const item of items) if (!sameTree(item, path.join(kept, path.basename(item)))) throw new Error('the copy is not complete');
+      } catch (error) {
+        try { rmSync(kept, { recursive: true, force: true }); } catch {}
+        throw new Error(`Rex Desk could not keep a copy of this account's conversations, so nothing was deleted (${error.message}).`);
+      }
+    }
+    const trash = path.join(path.dirname(folder), `.rexdesk-removing-${name}-${stamp}`);
+    try { this.files.rename(folder, trash); } catch (error) { throw new Error(`The account folder is in use or locked, so nothing was deleted. Close any window using it and try again (${error.code || error.message}).`); }
     for (const [key, value] of this.standIn) if (canonical(value || '') === canonical(folder) || key === `${provider}:${canonical(folder)}`) this.standIn.delete(key);
     this.clearLimited(folder); this.invalidate(provider);
+    return { trash, kept };
+  }
+  // Deletes a folder detachProfile moved aside. Returns '' when all of it is gone, otherwise the folder that is left.
+  purgeProfile(trash) {
+    try {
+      for (const link of linksIn(trash)) unlinkSync(link);
+      if (linksIn(trash).length) throw new Error('a link is still there');
+      this.files.rm(trash, { recursive: true, force: true });
+    } catch {}
+    return existsSync(trash) ? trash : '';
   }
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {

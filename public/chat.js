@@ -1644,6 +1644,9 @@ async function loadAccounts(refreshStatus = false) { try { ui.accounts = await a
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
+  ui.acctMsg = null;
+  // What a Sign out or Remove did, as a plain line inside the dialog: a toast sits behind the dialog and the phone sheet (L123).
+  const say = (text, bad = false) => { ui.acctMsg = { text, bad }; };
   const NAMES = { claude: [t('Claude'), t('Claude Code'), t('Claude')], codex: [t('Codex'), t('Codex'), 'ChatGPT'], gemini: [t('Gemini'), t('Gemini'), t('Google')], openrouter: [t('OpenRouter'), t('OpenRouter'), 'OpenRouter'] };
   const tab = () => NAMES[ui.acctTab] ? ui.acctTab : aiKey(ui.snap?.config?.provider);
   const draw = () => {
@@ -1666,7 +1669,7 @@ async function accountsDialog() {
       return `<span class="acct-usage">${windows.map(([key, label]) => { const limit = saved.windows[key], used = limit.used ?? 0, passed = limit.resetsAt && limit.resetsAt < Date.now(); return `<span class="acct-limit ${used >= 90 && !passed ? 'hot' : ''}"><span class="acct-lname">${label}</span><meter min="0" max="100" low="70" high="90" optimum="0" value="${passed ? 0 : used}"></meter><span class="acct-lval">${passed ? 'reset' : `${used}%`}</span><span class="acct-lreset">${passed ? '' : esc(resets(limit.resetsAt))}</span></span>`; }).join('')}</span>`;
     };
     // Sign out (each CLI's own sign-out) and Remove (only accounts added here; the main one stays), as quiet links at the row's end.
-    const acts = (item, signed) => { const buttons = [signed ? `<button type="button" class="or-link" data-acct-signout="${esc(item.profile)}">${t`Sign out`}</button>` : '', item.removable ? `<button type="button" class="or-link bad" data-acct-remove="${esc(item.profile)}">${t`Remove`}</button>` : ''].filter(Boolean); return buttons.length ? `<span class="acct-acts">${buttons.join('')}</span>` : ''; };
+    const acts = (item, signed) => { const buttons = [signed ? `<button type="button" class="or-link" data-acct-signout="${esc(item.profile)}">${t`Sign out`}</button>` : '', item.removable ? `<button type="button" class="or-link bad" data-acct-remove="${esc(item.profile)}" data-acct-mode="${esc(item.removeMode || '')}">${t`Remove`}</button>` : ''].filter(Boolean); return buttons.length ? `<span class="acct-acts">${buttons.join('')}</span>` : ''; };
     const row = item => { const who = item.account || item.label; return `<label class="acct-row${item.profile === list.selected ? ' on' : ''}" title="${esc(item.label)}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''}><span class="acct-main"><span class="acct-name"><b>${esc(who)}</b>${plan(item)}${item.profile === list.selected ? `<span class="acct-badge"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`In use`}</span>` : `<span class="acct-use">${t`Use`}</span>`}${acts(item, true)}</span><small>${esc([item.account ? where(item) : '', item.method, savedUsage(name, item.profile)?.at ? t`as of ${new Date(savedUsage(name, item.profile).at).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}` : ''].filter(Boolean).join(' · '))}</small>${usageHtml(name, item.profile)}</span></label>`; };
     const out = item => `<li><span class="acct-main"><b>${esc(item.account || item.label)}</b><small>${esc(item.label !== (item.account || item.label) ? item.label : t('Not signed in'))}</small></span>${acts(item, false)}<button type="button" class="btn small" data-acct-login="${esc(item.profile)}">${t`Sign in`}</button></li>`;
     // OpenRouter has no accounts to sign in to: one API key (typed here, checked, kept encrypted, never shown again) and the model agents use.
@@ -1694,6 +1697,7 @@ async function accountsDialog() {
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>${t`AI accounts`}</h2><button type="button" class="side-x" data-close aria-label="${t`Close`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? `<span class="acct-default-badge">${t`Default`}</span>` : ''}</button>`).join('')}</div>
       <div class="acct-body">${name === 'openrouter' ? orBody() : `<div class="acct-intro"><p>${t`Agents on ${product} run on the account marked ${`<b>${t`In use`}</b>`}. Click another account to switch.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use ${product}`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">${t`Use ${product} for new agents`}</button>`}</div>
+      ${ui.acctMsg ? `<p class="acct-msg${ui.acctMsg.bad ? ' bad' : ''}" role="status">${esc(ui.acctMsg.text)}</p>` : ''}
       ${list.savedMissing ? `<p class="acct-note bad" role="status">${t`That account's folder is gone. Using the default account.`}</p>` : ''}
       ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">${t`No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : t('Claude Code')} if this computer does not have it yet, and opens the sign-in in your browser.`}</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>${t`Not signed in`} <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
@@ -1725,14 +1729,19 @@ async function accountsDialog() {
     if (signOut) {
       event.preventDefault(); const name = tab();
       if (!await askConfirm(name === 'gemini' ? t`Sign out of Antigravity? A window opens: type /logout there and press Enter.` : t`Sign out of this account? Agents on it move to another signed-in account, or wait until you sign in again.`)) return;
-      try { const done = await api('/agents/signout', { method: 'POST', data: { provider: name, profile: signOut.dataset.acctSignout } }); toast(done.window ? t('Type /logout in the window that opened, then press Check again.') : t('Signed out.')); } catch (error) { toast(error.message, true); }
+      try { const done = await api('/agents/signout', { method: 'POST', data: { provider: name, profile: signOut.dataset.acctSignout } }); say(done.window ? t('Type /logout in the window that opened, then press Check again.') : t('Signed out.')); } catch (error) { say(/could not confirm the sign-out/.test(error.message) ? t('Rex Desk could not confirm the sign-out. Press Check again to see if this account is still signed in.') : error.message, true); }
       await loadAccounts(true); draw(); return;
     }
     const remove = event.target.closest('[data-acct-remove]');
     if (remove) {
-      event.preventDefault(); const name = tab(), profile = remove.dataset.acctRemove, inUse = profile === ui.accounts?.[name]?.selected;
-      if (!await askConfirm(inUse ? t`Remove this account? It is in use, so agents switch to the main account first. Its sign-in and settings on this computer are deleted; your conversations stay.` : t`Remove this account? Its sign-in and settings on this computer are deleted; your conversations stay.`)) return;
-      try { const done = await api('/agents/remove', { method: 'POST', data: { provider: name, profile } }); toast(done.switched ? t('Account removed. Agents now use the main account.') : t('Account removed.')); } catch (error) { toast(error.message, true); }
+      event.preventDefault(); const name = tab(), profile = remove.dataset.acctRemove, inUse = profile === ui.accounts?.[name]?.selected, hide = remove.dataset.acctMode === 'hide';
+      // An account whose folder Rex Desk cannot prove it made only leaves the list; its folder stays on this computer (L123).
+      const question = hide ? t`Take this account off Rex Desk's list? Rex Desk has no record of making its folder, so the folder and its sign-in stay on this computer.` : inUse ? t`Remove this account? It is in use, so agents switch to the main account first. Its sign-in and settings on this computer are deleted; your conversations stay.` : t`Remove this account? Its sign-in and settings on this computer are deleted; your conversations stay.`;
+      if (!await askConfirm(question)) return;
+      try {
+        const done = await api('/agents/remove', { method: 'POST', data: { provider: name, profile } });
+        say(done.hidden ? t('Account taken off the list. Its folder stays on this computer.') : done.leftover ? t`Account removed, but some of its files could not be deleted. They are in ${done.leftover}.` : done.kept ? t`Account removed. Its conversations were kept in ${done.kept}.` : done.switched ? t('Account removed. Agents now use the main account.') : t('Account removed.'));
+      } catch (error) { say(/working on this account right now/.test(error.message) ? t('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.') : error.message, true); }
       await loadAccounts(true); await refresh(); draw(); return;
     }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = t('Checking…'); await loadAccounts(true); draw(); }

@@ -2739,6 +2739,8 @@ html[data-theme=dark] .pf-menu{background:linear-gradient(var(--panel),var(--pan
 @media (max-width:560px){.acct-tab{padding:9px 4px;gap:4px;font-size:13px;min-width:0}.acct-default-badge{padding:0 5px;font-size:10px}}
 /* Four AIs do not fit one row on a phone: two rows of two. */
 @media (max-width:560px){.acct-dialog .acct-tabs{grid-auto-flow:row;grid-template-columns:1fr 1fr}.acct-or-row .btn{height:auto}}
+.acct-msg{margin:0 0 10px;font-size:12.5px;line-height:1.45;color:var(--muted);overflow-wrap:anywhere}
+.acct-msg.bad{color:var(--warn)}
 .acct-intro .acct-note{padding:0;background:none;border-radius:0;font-size:12px;color:var(--muted)}
 /* The whole body between the fixed header and footer scrolls. */
 .acct-dialog .acct-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:2px}
