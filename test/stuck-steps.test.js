@@ -280,3 +280,22 @@ test('Continue works only on a chat the loop guard stopped (L117 review)', async
     assert.equal(prompts.length, 1);
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('Stop while the turn waits for a helper ends it at once and clears the 30-minute timer (L117 review)', async () => {
+  const timers = [], cleared = [];
+  const messages = [launch('ag1'), launched('ag1'), result('I launched a helper.')];
+  let fail = null;
+  const sdk = { query: () => {
+    let index = 0;
+    const iterator = { next: () => index < messages.length ? Promise.resolve({ value: messages[index++], done: false }) : new Promise((resolve, reject) => { fail = reject; }), return: async () => ({ done: true }) };
+    return { [Symbol.asyncIterator]: () => iterator, interrupt: async () => { fail?.(new Error('Claude Code process aborted by user')); }, close: () => {} };
+  } };
+  const runner = new ClaudeRunner({ sdk, run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: () => {}, requeue: () => {},
+    setTimer: (fire, ms) => { const id = { ms }; timers.push(id); return id; }, clearTimer: id => cleared.push(id) });
+  const turn = runner.start('go');
+  await waitFor(() => timers.length === 1 && fail, 'the wait for the helper');
+  await runner.interrupt();
+  await assert.rejects(turn, /aborted by user/);
+  assert.deepEqual(cleared, timers, 'the timer is cleared even though the stream failed');
+  assert.equal(runner.helpersQuiet, null, 'Stop is not reported as helpers going quiet');
+});

@@ -387,8 +387,8 @@ export class ClaudeRunner {
         if (this.afterReply && this.agentsWorking()) {
           let timer = null;
           const quiet = new Promise(resolve => { timer = (this.setTimer || setTimeout)(() => resolve('quiet'), HELPER_QUIET_MS); });
-          step = await Promise.race([next, quiet]);
-          (this.clearTimer || clearTimeout)(timer);
+          // Cleared however the wait ends, also when Stop makes the stream fail.
+          try { step = await Promise.race([next, quiet]); } finally { (this.clearTimer || clearTimeout)(timer); }
           if (step === 'quiet') { this.helpersQuiet = this.helpersRunning(); return; }
         } else step = await next;
         if (step.done) return;
