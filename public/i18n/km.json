@@ -2881,5 +2881,7 @@
  "Handoff": "ប្រគល់បន្ត",
  "Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារកំពុងធ្វើការ៖ វានឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
  "Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
- "Handed off. Your next message starts a fresh chat.": "បានប្រគល់បន្ត។ សារបន្ទាប់របស់អ្នកចាប់ផ្ដើមការជជែកថ្មី។"
+ "Handed off. Your next message starts a fresh chat.": "បានប្រគល់បន្ត។ សារបន្ទាប់របស់អ្នកចាប់ផ្ដើមការជជែកថ្មី។",
+ "The helpers did not report back for 30 minutes, so I stopped them. The next handoff lists them.": "ជំនួយការមិនបានរាយការណ៍ត្រឡប់មកវិញអស់រយៈពេល 30 នាទី ដូច្នេះខ្ញុំបានបញ្ឈប់ពួកវា។ ការប្រគល់បន្តលើកក្រោយនឹងរាយឈ្មោះពួកវា។",
+ "Hand off": "ប្រគល់បន្ត"
 }

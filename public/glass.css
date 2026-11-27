@@ -634,3 +634,7 @@ html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}
 .nt-history li{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
 .nt-history li span{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12.5px}
 .nt-history li small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* L117: the chat's Handoff is an icon on a computer; on a phone it moves into the chat's More sheet, so the name keeps its room. */
+.head-actions .head-more{display:none}
+@media (max-width:760px){.head-actions .head-handoff,.head-actions [data-action="app-on"]{display:none!important}.head-actions .head-more{display:grid}}

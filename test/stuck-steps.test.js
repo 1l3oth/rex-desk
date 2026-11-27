@@ -112,7 +112,7 @@ test('cancels while a helper of the turn is still running never count as stuck a
 
 test('once the helpers are done, three real cancels in a row still count as stuck (L117)', async () => {
   const seen = {}, ended = [];
-  const runner = new ClaudeRunner({ sdk: fakeSdk([started('t1', 'local_bash'), refused('a'), settled('t1'), refused('b'), refused('c'), refused('d'), result('never')], seen), run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: () => {}, requeue: () => {}, endTree: async pid => { ended.push(pid); } });
+  const runner = new ClaudeRunner({ sdk: fakeSdk([started('t1', 'local_agent'), refused('a'), settled('t1'), refused('b'), refused('c'), refused('d'), result('never')], seen), run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: () => {}, requeue: () => {}, endTree: async pid => { ended.push(pid); } });
   runner.childPid = 7;
   assert.deepEqual(await runner.start('go'), { status: 'completed', stuck: true });
   assert.deepEqual(ended, [7]);
@@ -188,5 +188,95 @@ test('a fresh start lists the helpers it cut off and where their output is, and 
     assert.match(handoff, /do not start them again without telling the person/);
     assert.match(prompts[1], /do not start them again without telling the person/);
     assert.equal(store.get('run', run.id).helpers, undefined);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a background command left running does not hide a real cancel loop: three cancels still count as stuck (L117 review)', async () => {
+  const seen = {}, events = [], ended = [];
+  const runner = new ClaudeRunner({ sdk: fakeSdk([started('dev', 'local_bash'), refused('a'), refused('b'), refused('c'), result('never')], seen), run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: (kind, data) => events.push([kind, data]), requeue: () => {}, endTree: async pid => { ended.push(pid); } });
+  runner.childPid = 9;
+  assert.deepEqual(await runner.start('go'), { status: 'completed', stuck: true });
+  assert.deepEqual(ended, [9]);
+  assert.equal(events.find(([kind]) => kind === 'steps-stuck')[1].helpers[0].type, 'local_bash', 'the job is named for the handoff');
+});
+
+test('a dev server with repeated cancels gets its one fresh start, then the stop with Continue (L117 review)', async () => {
+  const store = new Store(temporary('stuck-devserver')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-devserver-root'), runnerFactory: options => {
+    const turn = prompts.length + 1;
+    const messages = turn <= 2 ? [started(`dev${turn}`, 'local_bash'), refused('a'), refused('b'), refused('c'), result('never')] : [{ type: 'assistant', message: { model: 'claude', content: [{ type: 'text', text: 'carried on' }] } }, result('carried on')];
+    const runner = new ClaudeRunner({ ...options, sdk: fakeSdk(messages, {}), endTree: async () => true });
+    const start = runner.start.bind(runner);
+    runner.start = prompt => { prompts.push(prompt); return start(prompt); };
+    return runner;
+  } });
+  try {
+    const run = await desk.startWebTask('take the screenshots');
+    await waitFor(() => store.events(run.id, { visible: true }).some(event => event.kind === 'stuck-stopped'), 'the loop guard stop');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'chat-cleared').length, 1, 'one fresh start');
+    assert.equal(prompts.length, 2, 'then a stop, not another restart');
+    const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
+    assert.match(handoff, /background command: helper dev1/);
+    assert.ok(store.get('run', run.id).stuckStopped);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a sub-agent that never reports back holds the turn at most 30 minutes after the reply, then the turn ends and says so (L117 review)', async () => {
+  const events = [], timers = []; let closed = false;
+  // The stream gives the reply, then waits for ever: the helper's finish notice never comes.
+  const messages = [launch('ag1'), launched('ag1'), result('I launched a helper.')];
+  const sdk = { query: () => {
+    let index = 0;
+    const iterator = { next: () => index < messages.length ? Promise.resolve({ value: messages[index++], done: false }) : new Promise(() => {}), return: async () => ({ done: true }) };
+    return { [Symbol.asyncIterator]: () => iterator, interrupt: async () => {}, close: () => { closed = true; } };
+  } };
+  // A fake clock: the 30 minutes pass at once, and the wait asked for is recorded.
+  const runner = new ClaudeRunner({ sdk, run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: (kind, data) => events.push([kind, data]), requeue: () => {}, setTimer: (fire, ms) => { timers.push(ms); return setTimeout(fire, 0); }, clearTimer: clearTimeout });
+  const answer = await runner.start('go');
+  assert.equal(answer.status, 'completed');
+  assert.deepEqual(timers, [30 * 60000]);
+  assert.ok(closed, 'Claude Code and its helpers are ended');
+  const stopped = events.find(([kind]) => kind === 'helpers-stopped')?.[1];
+  assert.equal(stopped.helpers[0].description, 'research the handbook');
+  assert.equal(stopped.helpers[0].outputFile, 'D:\\work\\ag1.jsonl');
+});
+
+test('any word in the 30 minutes starts the wait again, so a slow helper that keeps working is never cut (L117 review)', async () => {
+  const timers = [];
+  const progress = { type: 'system', subtype: 'task_progress', task_id: 't9', tool_use_id: 'ag1', description: 'still reading', usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 } };
+  const messages = [launch('ag1'), launched('ag1'), result('I launched a helper.'), started('t9', 'local_agent', 'ag1'), progress, settled('t9', 'ag1'), result('done')];
+  const runner = new ClaudeRunner({ sdk: fakeSdk(messages, {}), run: { id: 'r', provider: 'claude' }, cwd: os.tmpdir(), event: () => {}, requeue: () => {}, setTimer: (fire, ms) => { timers.push(ms); return setTimeout(fire, 60000); }, clearTimer: clearTimeout });
+  const answer = await runner.start('go');
+  assert.equal(answer.status, 'completed');
+  assert.equal(timers.length, 3, 'a fresh 30 minutes after each message while the helper worked');
+  assert.equal(runner.helpersQuiet, null);
+});
+
+test('the chat says in one line that helpers were stopped, and the next handoff lists them (L117 review)', async () => {
+  const store = new Store(temporary('helpers-quiet')), prompts = [];
+  const desk = new Desk(store, { root: temporary('helpers-quiet-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt);
+    if (prompts.length === 1) options.event('helpers-stopped', { helpers: [{ id: 't1', type: 'local_agent', description: 'audit the docs', outputFile: 'D:\\work\\audit.jsonl' }] });
+  }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('audit');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the turn');
+    const line = store.events(run.id, { visible: true }).find(event => event.kind === 'helpers-stopped');
+    assert.match(line.text, /did not report back for 30 minutes, so I stopped them/);
+    await desk.freshStart(run.id);
+    const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
+    assert.match(handoff, /sub-agent: audit the docs \(its output so far: D:\\work\\audit\.jsonl\)/);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('Continue works only on a chat the loop guard stopped (L117 review)', async () => {
+  const store = new Store(temporary('continue-guard')), prompts = [];
+  const desk = new Desk(store, { root: temporary('continue-guard-root'), runnerFactory: () => ({ async start(prompt) { prompts.push(prompt); }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('look');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the turn');
+    await assert.rejects(desk.continueStuck(run.id), /not stopped by Rex Desk/);
+    assert.equal(prompts.length, 1);
   } finally { await desk.shutdown(); store.close(); }
 });

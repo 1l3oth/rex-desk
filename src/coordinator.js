@@ -165,6 +165,7 @@ export const STUCK_PROMPT = "Several steps in a row came back cancelled by Claud
 export const STUCK_CONTINUE_PROMPT = "The person pressed Continue. Your steps kept getting cancelled by Claude Code, so Rex Desk stopped you. Carry on with the work from where you were: run each step in the foreground, stop any job you left running in the background by its own id, and do not start again a helper you already ran without saying so in one line first.";
 // A second stuck this soon after an automatic fresh start, with no word from the person in between, stops the agent instead.
 export const STUCK_AGAIN_MS = 30 * 60000;
+export const HELPERS_STOPPED_LINE = 'The helpers did not report back for 30 minutes, so I stopped them. The next handoff lists them.';
 // The helpers a fresh start cut off, for its handoff: what each was doing and where its output is.
 export function helpersText(helpers = []) {
   if (!helpers?.length) return '';
@@ -987,6 +988,8 @@ export class Desk {
           // Steps kept getting cancelled: the runner stopped its own processes; the end of the turn starts a fresh chat.
           if (kind === 'steps-stuck') { this.patchRun(runId, { stepsStuck: true, ...(data.helpers?.length ? { helpers: data.helpers } : {}) }); this.store.event(runId, kind, data); return; }
           // The helpers (sub-agents, background jobs) of this turn still running: a fresh start waits for them or lists them (L117).
+          // Helpers that never reported back ended with the turn: one plain line, and the next handoff lists them (L117).
+          if (kind === 'helpers-stopped') { if (data.helpers?.length) this.patchRun(runId, { helpers: data.helpers }); this.store.event(runId, 'helpers-stopped', { text: HELPERS_STOPPED_LINE, count: data.helpers?.length || 0 }, true); return; }
           if (kind === 'helpers') { this.patchRun(runId, { helpers: data.running?.length ? data.running : undefined }); if (!data.running?.length) this.handoffMidTurn(runId); return; }
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
@@ -1468,7 +1471,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // Continue on the line the loop guard left: the agent goes on in the same conversation.
   async continueStuck(runId) {
-    this.run(runId);
+    // Only on the line the loop guard left: any other chat goes on with a message, not with this route.
+    if (!this.run(runId).stuckStopped) throw new Error('This agent was not stopped by Rex Desk, so there is nothing to continue. Send it a message instead.');
     this.patchRun(runId, { stuckStopped: undefined, stuckFreshAt: undefined, autoContinues: 0 });
     if (this.live.has(runId)) return { continued: false, working: true };
     await this.resume(runId, { silent: true, prompt: STUCK_CONTINUE_PROMPT });

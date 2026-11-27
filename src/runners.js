@@ -136,6 +136,8 @@ export function lockedDenial(name, input = {}, cwd = '') {
 // Several steps in a row cancelled by Claude Code itself means a job the agent left running (a dev server, a test, a screenshot
 // script) cancels every next step: the agent is stuck. Rex Desk stops that turn's own processes and starts a fresh chat.
 export const STUCK_AFTER = 3;
+// How long a turn whose reply is in waits for a helper sub-agent with no word from anything (L117).
+export const HELPER_QUIET_MS = 30 * 60000;
 // Ends a process and everything it started, by its process id: only the Claude Code process of this turn and its children.
 export async function endProcessTree(pid, { platform = process.platform, run = execFile } = {}) {
   if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
@@ -150,10 +152,11 @@ export async function endProcessTree(pid, { platform = process.platform, run = e
 
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
-  // A cancel while a helper (a sub-agent or a background job of this turn) is still running is Claude Code making room for that
-  // helper's finish notice, not a stuck agent (L117): the agent is told to run the step again, but it never counts toward
-  // STUCK_AFTER, so the turn and its helpers are never ended for it.
-  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; if (!this.helpersRunning().length) this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
+  // A cancel while a helper sub-agent of this turn is still running is Claude Code making room for that helper's finish notice,
+  // not a stuck agent (L117): the agent is told to run the step again, but it never counts toward STUCK_AFTER, so the turn and
+  // its helpers are never ended for it. A background command (a dev server) left running is the usual cause of a real cancel
+  // loop, so cancels while only such a job runs still count.
+  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; if (!this.agentsWorking()) this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
   // The helpers of this turn still running: background tasks Claude Code reported started and not yet settled, and foreground
   // sub-agents whose result has not come back. Each says what it is and where its output goes.
   helpersRunning() {
@@ -189,7 +192,7 @@ export class ClaudeRunner {
   // Says once per turn that the prompt was really taken (src/coordinator.js counts a scheduled message as sent on it).
   accepted() { if (this.acceptedSaid) return; this.acceptedSaid = true; this.event('prompt-accepted', {}); }
   async start(prompt) {
-    this.acceptedSaid = false;
+    this.acceptedSaid = false; this.afterReply = false; this.helpersQuiet = null;
     const { query } = this.sdk || await import('@anthropic-ai/claude-agent-sdk');
     const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     // Tools of the person's own MCP servers are listed by name and loaded only when needed, not all at the start of every chat.
@@ -270,7 +273,7 @@ export class ClaudeRunner {
         error => this.event('remote-control', { error: String(error?.message || error) }));
     }
     let answered = false, skipped = null;
-    for await (const message of this.query) {
+    for await (const message of this.untilHelpersQuiet(this.query)) {
       // The agent's own words as they are written (not a sub-agent's): the text so far of the current block, a few times a
       // second. Shown and spoken live; the finished block still arrives as agent-text below and is what is saved.
       if (message.type === 'stream_event') {
@@ -360,14 +363,42 @@ export class ClaudeRunner {
         // the next message starts a new turn in the same conversation.
         // Not while a helper sub-agent still works (L117): Claude Code gives the agent its finish notice in a new step, and
         // that step's result ends the turn. The reply so far is already shown.
+        if (!remote) this.afterReply = true;
         if (!remote && !this.agentsWorking()) break;
       }
     }
+    // Helpers that never reported back: the turn ended without them, and the chat and the next handoff say so.
+    if (this.helpersQuiet?.length) this.event('helpers-stopped', { helpers: this.helpersQuiet });
     if (skipped) this.event('agent-result', { result: '', subtype: skipped.subtype, cost: skipped.total_cost_usd, tokens: tokensOf(skipped.usage), steps: 0, durationMs: skipped.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
     // A step was cancelled and the agent ended its turn without another step, so the note never reached it: it gets the note
     // at once in a quiet follow-up, instead of having guessed.
     if (this.cancelPending && !this.signal?.aborted) this.requeue?.(this.takeCancelNote());
     return { status: 'completed', ...(this.stuck ? { stuck: true } : {}) };
+  }
+  // The turn's messages. After the reply, while a helper sub-agent still works, the turn waits for its finish notice, but at most
+  // HELPER_QUIET_MS with no message at all: a helper that never reports back (its notice can come without its name) would
+  // otherwise hold the turn open for good. Then the turn ends, which stops Claude Code and its helpers. Stop ends it at once.
+  async *untilHelpersQuiet(stream) {
+    const iterator = stream[Symbol.asyncIterator]();
+    try {
+      while (true) {
+        const next = iterator.next();
+        let step;
+        if (this.afterReply && this.agentsWorking()) {
+          let timer = null;
+          const quiet = new Promise(resolve => { timer = (this.setTimer || setTimeout)(() => resolve('quiet'), HELPER_QUIET_MS); });
+          step = await Promise.race([next, quiet]);
+          (this.clearTimer || clearTimeout)(timer);
+          if (step === 'quiet') { this.helpersQuiet = this.helpersRunning(); return; }
+        } else step = await next;
+        if (step.done) return;
+        yield step.value;
+      }
+    } finally {
+      // Closing the query ends Claude Code (and so its helpers); a stream stuck waiting is not awaited.
+      void Promise.resolve(iterator.return?.()).catch(() => {});
+      if (this.helpersQuiet) this.query?.close?.();
+    }
   }
   // The messages of an open Claude-app session: the first one (if any), then whatever arrives in Rex Desk, until Stop.
   async *remoteMessages(first) {

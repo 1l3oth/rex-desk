@@ -105,6 +105,7 @@ const reviewStates = ['ready_for_review', 'needs_evidence', 'qa_passed', 'qa_fai
 const stateGroup = run => workingStates.includes(run.state) ? 'working' : reviewStates.includes(run.state) ? 'review' : 'done';
 // Continue in Claude app: a Claude chat stays open with Remote Control, so the person can chat with it from claude.ai/code or
 // the Claude app on a phone. While it is open the header links to it and offers to close it there; Rex Desk shows the same chat.
+const HANDOFF_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14h6M12.5 11.5 15 14l-2.5 2.5"/></svg>';
 const APP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg>';
 function appControl(run, live) {
   if (run.inApp) {
@@ -278,6 +279,7 @@ function transcript(all, runId = '') {
     if (event.kind === 'subagent-text') continue;
     // The loop guard stopped the agent (L117): one line, with Continue while it is still stopped.
     if (event.kind === 'stuck-stopped') { items.push({ role: 'stuck', at: event.createdAt }); continue; }
+    if (event.kind === 'helpers-stopped') { items.push({ role: 'status', text: t('The helpers did not report back for 30 minutes, so I stopped them. The next handoff lists them.'), at: event.createdAt }); continue; }
     if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt, sequence: event.sequence }); }
@@ -425,7 +427,7 @@ function stageModel() {
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
   const take = !personal && !run.inApp && chatTakers(ctx, run).length ? `<button class="btn small" data-action="move-to-chat" title="${t`Make this run an agent's personal chat: click the agent to see this work and keep talking`}">${t`Move to chat`}</button> ` : '';
   // Handoff (L117): a fresh chat on purpose, that first reads a handoff of this one. Not for a chat that lives in another app.
-  const handoff = run.external || run.inApp ? '' : `<button type="button" class="icon-btn head-add" data-action="handoff" title="${t`Handoff: start a fresh chat that reads a summary of this one`}" aria-label="${t`Handoff`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14h6M12.5 11.5 15 14l-2.5 2.5"/></svg></button> `;
+  const handoff = run.external || run.inApp ? '' : `<button type="button" class="icon-btn head-add head-handoff" data-action="handoff" title="${t`Handoff: start a fresh chat that reads a summary of this one`}" aria-label="${t`Handoff`}">${HANDOFF_ICON}</button> <button type="button" class="icon-btn head-add head-more" data-action="head-more" aria-label="${t`More`}" title="${t`More`}"><svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button> `;
   const actions = take + appControl(run, live) + handoff + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a meeting with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
   return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? `<span class="chip working">${t`In Claude app`}</span>` : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
@@ -771,7 +773,7 @@ async function clearAgent() {
 async function handoffAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent conversation here.'), true);
   const working = ['starting', 'running'].includes(run.state);
-  if (!await askConfirm(working ? t('Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.') : t('Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.'))) return;
+  if (!await askConfirm(working ? t('Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.') : t('Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.'), { ok: t('Hand off') })) return;
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Handed off. Your next message starts a fresh chat.')); await refresh();
 }
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent to stop here.'), true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
@@ -1950,6 +1952,20 @@ function filterChats() {
   const none = list.querySelector('.m-none'); if (none) none.hidden = shown > 0;
 }
 document.addEventListener('input', event => { if (event.target.id !== 'm-search') return; ui.chatFilter = event.target.value; filterChats(); });
+// A chat's More on a phone (L117): the header keeps room for the name, so Handoff and Continue in Claude app sit here, with words.
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('[data-action="head-more"]')) return;
+  event.stopPropagation();
+  document.querySelector('.dialog-back.m-more-sheet')?.remove();
+  const back = document.createElement('div'); back.className = 'dialog-back m-more-sheet';
+  const app = document.querySelector('.head-actions [data-action="app-on"]');
+  back.innerHTML = `<div class="dialog m-sheet" role="dialog" aria-label="${t`More`}">
+    <button type="button" class="m-sheet-item" data-action="handoff"><span class="av sm icon">${HANDOFF_ICON}</span><span>${t('Handoff')}</span></button>
+    ${app ? `<button type="button" class="m-sheet-item" data-action="app-on"><span class="av sm icon">${APP_ICON}</span><span>${t('Continue in Claude app')}</span></button>` : ''}
+    <button type="button" class="btn m-sheet-close">${t`Close`}</button></div>`;
+  document.body.append(back);
+  back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
+}, true);
 // More: what the round buttons used to hold, in a sheet from the bottom.
 document.addEventListener('click', event => {
   if (!event.target.closest?.('[data-action="m-more"]')) return;
