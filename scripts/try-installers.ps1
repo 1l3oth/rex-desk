@@ -80,12 +80,17 @@ if (Test-Path $exeHome) { throw 'exe: the uninstaller left rex-desk.exe behind.'
 Write-Host 'exe: uninstalled'
 Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
 
-# ----- the .msi (per machine, Program Files\Rex Desk) -----
-$msiHome = Join-Path $env:ProgramFiles 'Rex Desk\rex-desk.exe'
+# ----- the .msi (per machine) -----
+# The MSI may take its folder from one a past install left in the registry, so where it lands is read from its own log.
+$msiHome = $null
 function Install-Msi([string]$file, [string]$label) {
   $log = Join-Path $work "$label.log"
   $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$file`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
   if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "$label`: msiexec ended with $($p.ExitCode)." }
+  $dir = Select-String -Path $log -Pattern 'Property\(S\): INSTALLDIR = (.+)$' | Select-Object -Last 1
+  if (-not $dir) { throw "$label`: the msiexec log names no INSTALLDIR." }
+  $script:msiHome = Join-Path $dir.Matches[0].Groups[1].Value.Trim() 'rex-desk.exe'
+  Write-Host "$label`: installed in $(Split-Path $script:msiHome)"
 }
 if ($upgrade) {
   $oldMsi = Get-Live '\.msi$'
