@@ -3215,5 +3215,8 @@ html:has(.iv[open]){overflow:hidden}
   .aps-row .cn-time{width:112px}
 }
 /* Sign out and Remove on each account row (L123): quiet links at the row end. */
-.acct-acts{flex:none;display:flex;align-items:center;gap:10px;align-self:center}
-.acct-acts .or-link{font-size:12px;padding:2px 0}
+.acct-dialog .acct-acts{flex:none;display:inline-flex!important;flex-direction:row!important;flex-wrap:nowrap;align-items:center;gap:12px;margin-left:12px;white-space:nowrap}
+.acct-out li .acct-acts{align-self:center}
+.acct-dialog .acct-acts .or-link{font-size:12.5px;padding:1px 0;line-height:1.4}
+.acct-dialog .acct-one{margin:2px 2px 0;font-size:13px;line-height:1.45}
+.acct-list .acct-name .acct-badge,.acct-list .acct-name .acct-use{align-self:center}

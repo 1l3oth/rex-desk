@@ -95,7 +95,7 @@ test('Gemini shows a plain note instead of adding a second account, and the rows
   const agents = new AgentProfiles({ config: () => ({}) }, { roots: { home: temporary('acct-gem') } });
   assert.throws(() => agents.addProfile('gemini', 'work'), /one Google account signed in on a computer/);
   const chat = read('chat.js');
-  assert.match(chat, /name === 'gemini' \? `<p class="acct-note">\$\{t`Antigravity keeps one Google account signed in on a computer\./);
+  assert.match(chat, /name === 'gemini' \? `<p class="acct-one muted">\$\{t`Antigravity keeps one Google account signed in on a computer\./);
   assert.match(chat, /data-acct-signout="\$\{esc\(item\.profile\)\}"/);
   assert.match(chat, /item\.removable \? `<button type="button" class="or-link bad" data-acct-remove=/);
   assert.match(chat, /api\('\/agents\/remove'/);
