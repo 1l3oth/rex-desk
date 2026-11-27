@@ -1512,7 +1512,7 @@ function personalSide(run, agent, items, shells) {
   const setup = agent.main ? '' : sec(t('Setup'), [
     row('AI', esc(provider(agent.provider || 'claude'))),
     row(t('Model'), esc(model)),
-    row(t('Account'), pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', compact: true, items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })),
+    row(t('Account'), pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', compact: true, items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn && (!item.sameAs || item.profile === (agent.profile || ''))).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })),
     whereLine(ctx, agent),
     row(t('Tasks from'), esc(sources.join(', ') || t('Not set yet'))),
   ].join('') + (agent.remote && !agent.pinned ? `<button class="btn small aps-wide" data-action="spec-move" data-agent-id="${esc(agent.id)}">${t`Move to this computer`}</button>` : ''));
@@ -1748,12 +1748,15 @@ async function accountsDialog() {
     if (remove) {
       event.preventDefault(); const name = tab(), profile = remove.dataset.acctRemove, inUse = profile === ui.accounts?.[name]?.selected;
       // Remove only takes the account off Rex Desk: nothing on the computer is deleted (L123).
-      const signed = (ui.accounts?.[name]?.profiles || []).some(item => item.profile === profile && item.loggedIn);
+      // A row that is the same account as another one (or that another row matches) has no Sign out of its own, and adding it
+      // again brings it back as such a row: the texts then never point at a Sign out button.
+      const rowsNow = ui.accounts?.[name]?.profiles || [], item = rowsNow.find(row => row.profile === profile);
+      const twin = Boolean(item?.sameAs) || rowsNow.some(row => row.sameAs?.profile === profile), signed = Boolean(item?.loggedIn) && !item?.sameAs;
       const question = [t`Remove this account from Rex Desk?`, [inUse ? t`It is in use, so agents switch to the main account.` : '', t`Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at ${profile}.`, signed ? t`To sign it out, press Sign out first.` : ''].filter(Boolean).join(' ')].join('\n\n');
       if (!await askConfirm(question)) return;
       try {
         const done = await api('/agents/remove', { method: 'POST', data: { provider: name, profile } });
-        say(t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}. To sign out now, add this account again, then choose Sign out.`);
+        say(twin ? t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}.` : t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}. To sign out now, add this account again, then choose Sign out.`);
       } catch (error) { say(/working on this account right now/.test(error.message) ? t('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.') : error.message, true); }
       await loadAccounts(true); await refresh(); draw(); return;
     }
@@ -1762,7 +1765,12 @@ async function accountsDialog() {
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
     const login = event.target.closest('[data-acct-login]'), create = event.target.closest('[data-acct-create]');
     if (login || create) {
-      event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
+      event.preventDefault(); const name = tab(), folder = value => String(value || '').replace(/\\/g, '/').toLowerCase(), rowOf = profile => (ui.accounts?.[name]?.profiles || []).find(item => folder(item.profile) === folder(profile));
+      // Sign in again on a row that is the same account as another one: that folder is signed out first, so the list can tell when
+      // the new sign-in is done and which account it went to (another email, or the same one again).
+      const again = login ? rowOf(login.dataset.acctLogin) : null;
+      if (again?.sameAs && name !== 'gemini') { try { await api('/agents/signout', { method: 'POST', data: { provider: name, profile: again.profile } }); await loadAccounts(true); } catch {} }
+      const was = again && rowOf(again.profile)?.loggedIn ? again.account || '' : '';
       try {
         let started;
         if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; if (started?.restored) { say(t`This account was removed from Rex Desk before. Its earlier folder was found at ${started.profile}, so it is back.`); await loadAccounts(true); draw(); return; } }
@@ -1772,8 +1780,14 @@ async function accountsDialog() {
         // Sign-in happens in the browser; look again every few seconds for up to three minutes, or ten while the tool installs.
         for (let tries = 0; tries < (started?.installing ? 200 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
-          const before = signedIn(); await loadAccounts(true);
-          if (signedIn() > before) { ui.acctWaiting = false; toast(t('Signed in. You can pick this account now.')); }
+          await loadAccounts(true);
+          // Done when this folder is signed in to an account it was not on before (or at all, when it was signed out).
+          const now = rowOf(login ? login.dataset.acctLogin : started?.profile);
+          if (now?.loggedIn && (now.account || '') !== was) {
+            ui.acctWaiting = false;
+            if (now.sameAs) say(t`It signed in to ${now.account || now.sameAs.account || ''} again, the same account as another row. Sign out of it in your browser (or pick the other email when it asks), then press Sign in again.`, true);
+            else toast(t('Signed in. You can pick this account now.'));
+          }
           if (document.body.contains(back)) draw();
         }
         ui.acctWaiting = false; if (document.body.contains(back)) draw();

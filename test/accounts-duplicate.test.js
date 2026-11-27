@@ -11,19 +11,21 @@ delete process.env.CLAUDE_CONFIG_DIR; delete process.env.CODEX_HOME;
 
 // A home with ~/.claude (the main account), ~/.config/claude-<name> folders added in Rex Desk, and Orca copies. who maps a
 // folder to the account its fake "claude auth status" reports ('' = never signed in).
-function setup(accounts, { orca = {} } = {}) {
+function setup(accounts, { orca = {}, selected } = {}) {
   const root = mkdtempSync(path.join(base, 'home-')), home = path.join(root, 'home'), appData = path.join(root, 'appdata');
   mkdirSync(path.join(home, '.claude'), { recursive: true });
   const who = new Map([[canonical(path.join(home, '.claude')), accounts.main]]);
   for (const [name, email] of Object.entries(accounts)) if (name !== 'main') { const folder = path.join(home, '.config', `claude-${name}`); mkdirSync(folder, { recursive: true }); who.set(canonical(folder), email); }
   for (const [id, email] of Object.entries(orca)) { const folder = path.join(appData, 'orca', 'claude-profiles', id, 'home'); mkdirSync(folder, { recursive: true }); who.set(canonical(folder), email); }
+  const broken = new Set();
   const run = async (command, args, env) => {
     const folder = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), email = who.get(canonical(folder)) || '';
+    if (broken.has(canonical(folder))) return { code: 1, stdout: '', stderr: 'status failed' };
     return { code: 0, stdout: JSON.stringify(email ? { loggedIn: true, authMethod: 'claude.ai', email, orgName: `${email}'s Organization`, subscriptionType: 'max' } : { loggedIn: false }), stderr: '' };
   };
-  const records = new Map(), store = { get: (k, id) => records.get(`${k}/${id}`), put: (k, id, v) => records.set(`${k}/${id}`, v), config: () => ({}) };
+  const records = new Map(), store = { get: (k, id) => records.get(`${k}/${id}`), put: (k, id, v) => records.set(`${k}/${id}`, v), config: () => (selected === undefined ? {} : { agentProfiles: { claude: selected(home, appData) } }) };
   const agents = new AgentProfiles(store, { run, roots: { home, appData } });
-  return { agents, home, appData, folder: name => path.join(home, '.config', `claude-${name}`) };
+  return { agents, home, appData, broken, folder: name => path.join(home, '.config', `claude-${name}`) };
 }
 const rows = async agents => (await agents.overview({ refresh: true })).claude.profiles;
 const find = (list, folder) => list.find(item => item.profile && canonical(item.profile) === canonical(folder));
@@ -77,4 +79,50 @@ test('a taken name always has a row or a plain reason: a link or file at that pa
   assert.throws(() => agents.addProfile('claude', 'linked'), /taken by a file or link that is not an account/);
   assert.throws(() => agents.addProfile('claude', 'code-shared-history'), /kept for the shared conversation history/);
   assert.throws(() => agents.addProfile('claude', 'my shared-history'), /kept for the shared conversation history/);
+});
+
+const orcaHome = (appData, id) => path.join(appData, 'orca', 'claude-profiles', id, 'home');
+const inUse = (list, selected) => list.filter(item => canonical(item.profile || '.') === canonical(selected || '.') && item.loggedIn && !item.sameAs);
+
+test('a selected added copy of the main account is the row In use, and the main one says it is the same account', async () => {
+  const { agents, folder } = setup({ main: 'me@example.com', copy: 'me@example.com' }, { selected: home => path.join(home, '.config', 'claude-copy') });
+  const list = await rows(agents), copy = find(list, folder('copy')), main = list.find(item => item.profile === '');
+  assert.equal(copy.sameAs, null, 'the account in use is never the duplicate');
+  assert.equal(inUse(list, folder('copy')).length, 1);
+  assert.equal(canonical(main.sameAs.profile), canonical(folder('copy')));
+});
+
+test('an Orca copy in use stays a normal row, keeps Remove when it has it, and the matching added folder is the duplicate', async () => {
+  const { agents, appData, folder } = setup({ main: 'other@example.com', copy: 'me@example.com' }, { orca: { 'aaaa1111-x': 'me@example.com' }, selected: (home, appData) => orcaHome(appData, 'aaaa1111-x') });
+  const list = await rows(agents), orca = find(list, orcaHome(appData, 'aaaa1111-x'));
+  assert.ok(orca, 'the Orca copy in use shows'); assert.equal(orca.sameAs, null, 'not told it is a mistaken duplicate');
+  assert.equal(orca.removable, agents.removable('claude', orca.profile));
+  assert.equal(canonical(find(list, folder('copy')).sameAs.profile), canonical(orca.profile));
+});
+
+test('the launch account in use is never the duplicate of an added folder listed before it', async () => {
+  const { agents, home, folder } = setup({ main: 'other@example.com', work: 'me@example.com', launch: 'me@example.com' });
+  const launch = folder('launch'), old = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = launch;
+  try {
+    const list = await rows(agents), row = find(list, launch);
+    assert.equal(row.sameAs, null); assert.equal(inUse(list, launch).length, 1);
+    assert.equal(canonical(find(list, folder('work')).sameAs.profile), canonical(launch));
+  } finally { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; }
+});
+
+test('the automatic switch never moves back to a copy of an account still marked limited', async () => {
+  const { agents, folder } = setup({ main: 'me@example.com', copy: 'me@example.com', work: 'info@vbuild.cc' });
+  await rows(agents);
+  agents.markLimited('');
+  const first = await agents.alternative('claude', '');
+  assert.equal(canonical(first.profile), canonical(folder('work')));
+  agents.markLimited(first.profile);
+  assert.equal(await agents.alternative('claude', first.profile), null, 'the copy of the main account shares its limit');
+});
+
+test('the automatic switch remembers which account a folder was on when its status cannot be read', async () => {
+  const { agents, broken, home } = setup({ main: 'me@example.com', copy: 'me@example.com' });
+  await rows(agents);
+  agents.invalidate?.('claude'); agents.cache.clear(); broken.add(canonical(path.join(home, '.claude')));
+  assert.equal(await agents.alternative('claude', ''), null, 'the copy is the same account the main one was last seen on');
 });

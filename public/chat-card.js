@@ -15,7 +15,8 @@ function place(anchor) {
 function html(ctx, agent) {
   const { ui } = ctx, provider = aiId(agent.provider);
   const models = ui.snap.choices?.providers?.[provider]?.models || ui.snap.choices?.models || [], efforts = ui.snap.choices?.providers?.[provider]?.efforts || [];
-  const accounts = (ui.accounts?.[provider]?.profiles || []).filter(item => item.loggedIn);
+  // A folder that is the same account as another row is not a separate account to pick, unless the agent already uses it.
+  const accounts = (ui.accounts?.[provider]?.profiles || []).filter(item => item.loggedIn && (!item.sameAs || item.profile === (agent.profile || '')));
   const status = agent.status || {};
   const select = (name, value, options) => `<select data-card="${name}">${options.map(([key, label]) => `<option value="${esc(key)}" ${String(value ?? '') === String(key) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
   return `<div class="pc-head">${ctx.avatar({ name: agent.name })}<div class="pc-who"><div class="pc-name"><b>${esc(agent.name)}</b><button type="button" class="pc-edit" data-card-act="rename" title="${t`Rename`}" aria-label="${t`Rename ${esc(agent.name)}`}">&#9998;</button></div><small>@${esc(agent.slug || '')}${agent.projectSlug ? ` · ${esc(agent.projectSlug)}` : ''}${agent.device ? ` · ${esc(agent.device)}` : ''}</small>${agent.projectPath ? `<small class="pc-path" title="${esc(agent.projectPath)}">${esc(agent.projectPath)}</small>` : ''}<span class="pc-state ${esc(status.state || '')}"><i></i>${esc(status.label || t('Idle'))}</span></div><button type="button" class="pc-x" data-card-act="close" aria-label="${t`Close`}">&#215;</button></div>

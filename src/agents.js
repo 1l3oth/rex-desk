@@ -226,15 +226,27 @@ export class AgentProfiles {
   async alternative(provider, current) {
     if (provider === 'openrouter') return null;
     const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
-    // The account that is out (its email and organisation): another folder signed in to that same account shares its limit.
-    const out = accountKey(await this.status(provider, current).catch(() => null));
+    // Another folder signed in to the same account (email and organisation) shares its limit. So the accounts kept out are the one
+    // that is out and every one still marked limited, each by the account it is signed in to, or the one it was last seen signed in
+    // to when its status cannot be read now.
+    const accountOf = async profile => accountKey(await this.status(provider, profile).catch(() => null)) || this.lastAccount(provider, profile);
+    const blocked = new Set([await accountOf(current)]);
+    for (const item of this.profiles(provider, { configured: current })) if ((limited[key(item.profile)] || 0) > Date.now()) blocked.add(await accountOf(item.profile));
+    blocked.delete('');
     for (const item of this.profiles(provider, { configured: current })) {
       if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
       const status = await this.status(provider, item.profile, { refresh: true }).catch(() => null);
-      if (status?.loggedIn && out && accountKey(status) === out) continue;
+      if (status?.loggedIn && blocked.has(accountKey(status))) continue;
       if (status?.loggedIn) return { profile: item.profile, label: status.label, account: status.account, plan: status.plan };
     }
     return null;
+  }
+  // The account a folder was last seen signed in to ('' when never seen), kept across restarts for a status that cannot be read.
+  lastAccount(provider, profile) { return this.store.get('accounts', 'known')?.of?.[`${provider}:${canonical(profile || '')}`] || ''; }
+  rememberAccount(provider, profile, account) {
+    if (!account || this.lastAccount(provider, profile) === account) return;
+    const record = this.store.get('accounts', 'known') || { id: 'known', of: {} };
+    this.store.put('accounts', 'known', { ...record, of: { ...record.of, [`${provider}:${canonical(profile || '')}`]: account } });
   }
   // until: when the account's limit resets (from Claude's own usage report); 5 hours when that is not known.
   markLimited(profile, until = 0) {
@@ -265,7 +277,7 @@ export class AgentProfiles {
         installed: !(result.error?.code === 'ENOENT'), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
         organization: parsed?.organization || '', plan: parsed?.plan || '',
         error: parsed ? '' : result.error?.code === 'ENOENT' ? `${providerTitle(provider)} CLI is not installed.` : (result.stderr || result.stdout || 'Sign-in status unavailable.').trim().slice(0, 300) };
-      this.cache.set(key, status); return status;
+      this.cache.set(key, status); if (status.loggedIn) this.rememberAccount(provider, profile, accountKey(status)); return status;
     })().finally(() => this.pending.delete(key));
     this.pending.set(key, check); return check;
   }
@@ -278,12 +290,16 @@ export class AgentProfiles {
       // launch one) always shows, so a name Rex Desk says is taken always has a row to act on. Such a folder signed in to an
       // account another row already shows (the browser was still signed in to the first claude.ai account) is marked sameAs.
       const accountOf = index => accountKey(statuses[index]);
-      const inUse = canonical(this.use(provider, selected) || ''), first = new Map();
+      // The account in use (the one chosen, or the one standing in for it) is never the duplicate: it is the row the others match,
+      // and stays a normal row marked In use, whatever its kind (added, Orca, launch).
+      const chosen = canonical(selected || ''), standIn = canonical(this.use(provider, selected) || ''), first = new Map();
+      const using = item => [chosen, standIn].includes(canonical(item.profile || ''));
+      const rank = index => (canonical(profiles[index].profile || '') === chosen ? 0 : using(profiles[index]) ? 1 : 2);
       const lead = new Map();
       profiles.forEach((item, index) => { const key = accountOf(index); if (!key) return; const own = item.origin !== 'orca', current = lead.get(key);
-        if (current === undefined || canonical(item.profile || '') === inUse || (own && profiles[current].origin === 'orca' && canonical(profiles[current].profile || '') !== inUse)) lead.set(key, index); });
+        if (current === undefined || rank(index) < rank(current) || (rank(index) === rank(current) && own && profiles[current].origin === 'orca')) lead.set(key, index); });
       const keep = profiles.map((item, index) => !accountOf(index) || item.origin !== 'orca' || lead.get(accountOf(index)) === index);
-      profiles.forEach((item, index) => { const key = accountOf(index); if (key && keep[index] && !first.has(key)) first.set(key, index); });
+      profiles.forEach((item, index) => { const key = accountOf(index); if (key && keep[index] && (!first.has(key) || rank(index) < rank(first.get(key)))) first.set(key, index); });
       const sameAs = index => { const at = first.get(accountOf(index)); return accountOf(index) && keep[index] && at !== index ? { profile: profiles[at].profile, label: profiles[at].label, account: statuses[at].account } : null; };
       const saved = this.store.config().agentProfiles?.[provider] ?? null;
       // A profile the person once saved whose folder has since disappeared: kept in the config, but agents fall back to the
