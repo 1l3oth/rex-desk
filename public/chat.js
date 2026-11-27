@@ -878,7 +878,7 @@ document.addEventListener('click', async event => {
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
-    else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab', 'agents-pop'].includes(action)) await roomAction(ctx, action, target);
+    else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'room-telegram-save', 'room-telegram-clear', 'side-tab', 'agents-pop'].includes(action)) await roomAction(ctx, action, target);
     else if (action?.startsWith('pin-')) await pinsAction(ctx, action, target);
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
     else if (action?.startsWith('mk-')) await marketAction(ctx, action, target);
@@ -1373,7 +1373,7 @@ function connectorsPanel(agent) {
   const owner = bot.ownerLinked
     ? `<div class="aps-row"><span>${t`Owner`}</span><div>${esc(bot.owner || t('Linked'))}</div></div><button type="button" class="btn small quiet cn-wide" data-action="ab-code" data-agent="${id}">${t`Link another owner`}</button>`
     : `<p class="cn-note">${bot.pairCode ? t`Open @${esc(bot.botUsername)} in Telegram and send it this code to make you its owner:` : t`Make a new code, then send it to the bot in Telegram.`}</p>${bot.pairCode ? `<p class="cn-code">${esc(bot.pairCode)}</p>` : `<button type="button" class="btn small cn-wide" data-action="ab-code" data-agent="${id}">${t`Make a code`}</button>`}`;
-  const groups = `<section class="aps-sec"><h3>${t`Allow in groups`}</h3><p class="cn-note">${t`The bot works only in groups you allow, and only when someone mentions it or replies to its messages. Add it to a group, then allow it here.`}</p>
+  const groups = `<section class="aps-sec"><h3>${t`Allow in groups`}</h3><p class="cn-note">${t`The bot works only in groups you allow. Mention or reply to it there, or link one allowed group in a room's Chat info for two-way text sync.`}</p>
     ${bot.pending.length ? `<ul class="cn-list">${bot.pending.map(group => groupRow(group, `<button type="button" class="btn small" data-action="ab-allow" data-agent="${id}" data-gid="${esc(String(group.id))}" data-title="${esc(group.title || '')}">${t`Allow`}</button>`)).join('')}</ul>` : ''}
     ${bot.groups.length ? `<ul class="cn-list">${bot.groups.map(group => groupRow(group, `<button type="button" class="btn small quiet danger" data-action="ab-remove" data-agent="${id}" data-gid="${esc(String(group.id))}">${t`Remove`}</button>`)).join('')}</ul>` : (bot.pending.length ? '' : `<p class="cn-note">${t`No groups yet.`}</p>`)}</section>`;
   return `<div class="side-body aps cn">${about}

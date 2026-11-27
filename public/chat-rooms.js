@@ -28,11 +28,11 @@ export function agentPicture(agent) {
 }
 // Rex Agent's picture is Rex Desk's own mark.
 const REX_MARK = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#3a72e8"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>');
-export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '', agent = null, members = null }) {
+export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '', agent = null, members = null, plain = false }) {
   const { esc, initials, ui } = ctx;
   // Whoever this is gets their own picture wherever it shows (group chat messages, cards, lists): an agent its avatar,
   // the person their profile photo, Rex Agent the Rex Desk mark. Letters only for someone with no picture at all.
-  if (!agent && !image && !members) {
+  if (!plain && !agent && !image && !members) {
     if (name === 'Rex Agent') return rexCore(size, (ui?.snap?.specialists || []).filter(item => item.kind !== 'main').length);
     if ((name === 'You' || (ui?.profile?.name && name === ui.profile.name)) && ui?.profile?.photo) return `<span class="av ${size}"><img src="/api/profile/photo?v=${encodeURIComponent(ui.profile.photo.updatedAt || '')}" alt=""></span>`;
     agent = (ui?.snap?.specialists || []).find(item => item.name === name) || null;
@@ -65,15 +65,17 @@ export function roomStage(ctx) {
   let previous = null;
   const byId = new Map(messages.map(message => [message.id, message]));
   const snippet = text => { const plain = String(text || '').replace(/\s+/g, ' ').trim(); return plain.length > 90 ? `${plain.slice(0, 90)}…` : plain; };
-  const quote = message => { const parent = message.replyTo && byId.get(message.replyTo); return parent ? `<button type="button" class="rquote" data-jump="${esc(parent.id)}" title="${t`Show the message this answers`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${esc(parent.from.type === 'human' ? t('You') : parent.from.label)}</b> ${esc(snippet(parent.text))}</button>` : ''; };
+  const quote = message => { const parent = message.replyTo && byId.get(message.replyTo); if (!parent) return ''; const who = parent.from.type === 'human' ? t('You') : parent.from.type === 'telegram' ? `${parent.from.label} (${t('Telegram')})` : parent.from.label; return `<button type="button" class="rquote" data-jump="${esc(parent.id)}" title="${t`Show the message this answers`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${esc(who)}</b> ${esc(snippet(parent.text))}</button>`; };
   const render = message => {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
     const shown = message.from.type === 'human' ? String(message.text).replace(/\s*\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
     const attached = attachedFiles(shown, esc), html = attached.top + markdown(attached.text, { mentions: ['you', ...handles], tasks }) + attached.html + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') + (message.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(ctx.tokenText(message.tokens))}</div>` : '');
-    const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
+    const same = previous && previous.from.type === message.from.type && previous.from.id === message.from.id && previous.from.label === message.from.label && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
     if (message.from.type === 'human') return bubble({ mine: true, name: t('You'), time: hhmm(message.at), voice: shown !== message.text, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
-    return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}" title="${t`${esc(message.from.label)}'s card`}"` : ''}>${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}"` : ''}>${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span>${message.from.type === 'human' ? `<button type="button" class="rreply rdel" data-msg-delete="${esc(message.id)}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : ''}${message.from.type === 'agent' ? speakButton('rreply') : ''}<button type="button" class="rreply" data-reply="${esc(message.id)}" title="${t`Reply to ${esc(message.from.label)}`}" aria-label="${t`Reply to ${esc(message.from.label)}`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`Reply`}</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
+    const fromTelegram = message.from.type === 'telegram';
+    const av = same ? '' : (fromTelegram ? avatarHtml(ctx, { name: message.from.label, size: 'sm', plain: true }) : ctx.avatar({ name: message.from.label, size: 'sm' }));
+    return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}" title="${t`${esc(message.from.label)}'s card`}"` : ''}>${av}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}"` : ''}>${esc(message.from.label)}</strong>${fromTelegram ? `<span class="rtg-tag">${t`Telegram`}</span>` : ''}<span>${esc(hhmm(message.at))}</span>${message.from.type === 'human' ? `<button type="button" class="rreply rdel" data-msg-delete="${esc(message.id)}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : ''}${message.from.type === 'agent' ? speakButton('rreply') : ''}<button type="button" class="rreply" data-reply="${esc(message.id)}" title="${t`Reply to ${esc(message.from.label)}`}" aria-label="${t`Reply to ${esc(message.from.label)}`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`Reply`}</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>${t`Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.`}</p></div>`;
   // One typing line for everyone answering in the room, like a messenger; work on a task shows in the Activity tab instead.
@@ -86,7 +88,8 @@ export function roomStage(ctx) {
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="${t`Open ${esc(member.name)}`}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="${t`Remove from the room`}">×</button></span>`;
   const awayBanner = room.away?.on ? `<div class="away-banner"><span class="dot working"></span><span><b>${t`Away mode`}</b> · ${t`${[room.away.goal ? t`The agents keep working on ${esc(room.away.goal)}` : t('The agents keep working'), room.away.every === 'auto' ? t`next check-in in about ${room.away.nextMinutes || 30} min (auto)` : t`check-in every ${room.away.every} min`, room.away.until ? t`until ${esc(new Date(room.away.until).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))}` : t('until you are back')].join(' · ')}. Write here to end it.`}</span></div>` : '';
   const hostName = room.host === 'you' ? t('you') : room.host ? (room.members.find(member => member.id === room.host)?.name || '') : '';
-  const meetMeta = [hostName ? t`Called by ${hostName}` : '', room.topic || '', t`${room.members.length} agents`].filter(Boolean).join(' · ');
+  const tgMeta = room.telegramSync ? (room.telegramSyncState?.active === false ? t('Telegram paused') : t`Telegram: ${room.telegramSync.groupTitle || room.telegramSync.groupId}`) : '';
+  const meetMeta = [hostName ? t`Called by ${hostName}` : '', room.topic || '', t`${room.members.length} agents`, tgMeta].filter(Boolean).join(' · ');
   const endedBanner = room.endedAt ? `<div class="away-banner ended"><span class="dot"></span><span><b>${t`Meeting ended`}</b>${room.summary ? ` · ${esc(room.summary)}` : ''} · ${t`Write here to open it again.`}</span></div>` : '';
   const endButton = room.endedAt ? '' : `<button class="btn small" data-action="room-end" title="${t`End the meeting. The room and its history stay.`}">${t`End meeting`}</button> `;
   return { title: room.name, meta: meetMeta, feedClass: 'room', banner: endedBanner + awayBanner,
@@ -197,6 +200,20 @@ function roomSharedHtml(ctx, room) {
 }
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
+  const telegramOptions = room.telegramOptions || [], telegramLink = room.telegramSync || null, telegramState = room.telegramSyncState || null;
+  const savedTelegramValue = telegramLink ? `${telegramLink.agentId}|${telegramLink.groupId}` : '';
+  const telegramValue = ui.roomTelegramDraft && room.id in ui.roomTelegramDraft ? ui.roomTelegramDraft[room.id] : savedTelegramValue;
+  const telegramChoices = telegramOptions.map(item => ({ value: `${item.agentId}|${item.groupId}`, label: `${item.agentName} - ${item.groupTitle}${item.botUsername ? ` (@${item.botUsername})` : ''}`, ...(item.usedBy ? { hint: t`Linked to ${item.usedBy}`, disabled: true } : {}) }));
+  if (telegramLink && !telegramChoices.some(item => item.value === savedTelegramValue)) telegramChoices.unshift({ value: savedTelegramValue, label: `${telegramLink.groupTitle || telegramLink.groupId} (${t('Not available')})` });
+  const telegramPauseWhy = reason => ({
+    member_removed: t('Sync paused: the bot agent is no longer in this room.'),
+    bot_disconnected: t('Sync paused: the bot is disconnected.'),
+    group_removed: t('Sync paused: this group is no longer allowed in the agent Connectors tab.'),
+    bot_not_reading: t('Sync paused: this bot is not reading messages. Check its Connectors tab.'),
+  })[reason] || t('Sync paused: Telegram link is not available.');
+  const telegramStatus = !telegramLink ? ''
+    : telegramState?.active === false ? `<p class="rtelegram-status warn"><span class="dot warn"></span><span>${esc(telegramPauseWhy(telegramState.reason))}</span></p>`
+    : `<p class="rtelegram-status"><span class="dot good"></span><span>${esc(t`Synced with ${telegramLink.groupTitle || telegramLink.groupId}`)}</span></p>`;
   const mentioned = [...new Set(messages.flatMap(message => message.tasks || []))].map(id => (ui.snap.tasks || []).find(task => task.id === id)).filter(Boolean);
   const free = [{ id: 'main', name: t('Rex Agent'), projectSlug: 'all projects', status: { label: t('Knows every project') } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="${t`Open ${esc(person.name)}`}"><span data-agent-card="${esc(person.id)}" title="${t`${esc(person.name)}'s card`}">${avatarHtml(ctx, { name: person.name, agent: person.id === 'main' ? null : (ctx.ui.snap.specialists || []).find(agent => agent.id === person.id) || null, size: 'sm' })}</span><span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="${t`Remove from the room`}" aria-label="${t`Remove ${esc(person.name)}`}">×</button></li>`;
@@ -207,6 +224,15 @@ function roomInfoHtml(ctx, room) {
       <h3>${t`Members`} <span>${room.members.length + 1}</span></h3>
       <ul class="rmembers"><li class="rperson me"><span class="rperson-main">${avatarHtml(ctx, { name: t('You'), size: 'sm' })}<span class="rperson-text"><b>${t`You`}</b><small>${t`The person`}</small></span></span></li>${room.members.map(member).join('')}</ul>
       ${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: t('Add people'), placeholder: '+ Add people', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || t('Idle')}` })) }) : ''}
+      <h3>${t('Telegram room sync')}</h3>
+      ${telegramStatus}
+      <ul class="rtelegram-notes">
+        <li>${t('Text messages sync both ways with speaker names and reply links.')}</li>
+        <li>${t('Photos, files, voice notes, stickers, and other media are not synced.')}</li>
+        <li>${t('To receive every group text message (not only @mentions and replies), make the bot an admin or turn off Group Privacy in @BotFather.')}</li>
+        <li>${t('Each allowed Telegram group can link to one room at a time.')}</li>
+      </ul>
+      ${telegramChoices.length ? `<label class="ra-field rtelegram-field"><span>${t('Allowed bot and group')}</span>${pickerHtml(ctx, { id: 'room-telegram-link', label: t('Allowed bot and group'), value: telegramValue, placeholder: t('Choose an allowed bot and group'), items: [{ value: '', label: t('Not linked') }, ...telegramChoices], remember: false })}</label><div class="rtelegram-actions"><button class="btn small primary" data-action="room-telegram-save">${t('Link Telegram group')}</button>${telegramLink ? `<button class="btn small" data-action="room-telegram-clear">${t('Unlink')}</button>` : ''}</div>` : `<p class="muted small">${t('Add a Telegram bot to this room and allow its group in the agent Connectors tab first.')}</p>`}
       ${roomSharedHtml(ctx, room)}
       <h3>${t`Tasks in this chat`} <span>${mentioned.length}</span></h3>
       ${mentioned.length ? `<ul class="rtasks">${mentioned.map(task => `<li><button class="rtask" data-open="task" data-id="${esc(task.id)}"><span class="tnum">#${esc(taskNumber(task))}</span><span>${esc(taskName(task))}</span></button></li>`).join('')}</ul>` : `<p class="muted small">${t`None yet. Type # in the message box to mention a task.`}</p>`}
@@ -376,6 +402,8 @@ export function initRoomInfo(ctx) {
     const { ui, api, toast, refresh } = ctx;
     if (event.target.id === 'room-name') {
       try { await api(`/rooms/${ui.view.id}`, { method: 'PUT', data: { name: event.target.value } }); await refresh(); } catch (error) { toast(error.message, true); await refresh(); }
+    } else if (event.target.id === 'room-telegram-link' && ui.view.type === 'room') {
+      ui.roomTelegramDraft = { ...(ui.roomTelegramDraft || {}), [ui.view.id]: event.target.value };
     } else if (event.target.id === 'room-image-input' && event.target.files[0]) {
       const file = event.target.files[0]; event.target.value = '';
       try {
@@ -418,6 +446,18 @@ export async function roomAction(ctx, action, target) {
   if (action === 'room-delete') {
     const room = ui.snap.rooms.find(item => item.id === ui.view.id);
     if (room && await askConfirm(t`Delete the room "${room.name}" and its messages? The agents and their own chats stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
+    return;
+  }
+  if (action === 'room-telegram-save') {
+    const choice = document.getElementById('room-telegram-link')?.value || '', [agentId, groupId] = choice.split('|');
+    if (!agentId || !groupId) return toast(t('Choose an allowed bot and group.'), true);
+    try { await api(`/rooms/${ui.view.id}/telegram`, { method: 'PUT', data: { agentId, groupId } }); delete ui.roomTelegramDraft?.[ui.view.id]; await refresh(); toast(t('Telegram group linked.')); }
+    catch (error) { toast(error.message, true); }
+    return;
+  }
+  if (action === 'room-telegram-clear') {
+    try { await api(`/rooms/${ui.view.id}/telegram`, { method: 'DELETE' }); delete ui.roomTelegramDraft?.[ui.view.id]; await refresh(); toast(t('Telegram group unlinked.')); }
+    catch (error) { toast(error.message, true); }
     return;
   }
   if (action === 'room-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast(t('Stopped.')); await refresh(); return; }

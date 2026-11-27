@@ -44,7 +44,7 @@ function detail(ctx, helpers, entry) {
   // A message that came in from Telegram: show it, with a button that opens the agent's chat, where it already waits and
   // where a reply goes back to Telegram through the agent, as before.
   if (entry.tg) {
-    const target = entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
+    const target = entry.tg.roomId ? `data-nyc-type="room" data-nyc-id="${esc(entry.tg.roomId)}"` : entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button type="button" class="btn primary" data-ny-open-chat ${target} data-tg="${esc(entry.tg.id)}">${t`Open chat`}</button></div></div>`;
   }
   if (entry.mcp) {

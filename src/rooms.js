@@ -49,7 +49,7 @@ export class Rooms {
   }
   snapshot() {
     const rooms = this.list();
-    return { rooms: rooms.map(room => ({ ...room, members: room.members.map(id => this.member(id)) })), messages: rooms.flatMap(room => this.messages(room.id, { limit: 150 })) };
+    return { rooms: rooms.map(room => ({ ...room, telegramOptions: this.desk.agentBots?.roomOptions(room.id) || [], telegramSyncState: this.desk.agentBots?.roomSyncState?.(room.id) || null, members: room.members.map(id => this.member(id)) })), messages: rooms.flatMap(room => this.messages(room.id, { limit: 150 })) };
   }
   rename(roomId, name) {
     const room = this.room(roomId), title = String(name || '').trim().slice(0, 80);
@@ -60,6 +60,7 @@ export class Rooms {
   remove(roomId) {
     this.room(roomId);
     for (const message of this.store.list('roommsg').filter(item => item.roomId === roomId)) this.store.delete('roommsg', message.id);
+    for (const mapping of this.store.list('roomtgmsg').filter(item => item.roomId === roomId)) this.store.delete('roomtgmsg', mapping.id);
     this.store.delete('room', roomId);
     const folder = path.join(this.store.media('room-images'));
     try { for (const file of readdirSync(folder).filter(name => name.startsWith(roomId))) rmSync(path.join(folder, file), { force: true }); } catch { /* no picture */ }
@@ -183,7 +184,7 @@ export class Rooms {
     this.store.emit?.('change', { kind: 'room', roomId });
     return { deleted: true };
   }
-  async post(roomId, { fromAgentId = '', text, replyTo = '', to, system = false, instruction = '' } = {}) {
+  async post(roomId, { fromAgentId = '', text, replyTo = '', to, system = false, instruction = '', telegramSender = null } = {}) {
     let room = this.room(roomId); const body = (fromAgentId ? withoutStudyTip(text) : String(text || '').trim()).slice(0, 8000);
     if (!body) throw new Error('Write a message first.');
     if (fromAgentId && !room.members.includes(fromAgentId)) throw new Error('This agent is not in that room.');
@@ -196,25 +197,31 @@ export class Rooms {
     targets = targets.filter(target => target !== fromAgentId);
     if (fromAgentId && to === undefined && ackOnly(body)) targets = targets.filter(target => target === HUMAN);
     // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
-    if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }
-    if (!fromAgentId && !system && room.endedAt) { this.store.put('room', roomId, { ...room, endedAt: '', endedBy: '' }); room = this.room(roomId); this.system(roomId, 'You opened the meeting again.'); }
+    if (!fromAgentId && !telegramSender && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }
+    if (!fromAgentId && !system && room.endedAt) { this.store.put('room', roomId, { ...room, endedAt: '', endedBy: '' }); room = this.room(roomId); this.system(roomId, telegramSender ? `${String(telegramSender.label || 'Telegram member').slice(0, 80)} opened the meeting again.` : 'You opened the meeting again.'); }
     const parent = replyTo ? this.store.get('roommsg', replyTo) : null;
     // A person resets the count. An agent talking to another agent extends the thread's count by one.
     const agentToAgent = Boolean(fromAgentId) && targets.some(target => target !== HUMAN);
     const hops = fromAgentId ? (parent?.hops || 0) + (agentToAgent ? 1 : 0) : 0, paused = false;
-    const from = system ? { type: 'system', id: 'system', label: 'Rex Desk' } : fromAgentId ? { type: 'agent', id: fromAgentId, label: this.member(fromAgentId).name } : { type: 'human', id: HUMAN, label: 'You' };
+    const from = system ? { type: 'system', id: 'system', label: 'Rex Desk' } : fromAgentId ? { type: 'agent', id: fromAgentId, label: this.member(fromAgentId).name } : telegramSender ? { type: 'telegram', id: String(telegramSender.id || ''), label: String(telegramSender.label || 'Telegram member').slice(0, 80) } : { type: 'human', id: HUMAN, label: 'You' };
     // A task mentioned here gets its English name first, so everyone talks about it by that name.
     for (const taskId of this.tasksIn(body)) await this.desk.englishName(taskId).catch(() => {});
     // The number is taken after that wait, from the room as it is now: a message posted meanwhile already used the old next number.
     const seq = this.room(roomId).seq + 1;
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
-      tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
+      tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}), ...(telegramSender ? { telegram: { agentId: telegramSender.agentId, groupId: String(telegramSender.groupId), messageId: String(telegramSender.messageId) } } : {}) };
     // Files attached in a room travel with it, so they open on the person's other computers too (L27). They are put before the
     // message, so they sync no later than it does.
     if (from.type === 'human') try { this.desk.peers?.sharePictures([{ text: body }]); } catch { /* a file that cannot be read stays here */ }
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
+    if (telegramSender?.messageId) {
+      const mapping = { id: `${telegramSender.agentId}:${telegramSender.groupId}:${telegramSender.messageId}`, roomId, roomMessageId: message.id, agentId: telegramSender.agentId, groupId: String(telegramSender.groupId), telegramMessageId: String(telegramSender.messageId), at: now() };
+      if (this.desk.agentBots?.noteRoomMessage) this.desk.agentBots.noteRoomMessage(mapping);
+      else this.store.put('roomtgmsg', mapping.id, mapping);
+    }
+    if (!telegramSender) void this.desk.agentBots?.mirrorRoomMessage(message);
     // The person naming agents and a task in one message gives them that task: the first one named leads, the rest work on it with them.
-    const named = !fromAgentId && !system ? message.to.filter(target => target !== HUMAN && target !== 'main' && this.desk.store.get('specialist', target)) : [];
+    const named = !fromAgentId && !system && !telegramSender ? message.to.filter(target => target !== HUMAN && target !== 'main' && this.desk.store.get('specialist', target)) : [];
     if (named.length && message.tasks.length && this.desk.shareTask) for (const taskId of message.tasks) await this.desk.shareTask({ taskId, add: named, roomId, quiet: true }).catch(() => {});
     // An @mention of an agent who is not in this room reaches nobody: say so, and where that agent is, so nobody waits for an answer.
     const outsiders = this.outsidersIn(room, body);
@@ -222,7 +229,7 @@ export class Rooms {
     // In auto timing, the lead says when it wants the next check-in.
     if (fromAgentId && room.away?.on && room.away.every === 'auto' && fromAgentId === this.lead(room)) { const next = /next check-?in:?\s*(\d{1,3})\s*(h|hour|min)/i.exec(body); if (next) this.store.put('room', roomId, { ...this.room(roomId), away: { ...this.room(roomId).away, nextMinutes: Math.min(240, Math.max(5, Number(next[1]) * (/^h/i.test(next[2]) ? 60 : 1))) } }); }
     // The person writing in the room means they are back: away mode ends and the lead sums up what happened.
-    if (!fromAgentId && !system && room.away?.on && !body.startsWith('/')) void this.endAway(roomId, { back: true }).catch(error => this.store.event('', 'room-error', { roomId, message: error.message }, true));
+    if (!fromAgentId && !system && !telegramSender && room.away?.on && !body.startsWith('/')) void this.endAway(roomId, { back: true }).catch(error => this.store.event('', 'room-error', { roomId, message: error.message }, true));
     else await this.deliver(room, message);
     return { id: message.id, seq, delivered: message.to, paused };
   }
@@ -243,7 +250,7 @@ export class Rooms {
   promptFor(room, message, agentId) {
     // A room session that does not exist yet starts with the rooms' recent history, not only what is new.
     const agent = this.agent(agentId), session = agent?.roomRuns?.[room.id], seen = session && this.store.get('run', session) ? (agent.roomSeen || {}) : {};
-    const who = item => item.from.type === 'human' ? 'The person' : item.from.type === 'agent' ? this.member(item.from.id).name : 'Rex Desk';
+    const who = item => item.from.type === 'human' ? 'The person' : item.from.type === 'telegram' ? `${item.from.label} on Telegram` : item.from.type === 'agent' ? this.member(item.from.id).name : 'Rex Desk';
     const line = item => `${who(item)}: ${clip(item.text, 500)}`;
     // Only what is new since the agent last looked: its room session already holds everything before that, so sending it again
     // would only spend the person's Claude usage. A session that is new gets the room's recent history instead.
@@ -259,6 +266,7 @@ export class Rooms {
       here.length ? `The conversation so far (read it before you answer):\n${here.map(line).join('\n')}` : 'Nothing new in this room before this message.',
       owners.length ? `Who works on which task (the person decided this). Work on tasks here in the room; never start a new run for one. To hand a task to another agent, or to add agents to work on it with you, use desk_task_team:\n${owners.join('\n')}` : '',
       room.away?.on ? awayRules(room.away) : '',
+      this.desk.agentBots?.roomSyncState?.(room.id)?.active ? `Telegram room sync is active for "${room.telegramSync.groupTitle || room.telegramSync.groupId}". Your text replies in this room are synced to that Telegram group automatically (media is not synced), so do not send the same reply again with desk_text_person or desk_telegram.` : '',
       this.meetingRules(room, agentId),
       `New message from ${who(message)} to ${message.to.map(id => id === HUMAN ? 'the person' : this.member(id).name).join(', ')}:\n${message.instruction || message.text}`,
       since.length ? `Already answered after that message (do not repeat it; build on it or say you agree in a few words):\n${since.map(line).join('\n')}` : '',
@@ -284,7 +292,7 @@ export class Rooms {
       const fresh = this.agent(agentId); if (!fresh) return;
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
       const session = fresh.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
-      const sender = message.from.type === 'human' ? 'The person' : message.from.label;
+      const sender = message.from.type === 'human' ? 'The person' : message.from.type === 'telegram' ? `${message.from.label} on Telegram` : message.from.label;
       const asked = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
       // A file attached on another computer is named by this computer's own copy of it, or said not to have arrived.
       const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked, { wait: 0, remote }) : peers?.localFiles ? peers.localFiles(asked, { remote }) : asked;

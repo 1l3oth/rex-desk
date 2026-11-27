@@ -472,11 +472,11 @@ export class TelegramBridge {
   // One row per message: who wrote (the chat's name and tag), the agent it went to, the words, and whether it has been read.
   // Opening the row in the app goes to that agent's chat, where the message already waits; the agent texts back through the
   // existing Telegram routing. The oldest rows are pruned so the list never grows without bound.
-  noteInbox(agentId, found, tag, text) {
+  noteInbox(agentId, found, tag, text, { roomId = '' } = {}) {
     const id = randomUUID().replaceAll('-', '').slice(0, 12);
     const chatName = String(found.values.chatName || 'Telegram').replace(/\s+/g, ' ').slice(0, 60);
     const words = String(text ?? '').replace(/\s+/g, ' ').trim();
-    this.store.put('tginbox', id, { id, agentId, chatName, tag: tag || '', text: clip(words, 180), at: new Date().toISOString(), read: false });
+    this.store.put('tginbox', id, { id, agentId, ...(roomId ? { roomId } : {}), chatName, tag: tag || '', text: clip(words, 180), at: new Date().toISOString(), read: false });
     const rows = this.store.list('tginbox').sort((a, b) => String(a.at).localeCompare(String(b.at)));
     for (const row of rows.slice(0, Math.max(0, rows.length - INBOX_MAX))) this.store.delete('tginbox', row.id);
   }
@@ -485,7 +485,7 @@ export class TelegramBridge {
     const mainRun = this.store.list('run').find(run => run.main);
     const runFor = agentId => agentId === 'main' ? (mainRun?.id || '') : (this.store.get('specialist', agentId)?.runId || '');
     return this.store.list('tginbox').sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, INBOX_MAX)
-      .map(row => ({ id: row.id, agentId: row.agentId, runId: runFor(row.agentId), chatName: row.chatName, tag: row.tag || '', text: row.text, at: row.at, read: Boolean(row.read) }));
+      .map(row => ({ id: row.id, agentId: row.agentId, runId: runFor(row.agentId), roomId: row.roomId || '', chatName: row.chatName, tag: row.tag || '', text: row.text, at: row.at, read: Boolean(row.read) }));
   }
   // Mark one row (or all) read or unread, from the app.
   markInboxRead(id, read = true) {

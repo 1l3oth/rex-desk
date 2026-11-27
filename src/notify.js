@@ -128,12 +128,13 @@ export class Notifier {
     } else if (kind === 'roommsg') {
       const message = this.store.get('roommsg', id);
       if (!message || this.seen.has(`msg:${id}`)) return; this.seen.add(`msg:${id}`);
-      if (message.from?.type !== 'agent') return;
+      if (!['agent', 'telegram'].includes(message.from?.type)) return;
       const room = this.store.get('room', message.roomId), toYou = /(^|[^\w@])@you\b/i.test(String(message.text || '')); // only an explicit @you: an agent's ordinary reply is not a question to you
+      const who = message.from.type === 'telegram' ? `${message.from.label} (Telegram)` : message.from.label;
       // In a busy room, one pop-up per chosen gap; every message still counts as unread. A message to you always pops up.
       const gap = this.prefs().roomGap * 1000, quiet = !toYou && gap > 0 && Date.now() - (this.roomToast.get(message.roomId) || 0) < gap;
       if (!quiet) this.roomToast.set(message.roomId, Date.now());
-      this.notify({ kind: toYou ? 'mention' : 'room', title: toYou ? `${message.from.label} asked you in ${room?.name || 'a room'}` : `${message.from.label} in ${room?.name || 'a room'}`, body: message.text, target: { type: 'room', id: message.roomId }, toast: !quiet, from: message.from.label, source: `msg:${message.id}` });
+      this.notify({ kind: toYou ? 'mention' : 'room', title: toYou ? `${who} asked you in ${room?.name || 'a room'}` : `${who} in ${room?.name || 'a room'}`, body: message.text, target: { type: 'room', id: message.roomId }, toast: !quiet, from: who, source: `msg:${message.id}` });
     }
   }
   keyOf(target) { return `${target.type}:${target.id || ''}`; }

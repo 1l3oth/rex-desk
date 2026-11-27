@@ -10,17 +10,41 @@ const API = 'https://api.telegram.org';
 // What a person can send besides text. Telegram's own notices (someone joined, a message was pinned) are none of these.
 const MEDIA = ['photo', 'video', 'video_note', 'voice', 'audio', 'document', 'animation', 'sticker', 'contact', 'location', 'poll', 'dice'];
 export const TEXT_ONLY = 'Only text works here for now. Please send your message as text.';
+export const ROOM_TEXT_ONLY = 'Only text messages sync with Rex Desk. Media is not synced.';
+const ROOM_MEDIA_NOTE = '[Media/files attached in Rex Desk are not synced]';
+const TG_MEDIA_NOTE = '[Media not synced from Telegram]';
+const ROOM_MAP_MAX = 2000;
 const TOKEN = /^\d{5,}:[A-Za-z0-9_-]{20,}$/;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
 const clip = (text, size = 3800) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };
+const splitTelegramText = value => {
+  const text = String(value || ''), chunks = [];
+  for (let rest = text; rest.length > 3800;) {
+    let cut = rest.lastIndexOf('\n', 3800); if (cut < 1200) cut = rest.lastIndexOf(' ', 3800); if (cut < 1200) cut = 3800;
+    chunks.push(rest.slice(0, cut)); rest = rest.slice(cut).trimStart();
+  }
+  if (rest) chunks.push(rest);
+  return chunks.length ? chunks : [' '];
+};
+// Strip local attachment blocks and local upload images before sending a room message to Telegram, so local paths never leak.
+function roomTextForTelegram(message) {
+  let raw = String(message?.text || ''), hasMedia = false;
+  if (message?.from?.type === 'human') raw = raw.replace(/\s*\(Sent by voice: [^)]*\)\s*$/, '');
+  raw = raw.replace(/\n*Attached files \(read them from these paths\):\n((?:- .+\n?)+)/g, () => { hasMedia = true; return ''; });
+  raw = raw.replace(/\s*Attached files \(read them from these paths\):\s*-\s+(.+)$/s, () => { hasMedia = true; return ''; });
+  raw = raw.replace(/!\[[^\]]*\]\(\/api\/uploads\/[^)\s]+\)/g, () => { hasMedia = true; return ''; });
+  const clean = raw.trim();
+  if (!clean) return hasMedia ? ROOM_MEDIA_NOTE : '';
+  return hasMedia ? `${clean}\n\n${ROOM_MEDIA_NOTE}` : clean;
+}
 const codeIn = text => String(text || '').trim().replace(/^\/start(@\w+)?\s*/i, '').trim().toUpperCase();
 const PAIR_MS = 30 * 60 * 1000;
 export const linkOf = agentId => `agentbot:${agentId}`;
 const nameOf = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || '';
 
 export class AgentBots {
-  constructor(desk, { fetcher = fetch } = {}) { this.desk = desk; this.store = desk.store; this.fetcher = fetcher; this.running = false; this.loops = new Map(); }
+  constructor(desk, { fetcher = fetch } = {}) { this.desk = desk; this.store = desk.store; this.fetcher = fetcher; this.running = false; this.loops = new Map(); this.roomQueues = new Map(); }
 
   // Errors never carry Telegram's own text or the request address (both can hold the token): only a fixed message.
   async call(token, method, params = {}, timeoutMs = 15000) {
@@ -48,6 +72,91 @@ export class AgentBots {
     const fresh = record.pairCode && Number(record.pairUntil) > Date.now();
     const reader = botReader(this.store, { agentId });
     return { connected: true, readBy: reader.readBy, why: reader.why || '', botUsername: record.botUsername, owner: record.ownerName || '', ownerLinked: Boolean(record.ownerChatId), pairCode: record.ownerChatId ? '' : (fresh ? record.pairCode : ''), groups: record.groups || [], pending: record.pending || [] };
+  }
+  roomAuthor(message, record) {
+    if (message.from?.type === 'agent') return String(message.from.label || this.agent(message.from.id)?.name || 'Agent').trim() || 'Agent';
+    if (message.from?.type === 'human') return String(this.store.config?.()?.profile?.name || this.store.config?.()?.name || record?.ownerName || 'You').trim() || 'You';
+    return String(message.from?.label || 'Rex Desk').trim() || 'Rex Desk';
+  }
+  noteRoomMessage(entry) {
+    const id = String(entry.id || `${entry.agentId}:${entry.groupId}:${entry.telegramMessageId}`);
+    this.store.put('roomtgmsg', id, { ...entry, id, groupId: String(entry.groupId), telegramMessageId: String(entry.telegramMessageId), at: entry.at || new Date().toISOString() });
+    const rows = this.store.list('roomtgmsg').filter(item => item.roomId === entry.roomId).sort((left, right) => String(left.at || '').localeCompare(String(right.at || '')));
+    for (const old of rows.slice(0, Math.max(0, rows.length - ROOM_MAP_MAX))) this.store.delete('roomtgmsg', old.id);
+  }
+  roomSyncState(roomId) {
+    const room = this.desk.rooms?.room?.(roomId), link = room?.telegramSync || null;
+    if (!link) return null;
+    if (!room.members.includes(link.agentId)) return { active: false, reason: 'member_removed' };
+    const record = this.record(link.agentId), token = this.token(link.agentId);
+    if (!record || !token) return { active: false, reason: 'bot_disconnected' };
+    if (!(record.groups || []).some(group => String(group.id) === String(link.groupId))) return { active: false, reason: 'group_removed' };
+    const reader = botReader(this.store, { agentId: link.agentId });
+    if (!reader.reads || reader.why) return { active: false, reason: 'bot_not_reading', why: reader.why || '', readBy: reader.readBy || null };
+    return { active: true, reason: '' };
+  }
+  roomOptions(roomId) {
+    const room = this.desk.rooms?.room?.(roomId); if (!room) return [];
+    const rooms = this.desk.rooms?.list?.() || [];
+    return room.members.flatMap(agentId => {
+      const record = this.record(agentId);
+      if (!record || !this.token(agentId)) return [];
+      return (record.groups || []).map(group => {
+        const gid = String(group.id);
+        const usedBy = rooms.find(item => item.id !== roomId && String(item.telegramSync?.groupId) === gid)?.name || '';
+        return { agentId, agentName: this.agent(agentId)?.name || 'Agent', botUsername: record.botUsername || '', groupId: gid, groupTitle: group.title || gid, ...(usedBy ? { usedBy } : {}) };
+      });
+    });
+  }
+  roomSync(roomId) {
+    const room = this.desk.rooms.room(roomId), linked = room.telegramSync || null, state = this.roomSyncState(roomId);
+    return { linked, options: this.roomOptions(roomId), active: Boolean(state?.active), reason: state?.reason || '' };
+  }
+  setRoomSync(roomId, { agentId, groupId } = {}) {
+    const room = this.desk.rooms.room(roomId), id = String(agentId || ''), gid = String(groupId || '');
+    if (!room.members.includes(id)) throw new Error('Add the bot agent to this room first.');
+    const record = this.record(id);
+    if (!record || !this.token(id)) throw new Error('Connect this agent’s Telegram bot first.');
+    const group = (record.groups || []).find(item => String(item.id) === gid);
+    if (!group) throw new Error('Allow this Telegram group in the agent’s Connectors tab first.');
+    const occupied = this.desk.rooms.list().find(item => item.id !== roomId && String(item.telegramSync?.groupId) === gid);
+    if (occupied) throw new Error('This Telegram group is already linked to another room.');
+    this.store.put('room', roomId, { ...room, telegramSync: { agentId: id, groupId: gid, groupTitle: group.title || gid, botUsername: record.botUsername || '' } });
+    return this.roomSync(roomId);
+  }
+  clearRoomSync(roomId) {
+    const room = this.desk.rooms.room(roomId), { telegramSync, ...rest } = room;
+    this.store.put('room', roomId, rest);
+    return this.roomSync(roomId);
+  }
+  mirrorRoomMessage(message) {
+    if (!message?.roomId || message.telegram) return Promise.resolve();
+    const room = this.desk.rooms?.room?.(message.roomId), link = room?.telegramSync;
+    if (!link || !['human', 'agent'].includes(message.from?.type)) return Promise.resolve();
+    const previous = this.roomQueues.get(room.id) || Promise.resolve();
+    const next = previous.catch(() => {}).then(() => this.sendRoomMessage(room, link, message)).catch(() => {
+      this.store.event?.('', 'room-telegram-error', { roomId: room.id, message: 'Could not sync a room message to Telegram.' }, true);
+    });
+    this.roomQueues.set(room.id, next);
+    void next.finally(() => { if (this.roomQueues.get(room.id) === next) this.roomQueues.delete(room.id); });
+    return next;
+  }
+  async sendRoomMessage(room, link, message) {
+    const record = this.record(link.agentId), token = this.token(link.agentId);
+    if (!room.members.includes(link.agentId) || !record || !token || !(record.groups || []).some(item => String(item.id) === String(link.groupId))) throw new Error('Telegram link is unavailable.');
+    const body = roomTextForTelegram(message);
+    if (!body) return;
+    const author = this.roomAuthor(message, record);
+    const chunks = splitTelegramText(`${author}:\n${body}`);
+    const mapped = message.replyTo ? this.store.list('roomtgmsg').filter(item => item.roomId === room.id && item.roomMessageId === message.replyTo && String(item.groupId) === String(link.groupId)) : [];
+    const parent = mapped.find(item => item.agentId === link.agentId) || mapped[0] || null;
+    let replyId = parent?.telegramMessageId;
+    for (const text of chunks) {
+      const replyNum = replyId ? (Number(replyId) || replyId) : '';
+      const sent = await this.call(token, 'sendMessage', { chat_id: link.groupId, text, ...(replyNum ? { reply_to_message_id: replyNum, allow_sending_without_reply: true } : {}) });
+      replyId = sent.message_id;
+      this.noteRoomMessage({ roomId: room.id, roomMessageId: message.id, agentId: link.agentId, groupId: String(link.groupId), telegramMessageId: sent.message_id });
+    }
   }
   async connect(agentId, botToken) {
     const agent = this.agent(agentId); if (!agent) throw new Error('That agent is gone.');
@@ -148,7 +257,7 @@ export class AgentBots {
 
   async handle(agentId, update) {
     const record = this.record(agentId), token = this.token(agentId); if (!record || !token) return;
-    const say = (chatId, text) => this.call(token, 'sendMessage', { chat_id: chatId, text: clip(text) }).catch(() => {});
+    const say = (chatId, text, extra = {}) => this.call(token, 'sendMessage', { chat_id: chatId, text: clip(text), ...extra }).catch(() => {});
     const joined = update.my_chat_member;
     if (joined) {
       if (['group', 'supergroup'].includes(joined.chat?.type) && ['member', 'administrator'].includes(joined.new_chat_member?.status)) this.noteGroup(agentId, joined.chat);
@@ -174,24 +283,59 @@ export class AgentBots {
       return this.route(agentId, chat, text, record.ownerName || 'the person');
     }
     if (!['group', 'supergroup'].includes(chat.type)) return;
+    if (message.from?.is_bot || String(message.from?.id || '') === String(record.botId)) return;
     if (!(record.groups || []).some(item => String(item.id) === String(chat.id))) { this.noteGroup(agentId, chat); return; }
-    const me = `@${record.botUsername}`.toLowerCase();
+    const me = record.botUsername ? `@${record.botUsername}`.toLowerCase() : '';
+    const mentionRe = record.botUsername ? new RegExp(`(?<![\\w@])@${record.botUsername.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'ig') : null;
     // A photo or file is for the bot when its caption mentions it or it replies to the bot.
-    const addressed = (text || String(message.caption || '')).toLowerCase().includes(me) || String(message.reply_to_message?.from?.id) === String(record.botId);
+    const caption = String(message.caption || '').trim();
+    const addressed = (me && (text || caption).toLowerCase().includes(me)) || String(message.reply_to_message?.from?.id) === String(record.botId);
+    const roomsList = this.desk.rooms?.list?.() || [];
+    const groupRoom = roomsList.find(item => String(item.telegramSync?.groupId) === String(chat.id) && item.members.includes(item.telegramSync?.agentId));
+    if (groupRoom) {
+      // One bot bridges a synced Telegram group; any other agent bot allowed in the same group stays quiet to avoid duplicates and loops.
+      if (groupRoom.telegramSync.agentId !== agentId) return;
+      const msgId = message.message_id != null ? String(message.message_id) : '';
+      if (msgId && this.store.get('roomtgmsg', `${agentId}:${chat.id}:${msgId}`)) return;
+      const hasMedia = MEDIA.some(kind => message[kind]);
+      if (!text && !hasMedia) return;
+      if (!text && hasMedia) {
+        await this.textOnly(agentId, message, say, { replyTo: message.message_id, text: ROOM_TEXT_ONLY });
+        if (!caption) return;
+      }
+      const rawText = text || caption;
+      const botMentioned = Boolean(mentionRe && rawText.match(mentionRe));
+      const stripped = (mentionRe ? rawText.replace(mentionRe, '').trim() : rawText) || rawText;
+      const postedText = !text && hasMedia ? `${TG_MEDIA_NOTE}\n${stripped}` : stripped;
+      const replyTgId = message.reply_to_message?.message_id != null ? String(message.reply_to_message.message_id) : '';
+      const mapped = replyTgId ? (this.store.get('roomtgmsg', `${agentId}:${chat.id}:${replyTgId}`) || this.store.list('roomtgmsg').find(item => item.roomId === groupRoom.id && String(item.groupId) === String(chat.id) && String(item.telegramMessageId) === replyTgId)) : null;
+      const parentMsg = mapped?.roomMessageId ? this.store.get('roommsg', mapped.roomMessageId) : null;
+      const replyToId = parentMsg?.roomId === groupRoom.id ? parentMsg.id : '';
+      const mentionedAgents = this.desk.rooms.mentionsIn(groupRoom, stripped).filter(id => id !== 'you');
+      const targetIds = mentionedAgents.length ? mentionedAgents
+        : parentMsg?.roomId === groupRoom.id && parentMsg.from?.type === 'agent' && groupRoom.members.includes(parentMsg.from.id) ? [parentMsg.from.id]
+        : botMentioned ? [agentId]
+        : ['you'];
+      const to = targetIds.map(id => id === 'you' ? 'you' : (this.desk.rooms.member(id).handle || this.desk.rooms.member(id).name));
+      const senderLabel = nameOf(message.from) || 'Telegram member';
+      await this.desk.rooms.post(groupRoom.id, { text: postedText, replyTo: replyToId, telegramSender: { agentId, groupId: String(chat.id), messageId: msgId, id: String(message.from?.id || ''), label: senderLabel }, to });
+      this.desk.telegram?.noteInbox(agentId, { values: { chatName: `${groupRoom.name}: ${chat.title || 'Telegram group'}` } }, `agentbot:${agentId}:${chat.id}`, `${senderLabel}: ${postedText}`, { roomId: groupRoom.id });
+      return;
+    }
     if (!addressed) return;
     if (!text) return this.textOnly(agentId, message, say);
-    const stripped = text.replace(new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), '').trim() || text;
+    const stripped = (mentionRe ? text.replace(mentionRe, '').trim() : text) || text;
     return this.route(agentId, chat, stripped, `${nameOf(message.from) || 'Someone'} in ${chat.title || 'a group'}`);
   }
   // Media is not passed to the agent yet, and the person is told so, once for an album (each of its pictures is a message).
-  textOnly(agentId, message, say) {
+  textOnly(agentId, message, say, { replyTo = '', text = TEXT_ONLY } = {}) {
     if (!MEDIA.some(kind => message[kind])) return;
     if (message.media_group_id) {
       const album = `${agentId}:${message.chat.id}:${message.media_group_id}`;
       if (this.album === album) return;
       this.album = album;
     }
-    return say(message.chat.id, TEXT_ONLY);
+    return say(message.chat.id, text, replyTo ? { reply_to_message_id: replyTo, allow_sending_without_reply: true } : {});
   }
   noteGroup(agentId, chat) {
     const record = this.record(agentId); if (!record) return;

@@ -66,7 +66,7 @@ What happened is written to `install-update.log` in the updates folder.
 
 ## What you can do
 
-- **Chat with agents.** Each project has its own agent and personal chat. Group chats bring several agents together, and Rex Agent can make a group chat or talk in one for you. You can switch an agent between Claude, Codex, Gemini and Local AI and choose the model, effort and permission mode under the message box.
+- **Chat with agents.** Each project has its own agent and personal chat. Group chats bring several agents together, and Rex Agent can make a group chat or talk in one for you. A room can also sync text messages both ways with one allowed Telegram group through an agent bot in that room, with speaker labels and reply links. Media (photos, files, voice notes, stickers) is not synced, and one Telegram group links to one room at a time. For all incoming group text messages beyond bot mentions and replies, make the bot a group admin or disable Group Privacy in @BotFather. You can switch an agent between Claude, Codex, Gemini and Local AI and choose the model, effort and permission mode under the message box.
 - **Split view and quick search.** Put up to four chats side by side. Press Ctrl+K (Cmd+K on a Mac) to jump to any chat, agent, task or setting.
 - **Background jobs.** An agent can hand a slow job to a quick helper and keep talking to you; the result shows up in the chat.
 - **Tasks.** Keep tasks in Rex Desk, or connect a tracker such as Orbit. Hand a task to an agent and it does the work in its own chat or group.
