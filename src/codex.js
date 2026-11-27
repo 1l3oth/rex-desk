@@ -14,7 +14,7 @@ export function aiProvider(value = 'claude') {
   return value;
 }
 export const providerTitle = value => value === 'codex' ? 'Codex' : value === 'gemini' ? 'Gemini (Antigravity)' : value === 'openrouter' ? 'OpenRouter' : 'Claude Code';
-// Antigravity keeps one Google sign-in per computer for now, so its "profile" variable is only Rex Desk's own marker.
+// Antigravity profiles: REX_GEMINI_HOME marks the profile home, and profileEnvironment points ANTIGRAVITY_GEMINI_DIR at its .gemini folder.
 // OpenRouter runs through Claude Code with an OpenRouter key (see openrouter.js); it has no profile folders of its own.
 export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : value === 'gemini' ? 'REX_GEMINI_HOME' : value === 'openrouter' ? 'REX_OPENROUTER_HOME' : 'CLAUDE_CONFIG_DIR';
 

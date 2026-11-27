@@ -193,11 +193,12 @@ test('sign out is reported only when the CLI\'s sign-out worked and its status s
   await assert.rejects(fake(args => (args.includes('logout') ? logoutOk : { code: 1, stdout: '', stderr: 'Error: could not read auth.json, treating as not logged in' })).signOut('codex', work), /could not confirm the sign-out/);
 });
 
-test('Gemini shows a plain note instead of adding a second account, and the rows say Remove only takes it off Rex Desk (L123)', () => {
+test('Gemini adds a second account in its own .gemini folder, and the rows say Remove only takes it off Rex Desk (L123)', () => {
   const agents = new AgentProfiles({ config: () => ({}) }, { roots: { home: temporary('acct-gem') } });
-  assert.throws(() => agents.addProfile('gemini', 'work'), /one Google account signed in on a computer/);
+  const added = agents.addProfile('gemini', 'work');
+  assert.ok(existsSync(path.join(added.profile, '.gemini')));
   const chat = read('chat.js');
-  assert.match(chat, /name === 'gemini' \? `<p class="acct-one muted">\$\{t`Antigravity keeps one Google account signed in on a computer\./);
+  assert.doesNotMatch(chat, /acct-one muted/);
   assert.match(chat, /data-acct-signout="\$\{esc\(item\.profile\)\}"/);
   assert.match(chat, /item\.removable \? `<button type="button" class="or-link bad" data-acct-remove="\$\{esc\(item\.profile\)\}">/);
   assert.match(chat, /Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at \$\{profile\}\./);
