@@ -145,7 +145,7 @@ test('loop guard: a real stuck gives one fresh start; stuck again soon after sto
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'chat-cleared').length, 1, 'one fresh start, not three');
     assert.equal(prompts.length, 2, 'no silent restart after the second stuck');
-    assert.match(stopped.text, /stopped this agent/);
+    assert.match(stopped.text, /got stuck, so I stopped it/);
     assert.ok(store.get('run', run.id).stuckStopped);
     // The person presses Continue: the agent goes on in the same chat.
     await desk.continueStuck(run.id);

@@ -2875,13 +2875,13 @@
  "Finish sign-in on the computer running Rex Desk.": "សូមបញ្ចប់ការចូលគណនីនៅលើកុំព្យូទ័រដែលដំណើរការ Rex Desk។",
  "Agents cannot use {0} until you sign in again.": "ភ្នាក់ងារមិនអាចប្រើ {0} បានទេ រហូតដល់អ្នកចូលគណនីម្ដងទៀត។",
  "At the top of the screen, for chats you are not looking at.": "នៅខាងលើអេក្រង់ សម្រាប់ការជជែកដែលអ្នកមិនកំពុងមើល។",
- "Steps kept getting cancelled again, so I stopped this agent. Its chat is kept.": "ជំហានត្រូវបានបោះបង់ម្ដងហើយម្ដងទៀត ដូច្នេះខ្ញុំបានបញ្ឈប់ភ្នាក់ងារនេះ។ ការជជែករបស់វានៅដដែល។",
- "Continue": "បន្ត",
- "Handoff: start a fresh chat that reads a summary of this one": "ប្រគល់បន្ត៖ ចាប់ផ្ដើមការជជែកថ្មីដែលអានសេចក្ដីសង្ខេបនៃការជជែកនេះ",
- "Handoff": "ប្រគល់បន្ត",
- "Hand off now? The agent is working: it stops, and a fresh chat starts with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារកំពុងធ្វើការ៖ វានឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
- "Hand off to a fresh chat? The agent starts fresh with your next message and reads a summary of this one. The messages stay on screen.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។ សារទាំងអស់នៅលើអេក្រង់ដដែល។",
  "Handed off. Your next message starts a fresh chat.": "បានប្រគល់បន្ត។ សារបន្ទាប់របស់អ្នកចាប់ផ្ដើមការជជែកថ្មី។",
  "The helpers did not report back for 30 minutes, so I stopped them. The next handoff lists them.": "ជំនួយការមិនបានរាយការណ៍ត្រឡប់មកវិញអស់រយៈពេល 30 នាទី ដូច្នេះខ្ញុំបានបញ្ឈប់ពួកវា។ ការប្រគល់បន្តលើកក្រោយនឹងរាយឈ្មោះពួកវា។",
- "Hand off": "ប្រគល់បន្ត"
+ "Hand off": "ប្រគល់បន្ត",
+ "This agent got stuck, so I stopped it. Your chat is kept.": "ភ្នាក់ងារនេះជាប់គាំង ដូច្នេះខ្ញុំបានបញ្ឈប់វា។ ការជជែករបស់អ្នកនៅដដែល។",
+ "Continue working": "បន្តធ្វើការ",
+ "Hand off to a new chat": "ប្រគល់បន្តទៅការជជែកថ្មី",
+ "The agent starts fresh and reads a summary of this chat.": "ភ្នាក់ងារចាប់ផ្ដើមថ្មី ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
+ "Hand off now? The agent stops, and a new chat starts with your next message and reads a summary of this one.": "ប្រគល់បន្តឥឡូវនេះ? ភ្នាក់ងារនឹងឈប់ ហើយការជជែកថ្មីចាប់ផ្ដើមជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។",
+ "Hand off to a new chat? The agent starts fresh with your next message and reads a summary of this one.": "ប្រគល់បន្តទៅការជជែកថ្មី? ភ្នាក់ងារចាប់ផ្ដើមថ្មីជាមួយសារបន្ទាប់របស់អ្នក ហើយអានសេចក្ដីសង្ខេបនៃការជជែកនេះ។"
 }

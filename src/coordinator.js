@@ -1457,7 +1457,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const spoke = last && this.store.events(runId, { visible: true, limit: 200 }).some(event => event.kind === 'human-message' && (Date.parse(event.createdAt) || 0) > last);
     if (last && at - last < STUCK_AGAIN_MS && !spoke) {
       this.patchRun(runId, { stuckStopped: new Date(at).toISOString(), helpers: undefined });
-      this.store.event(runId, 'stuck-stopped', { text: 'Steps kept getting cancelled again, so I stopped this agent. Its chat is kept.' }, true);
+      this.store.event(runId, 'stuck-stopped', { text: 'This agent got stuck, so I stopped it. Your chat is kept.' }, true);
       return false;
     }
     await this.freshStart(runId, { reason: 'automatically, because several steps in a row were cancelled by Claude Code (a job left running in the background)', notice: 'Steps kept getting cancelled, so I started a fresh chat.' });

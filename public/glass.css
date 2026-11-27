@@ -638,3 +638,13 @@ html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}
 /* L117: the chat's Handoff is an icon on a computer; on a phone it moves into the chat's More sheet, so the name keeps its room. */
 .head-actions .head-more{display:none}
 @media (max-width:760px){.head-actions .head-handoff,.head-actions [data-action="app-on"]{display:none!important}.head-actions .head-more{display:grid}}
+/* L117: the loop guard's stopped notice, a flat row like a settings notice: icon, words, then Continue working. */
+.stuck-note{display:flex;align-items:center;gap:10px;margin:10px 0 18px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font-size:13px;line-height:1.4}
+.stuck-note .stuck-icon{flex:none;color:var(--muted)}
+.stuck-note .stuck-text{flex:1;min-width:0}
+.stuck-note .btn{flex:none}
+@media (max-width:760px){.stuck-note{flex-wrap:wrap}.stuck-note .btn{width:100%;justify-content:center}}
+.m-sheet-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.m-sheet-text small{font-size:13px;color:var(--muted);line-height:1.3}
+/* The Hand off button lines up with Continue in Claude app: icon, then the words. */
+.btn.head-handoff{display:inline-flex;align-items:center;gap:6px}
