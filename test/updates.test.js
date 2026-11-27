@@ -277,7 +277,7 @@ test('Windows installer: the folder reaches PowerShell only through REX_INSTALL_
   assert.match(script, /\$p=@\(&\$q\);/); assert.match(script, /\$l=@\(&\$q\);/);
 });
 
-test('Windows installer: an empty, unset or drive-root folder stops no program, only programs inside the folder match, and each is stopped through its own handle', async () => {
+test('Windows installer: an empty, unset or drive-root folder stops no program, only the two programs Rex Desk installs match, and each is stopped through its own handle', async () => {
   const { hooks, script } = await closeCommand();
   const block = hooks.slice(hooks.indexOf('StrLen $RexT1 "$INSTDIR"'), hooks.indexOf('nsExec::ExecToStack `powershell.exe'));
   // The installer: a short folder (empty or a drive root) or a variable that did not read back as written skips the step.
@@ -289,8 +289,10 @@ test('Windows installer: an empty, unset or drive-root folder stops no program, 
   const list = script.indexOf('Get-CimInstance');
   for (const check of ["-notmatch '^[A-Za-z]:\\\\[^\\\\]'", 'GetFullPath', 'GetPathRoot']) { const at = script.indexOf(check); assert.ok(at > 0 && at < list, check); }
   assert.equal((script.slice(0, list).match(/exit 3/g) || []).length, 3);
-  assert.match(script, /\$f\+='\\';\$q=/);
-  assert.match(script, /\$_\.ExecutablePath\.StartsWith\(\$f,'OrdinalIgnoreCase'\)/);
+  // Only Rex Desk's own programs: the exact paths of the two executables the build installs, nothing else in a shared folder.
+  assert.match(script, /\$f\+='\\';\$n='rex-desk\.exe','payload\\node\\node\.exe'\|%\{\$f\+\$_\};\$q=/);
+  assert.match(script, /\?\{\$_\.ExecutablePath -and \$n -contains \$_\.ExecutablePath\}/);
+  assert.doesNotMatch(script, /StartsWith/, 'no prefix match: an unrelated program in the same folder is never closed');
   assert.doesNotMatch(script, /-like|-Filter|Stop-Process/, 'no wildcard match, and no stop by process ID');
   // A process is held open first (its ID cannot go to another program while the handle is open), its path is checked
   // again under that ID, and Kill goes through that same handle.

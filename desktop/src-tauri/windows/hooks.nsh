@@ -251,6 +251,10 @@ FunctionEnd
   ; it). Each lookup is wrapped in @(): a single process comes back unwrapped, and its Count reads as nothing.
   ; A program is stopped only through an open handle: the handle is opened first, which keeps Windows from giving its
   ; process ID to another program, then its path is checked again under that ID, and Kill uses that same handle.
+  ; Only Rex Desk's own programs are closed: the exact paths of the two executables the build installs (rex-desk.exe and
+  ; payload\node\node.exe; .rex-desk-files lists no other .exe). A person may have installed into a shared folder such as
+  ; D:\Apps, so nothing else in it is ever closed. -contains compares whole paths as plain text, ignoring case.
+  ; A program of Rex Desk's that is missed only makes the rename below fail, which stops the update and keeps the old copy.
   ; An empty folder would match every program on the computer, so nothing is listed or stopped unless the folder is a
   ; real folder below a drive and the variable reads back exactly as written. The script checks it again itself (empty,
   ; unset, relative or a drive root stops nothing) and only matches programs inside "<folder>\", so a sibling such as
@@ -271,7 +275,7 @@ FunctionEnd
   ${If} $RexOk != ""
     !insertmacro RexNote "skipped closing programs, nothing was stopped: $RexOk"
   ${Else}
-  nsExec::ExecToStack `powershell.exe -NoProfile -Command "$$f=([string]$$env:REX_INSTALL_DIR).Trim();$$s='skipped, nothing stopped: folder is ';if($$f -notmatch '^[A-Za-z]:\\[^\\]' -and $$f -notmatch '^\\\\[^\\]+\\[^\\]+\\[^\\]'){$$s+'empty, relative or a drive root';exit 3};try{$$f=[IO.Path]::GetFullPath($$f).TrimEnd('\')}catch{$$s+'not a valid path';exit 3};if($$f.Length -le 3 -or [IO.Path]::GetPathRoot($$f).TrimEnd('\') -eq $$f){$$s+'a drive root';exit 3};$$f+='\';$$q={@(Get-CimInstance Win32_Process|?{$$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f,'OrdinalIgnoreCase')})};for($$i=0;$$i -lt 20;$$i++){$$p=@(&$$q);if(!$$p.Count){break};foreach($$c in $$p){try{$$h=[Diagnostics.Process]::GetProcessById($$c.ProcessId);$$null=$$h.Handle;if(@(&$$q|?{$$_.ProcessId -eq $$c.ProcessId}).Count){$$h.Kill()}}catch{}};sleep -m 300};$$l=@(&$$q);if($$l.Count){'still running: '+(($$l|%{$$_.Name+' '+$$_.ProcessId})-join', ')}else{'nothing left running'}"`
+  nsExec::ExecToStack `powershell.exe -NoProfile -Command "$$f=([string]$$env:REX_INSTALL_DIR).Trim();$$s='skipped, nothing stopped: folder is ';if($$f -notmatch '^[A-Za-z]:\\[^\\]' -and $$f -notmatch '^\\\\[^\\]+\\[^\\]+\\[^\\]'){$$s+'empty, relative or a drive root';exit 3};try{$$f=[IO.Path]::GetFullPath($$f).TrimEnd('\')}catch{$$s+'not a valid path';exit 3};if($$f.Length -le 3 -or [IO.Path]::GetPathRoot($$f).TrimEnd('\') -eq $$f){$$s+'a drive root';exit 3};$$f+='\';$$n='rex-desk.exe','payload\node\node.exe'|%{$$f+$$_};$$q={@(Get-CimInstance Win32_Process|?{$$_.ExecutablePath -and $$n -contains $$_.ExecutablePath})};for($$i=0;$$i -lt 20;$$i++){$$p=@(&$$q);if(!$$p.Count){break};foreach($$c in $$p){try{$$h=[Diagnostics.Process]::GetProcessById($$c.ProcessId);$$null=$$h.Handle;if(@(&$$q|?{$$_.ProcessId -eq $$c.ProcessId}).Count){$$h.Kill()}}catch{}};sleep -m 300};$$l=@(&$$q);if($$l.Count){'still running: '+(($$l|%{$$_.Name+' '+$$_.ProcessId})-join', ')}else{'nothing left running'}"`
   Pop $RexOk
   Pop $RexErr
   ${Do}
