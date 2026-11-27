@@ -461,6 +461,21 @@ export class Desk {
     return agent?.model ? '' : 'sonnet';
   }
   // The Claude account (profile folder) a run uses: the agent's own if it was pinned to one, otherwise the one for everyone.
+  // Removes an account Rex Desk added (L123). The account in use for everyone moves to the default one first, agents pinned to it
+  // go back to the default, and anything saved for it (the usage bars, a limit mark, a turn's account) is cleared. Then its folder
+  // goes, never the default folder or the shared conversation history.
+  removeAccount(provider, profile) {
+    if (!this.agents.removable(provider, profile)) throw new Error('Only an account added in Rex Desk can be removed here. The main account stays.');
+    const same = value => typeof value === 'string' && value && canonicalProfile(value) === canonicalProfile(profile);
+    const config = this.store.publicConfig(), switched = same(config.agentProfiles?.[provider]) || same(this.agents.selected(provider));
+    if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: null } });
+    let moved = 0;
+    for (const agent of this.store.list('specialist')) if (same(agent.profile)) { this.store.put('specialist', agent.id, { ...agent, profile: '' }); moved += 1; }
+    for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: '' });
+    for (const usage of this.store.list('usage')) if (usage.provider === provider && same(usage.profile)) this.store.delete('usage', usage.id);
+    this.agents.deleteProfile(provider, profile);
+    return { removed: true, switched, moved };
+  }
   accountFor(run) {
     const id = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     return (id && this.store.get('specialist', id)?.profile) || '';

@@ -2891,5 +2891,14 @@
  "Notifications: what your agents did": "ការជូនដំណឹង៖ អ្វីដែលភ្នាក់ងាររបស់អ្នកបានធ្វើ",
  "Show agents": "បង្ហាញភ្នាក់ងារ",
  "No agents match.": "គ្មានភ្នាក់ងារត្រូវគ្នាទេ។",
- "So you can tell your computers apart, like Home or Work.": "ដើម្បីឱ្យអ្នកស្គាល់កុំព្យូទ័ររបស់អ្នកដាច់ពីគ្នា ដូចជា ផ្ទះ ឬ ការងារ។"
+ "So you can tell your computers apart, like Home or Work.": "ដើម្បីឱ្យអ្នកស្គាល់កុំព្យូទ័ររបស់អ្នកដាច់ពីគ្នា ដូចជា ផ្ទះ ឬ ការងារ។",
+ "Antigravity keeps one Google account signed in on a computer. To use another one, sign out, then sign in with the other account.": "Antigravity រក្សាគណនី Google តែមួយដែលបានចូលនៅលើកុំព្យូទ័រមួយ។ ដើម្បីប្រើគណនីផ្សេង សូមចាកចេញ រួចចូលវិញដោយប្រើគណនីនោះ។",
+ "Sign out of Antigravity? A window opens: type /logout there and press Enter.": "ចាកចេញពី Antigravity? បង្អួចមួយនឹងបើក៖ វាយ /logout នៅទីនោះ ហើយចុច Enter។",
+ "Sign out of this account? Agents on it move to another signed-in account, or wait until you sign in again.": "ចាកចេញពីគណនីនេះ? ភ្នាក់ងារដែលប្រើវានឹងប្ដូរទៅគណនីផ្សេងដែលបានចូល ឬរង់ចាំរហូតដល់អ្នកចូលម្ដងទៀត។",
+ "Type /logout in the window that opened, then press Check again.": "វាយ /logout នៅក្នុងបង្អួចដែលបានបើក រួចចុច ពិនិត្យម្ដងទៀត។",
+ "Signed out.": "បានចាកចេញ។",
+ "Remove this account? It is in use, so agents switch to the main account first. Its sign-in and settings on this computer are deleted; your conversations stay.": "ដកគណនីនេះចេញ? វាកំពុងប្រើ ដូច្នេះភ្នាក់ងារនឹងប្ដូរទៅគណនីមេជាមុនសិន។ ការចូល និងការកំណត់របស់វានៅលើកុំព្យូទ័រនេះនឹងត្រូវលុប ប៉ុន្តែការសន្ទនារបស់អ្នកនៅដដែល។",
+ "Remove this account? Its sign-in and settings on this computer are deleted; your conversations stay.": "ដកគណនីនេះចេញ? ការចូល និងការកំណត់របស់វានៅលើកុំព្យូទ័រនេះនឹងត្រូវលុប ប៉ុន្តែការសន្ទនារបស់អ្នកនៅដដែល។",
+ "Account removed. Agents now use the main account.": "បានដកគណនីចេញ។ ឥឡូវនេះភ្នាក់ងារប្រើគណនីមេ។",
+ "Account removed.": "បានដកគណនីចេញ។"
 }

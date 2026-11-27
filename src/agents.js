@@ -1,6 +1,6 @@
 import { AI_PROVIDERS, aiProvider, providerTitle, profileKey } from './codex.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -12,6 +12,9 @@ import { checkOpenRouterKey, openrouterEnvironment, openrouterHome } from './ope
 const cli = provider => provider === 'gemini' ? { command: agyCommand(), args: [] } : resolveCommand(provider);
 const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'status'], gemini: ['models'] };
 const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
+// Each CLI's own sign-out (L123). Claude Code: `claude auth logout`; Codex: `codex logout`. Antigravity has none on the command
+// line: its docs say to type /logout in the agy prompt, so Rex Desk opens agy in a window and says so.
+const logoutArgs = { claude: ['auth', 'logout'], codex: ['logout'] };
 // What the sign-in window runs first when the CLI is not on this computer yet.
 export const CODEX_WINDOWS_INSTALL = "$rexArch = if (($env:PROCESSOR_ARCHITEW6432, $env:PROCESSOR_ARCHITECTURE) -contains 'ARM64') { 'Arm64' } else { 'X64' }; "
   + "iex ([string](irm https://chatgpt.com/codex/install.ps1)).Replace('[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture', \"'$rexArch'\")";
@@ -178,7 +181,7 @@ export function parseClaudeStatus(output) {
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound } = {}) { this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // The OpenRouter key: the one saved in Settings (encrypted, shared with Jev), else OPENROUTER_API_KEY from the launch environment.
   openrouterKey() { const saved = this.store.get?.('secret', 'openrouter'); try { return saved ? this.store.decrypt(saved) : process.env.OPENROUTER_API_KEY || ''; } catch { return ''; } }
   withKey(provider, env) { return provider === 'openrouter' ? openrouterEnvironment(env, this.openrouterKey(), this.store.directory ? openrouterHome(this.store.directory) : '') : env; }
@@ -255,7 +258,7 @@ export class AgentProfiles {
       const savedMissing = Boolean(saved && typeof saved === 'string' && !directory(saved));
       return [provider, { selected, saved, savedMissing, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
         mcpEverywhere: profiles.every(item => this.mcpInstalled(provider, item.profile)),
-        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile) })).filter((item, index) => keep[index]) }];
+        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile), removable: this.removable(provider, item.profile) })).filter((item, index) => keep[index]) }];
     }));
     return Object.fromEntries(providers);
   }
@@ -367,7 +370,10 @@ export class AgentProfiles {
   }
   // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
   // one, so an agent keeps its conversation when it moves between accounts.
-  addProfile(provider, name, { roots = { home } } = {}) {
+  addProfile(provider, name, { roots = this.roots } = {}) {
+    // Antigravity keeps one Google sign-in per computer, in the system keyring, with no profile folder of its own (its docs: sign
+    // out with /logout, then sign in with the other account), so a second Gemini account cannot be added side by side.
+    if (provider === 'gemini') throw new Error('Antigravity keeps one Google account signed in on a computer. To use another one, sign out, then sign in with the other account.');
     const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
     if (!slug) throw new Error('Give the account a short name, like work or personal.');
     const folder = path.join(roots.home, '.config', `${aiProvider(provider)}-${slug}`);
@@ -376,6 +382,52 @@ export class AgentProfiles {
     const shared = path.join(roots.home, '.config', 'claude-code-shared-history');
     if (provider === 'claude' && existsSync(shared)) { try { symlinkSync(shared, path.join(folder, 'projects'), 'junction'); } catch {} }
     return { profile: folder, label: profileLabel(provider, folder) };
+  }
+  // A profile folder Rex Desk made itself (addProfile): ~/.config/<provider>-<name>, never the default ~/.claude, ~/.codex or
+  // ~/.gemini, never the shared conversation history, never a folder another tool made (Orca, ~/.claude-*).
+  removable(provider, profile, { roots = this.roots } = {}) {
+    if (!profile || provider === 'openrouter' || provider === 'gemini') return false;
+    const config = canonical(path.join(roots.home, '.config')), folder = canonical(profile), name = folder.slice(config.length + 1);
+    return folder.startsWith(`${config}/`) && !name.includes('/') && name.startsWith(`${aiProvider(provider)}-`) && name.length > aiProvider(provider).length + 1 && !/shared-history/i.test(name);
+  }
+  // Signs one account out with the CLI's own sign-out. Gemini (Antigravity) only signs out inside its prompt: a window opens with
+  // agy and the line to type. The cached status is dropped, so the list shows Signed out at once.
+  async signOut(provider, profile) {
+    if (provider === 'openrouter') throw new Error('OpenRouter has no sign-in: remove the key instead.');
+    const name = providerTitle(provider), executable = cli(provider), env = profileEnvironment(provider, profile);
+    if (!this.found(executable)) throw new Error(`${name} is not installed on this computer, so there is nothing to sign out of.`);
+    if (provider === 'gemini') { this.openLogoutWindow(executable, env); this.invalidate(provider); return { window: true }; }
+    const result = await this.run(executable.command, [...executable.args, ...logoutArgs[provider]], env, 30000);
+    this.invalidate(provider);
+    for (const [key, value] of this.standIn) if (canonical(value || '') === canonical(profile || '')) this.standIn.delete(key);
+    const after = await this.status(provider, profile, { refresh: true }).catch(() => null);
+    if (after?.loggedIn) throw new Error(`${name} did not sign out: ${(result.stderr || result.stdout || 'no reason given').trim().slice(0, 200)}`);
+    return { signedOut: true };
+  }
+  openLogoutWindow(executable, env) {
+    const line = 'Rex Desk: to sign out of Antigravity, type /logout and press Enter, then close this window.';
+    if (this.openWindow) return this.openWindow({ executable, env, line });
+    let child;
+    if (process.platform === 'win32') {
+      const script = ["$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-out'", `Write-Host ${psQuote(line)}`, "Write-Host ''", `& ${[executable.command, ...executable.args].map(psQuote).join(' ')}`].join('\n');
+      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-out', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env, windowsHide: false, detached: true, stdio: 'ignore' });
+    } else {
+      const shell = `echo ${shQuote(line)}; ${[executable.command, ...executable.args].map(shQuote).join(' ')}`;
+      child = process.platform === 'darwin'
+        ? spawn('osascript', ['-e', `tell application "Terminal" to do script ${JSON.stringify(shell)}`, '-e', 'tell application "Terminal" to activate'], { env, detached: true, stdio: 'ignore' })
+        : spawn('x-terminal-emulator', ['-e', 'bash', '-lc', `${shell}; exec bash`], { env, detached: true, stdio: 'ignore' });
+    }
+    child.on('error', () => {}); child.unref();
+  }
+  // Deletes a profile folder Rex Desk made. Its "projects" link to the shared history is taken away first (only the link), so the
+  // shared conversations are never touched.
+  deleteProfile(provider, profile, { roots = this.roots } = {}) {
+    if (!this.removable(provider, profile, { roots })) throw new Error('Only an account added in Rex Desk can be removed here. The main account stays.');
+    const folder = path.resolve(profile), link = path.join(folder, 'projects');
+    try { if (lstatSync(link).isSymbolicLink()) { unlinkSync(link); if (existsSync(link)) throw new Error('The shared history link could not be taken away, so nothing was deleted.'); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    rmSync(folder, { recursive: true, force: true });
+    for (const [key, value] of this.standIn) if (canonical(value || '') === canonical(folder) || key === `${provider}:${canonical(folder)}`) this.standIn.delete(key);
+    this.clearLimited(folder); this.invalidate(provider);
   }
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {

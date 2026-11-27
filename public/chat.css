@@ -3214,3 +3214,6 @@ html:has(.iv[open]){overflow:hidden}
   .st-field,.lt-field{min-width:0}.st-field input[type=time],.lt-field input[type=date]{width:100%}
   .aps-row .cn-time{width:112px}
 }
+/* Sign out and Remove on each account row (L123): quiet links at the row end. */
+.acct-acts{flex:none;display:flex;align-items:center;gap:10px;align-self:center}
+.acct-acts .or-link{font-size:12px;padding:2px 0}

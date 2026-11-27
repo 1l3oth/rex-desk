@@ -1024,6 +1024,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return json(response, 200, { ok: true, label: checked.label, freeTier: checked.freeTier });
       }
       if (url.pathname === '/api/agents/openrouter-key' && request.method === 'DELETE') { store.delete('secret', 'openrouter'); desk.agents.invalidate('openrouter'); return json(response, 200, { ok: true }); }
+      if (url.pathname === '/api/agents/signout' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.agents.signOut(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
+      if (url.pathname === '/api/agents/remove' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.removeAccount(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }
