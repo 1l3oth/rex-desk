@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, sym
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
-import { agyCommand, antigravityMcpInstalled, parseAgyModels } from './antigravity.js';
+import { agyCommand, antigravityMcpInstalled, antigravityModels, parseAgyModels } from './antigravity.js';
 import { checkOpenRouterKey, openrouterEnvironment, openrouterHome } from './openrouter.js';
 
 // The command and arguments that check, and start, a provider's sign-in. Antigravity has no status command: listing the
@@ -94,6 +94,12 @@ export function profileEnvironment(provider, profile, env = process.env) {
   const result = { ...env, REX_AI_PROVIDER: aiProvider(provider) }, key = profileKey(aiProvider(provider));
   const selected = profile === undefined ? inheritedProfile(provider, env) : profile;
   if (selected) result[key] = path.resolve(selected); else delete result[key];
+  // Antigravity keeps each Google sign-in apart only with its data folder moved and the token kept in a file there
+  // (by default the token sits in the shared Windows credential store, one per computer).
+  if (aiProvider(provider) === 'gemini') {
+    if (selected) { result.ANTIGRAVITY_GEMINI_DIR = path.join(path.resolve(selected), '.gemini'); result.AGY_CLI_FORCE_FILE_TOKEN_STORAGE = '1'; }
+    else { delete result.ANTIGRAVITY_GEMINI_DIR; delete result.AGY_CLI_FORCE_FILE_TOKEN_STORAGE; }
+  }
   return result;
 }
 export function profileLabel(provider, profile) {
@@ -228,13 +234,20 @@ export class AgentProfiles {
         this.cache.set(`${provider}:`, status); return status;
       }
       const executable = cli(provider), env = profileEnvironment(provider, profile);
-      const args = [...executable.args, ...statusArgs[provider]];
-      const result = await this.run(executable.command, args, env, 30000);
-      const parsed = provider === 'gemini' ? { loggedIn: result.code === 0 && parseAgyModels(result.stdout).length > 0, method: 'Google', account: '', plan: '' } : provider === 'codex' ? codexStatus(result) : parseClaudeStatus(result.stdout);
+      let result, parsed;
+      if (provider === 'gemini' && profile) {
+        try {
+          const models = await antigravityModels({ env, cwd: profile });
+          parsed = { loggedIn: models.length > 0, method: 'Google', account: '', plan: '' };
+        } catch (error) { result = { stderr: String(error?.message || error) }; }
+      } else {
+        result = await this.run(executable.command, [...executable.args, ...statusArgs[provider]], env, 30000);
+        parsed = provider === 'gemini' ? { loggedIn: result.code === 0 && parseAgyModels(result.stdout).length > 0, method: 'Google', account: '', plan: '' } : provider === 'codex' ? codexStatus(result) : parseClaudeStatus(result.stdout);
+      }
       const status = { provider, profile, label: profileLabel(provider, profile), checkedAt: new Date().toISOString(), checkedAtMs: Date.now(),
-        installed: !(result.error?.code === 'ENOENT'), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
+        installed: result ? result.error?.code !== 'ENOENT' : cliFound(executable), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
         organization: parsed?.organization || '', plan: parsed?.plan || '',
-        error: parsed ? '' : result.error?.code === 'ENOENT' ? `${providerTitle(provider)} CLI is not installed.` : (result.stderr || result.stdout || 'Sign-in status unavailable.').trim().slice(0, 300) };
+        error: parsed ? '' : result?.error?.code === 'ENOENT' ? `${providerTitle(provider)} CLI is not installed.` : (result?.stderr || result?.stdout || 'Sign-in status unavailable.').trim().slice(0, 300) };
       this.cache.set(key, status); return status;
     })().finally(() => this.pending.delete(key));
     this.pending.set(key, check); return check;
@@ -365,14 +378,15 @@ export class AgentProfiles {
     const job = this.jobs?.get(provider);
     return job ? { provider, state: job.state, url: job.url, error: job.error, at: job.at } : { provider, state: 'none' };
   }
-  // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
-  // one, so an agent keeps its conversation when it moves between accounts.
+  // A new isolated profile folder for another account. Claude shares conversation history with the others when available,
+  // while Gemini uses its own .gemini directory for sign-in and settings.
   addProfile(provider, name, { roots = { home } } = {}) {
     const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
     if (!slug) throw new Error('Give the account a short name, like work or personal.');
     const folder = path.join(roots.home, '.config', `${aiProvider(provider)}-${slug}`);
     if (existsSync(folder)) throw new Error(`There is already a profile called ${slug}.`);
     mkdirSync(folder, { recursive: true });
+    if (provider === 'gemini') mkdirSync(path.join(folder, '.gemini'), { recursive: true });
     const shared = path.join(roots.home, '.config', 'claude-code-shared-history');
     if (provider === 'claude' && existsSync(shared)) { try { symlinkSync(shared, path.join(folder, 'projects'), 'junction'); } catch {} }
     return { profile: folder, label: profileLabel(provider, folder) };
@@ -380,7 +394,7 @@ export class AgentProfiles {
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {
     try {
-      if (provider === 'gemini') return antigravityMcpInstalled();
+      if (provider === 'gemini') return antigravityMcpInstalled(home, profile);
       if (provider === 'openrouter') return true;
       if (provider === 'codex') { const config = path.join(profile || path.join(home, '.codex'), 'config.toml'); return existsSync(config) && /\[mcp_servers\.rex_desk\]/.test(readFileSync(config, 'utf8')); }
       const file = profile ? path.join(profile, '.claude.json') : path.join(home, '.claude.json');
