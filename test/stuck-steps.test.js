@@ -334,7 +334,7 @@ test('a More sheet closes before its item opens, a guard stop wins over the slee
   assert.doesNotMatch(chat, /back\.addEventListener\('click', inner =>/, 'no sheet listener the item handlers would starve');
   assert.match(chat, /const mood = stopped \? 'is-stopped' :/, 'stopped wins over idle in the list');
   assert.match(chat, /sub: guardStopped\(main\) \? t\('Stopped'\) : mainLive\(\)\.state === 'idle' \? t\('Asleep'\)/, 'Rex Agent row');
-  assert.match(chat, /stopped: agentStopped\(agent\) \}\)\)/, 'agent rows');
+  assert.match(chat, /railItem\('specialist', agent\.id, \{[^\n]*stopped: agentStopped\(agent\) \}\)/, 'agent rows pass the guard stop to their row');
   assert.match(css, /@container \(max-width:880px\)\{\.head-actions:has\(\.head-more\[data-personal\]\) \.head-handoff/, 'narrow fold only for personal chats');
   assert.match(chat, /head-more"\$\{personal \? ' data-personal' : ''\}/);
 });
