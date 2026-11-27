@@ -853,7 +853,7 @@ export class Desk {
     // heldResult: the final reply of a Telegram turn, sent once the turn really ended (see finally), never before the
     // usage-limit check: Claude can report its result and then fail on the limit, and the retry answers instead.
     // turnFailed: Telegram is then told only that there is no answer, never the error or a failed reply's own words.
-    let run = this.run(runId), token, handedOn = false, heldResult = null, turnFailed = false;
+    let run = this.run(runId), token, handedOn = false, heldResult = null, turnFailed = false, codexHome;
     // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
@@ -963,12 +963,30 @@ export class Desk {
       const cwd = await this.startFolder(runId, () => { const now = this.run(runId); return [now.cwd, now.worktree, ...(now.cwd || now.worktree ? [projectHere, ownHome()] : [path.join(this.store.directory, 'coordinator')])]; });
       run = this.run(runId);
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
+      // The project folder whose work folder holds this agent's temp files and host files (never C:'s temp folder).
+      const workProject = run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path;
+      // The account is picked once, here: the turn launches on exactly this one, and a Codex thread is checked against it, so a
+      // switch made while a message waited can never send the old thread id to the new account.
+      const agentEnv = { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) };
+      codexHome = run.provider === 'codex' ? agentEnv.CODEX_HOME || '' : undefined;
+      if (!attach && run.provider === 'codex') {
+        const thread = this.codexThread(run, codexHome);
+        if (thread === 'unsure') {
+          // Nothing changes: the thread id stays, and the waiting message goes back to the queue, so Resume or the next message retries.
+          this.patchRun(runId, { followUp: '', queued: [run.followUp, ...(run.queued || [])].filter(item => String(item || '').trim()), freshRetry: true, threadUnchecked: true });
+          throw Object.assign(new Error("Rex Desk could not read this Codex account's history folder to check the earlier conversation, so nothing was sent yet. Your message is kept: press Resume or send again to retry."), { why: 'codex-unchecked' });
+        }
+        if (thread !== 'here') {
+          await this.freshStart(runId, { inTurn: true, ...(thread === 'moved'
+            ? { why: 'codex-account', reason: 'because the chat moved to another Codex account, which keeps its own history', notice: 'This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.' }
+            : { why: 'codex-missing', reason: 'because Codex could not find its earlier conversation on this account', notice: 'Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.' }) });
+          run = this.run(runId);
+        }
+      }
       // A run nobody picked a mode for starts in the person's default mode from Settings.
       const remoteOn = Boolean(this.store.get('run', runId)?.inApp?.on) && (run.provider || 'claude') === 'claude';
       // An agent's own effort (its card) is used when nobody picked one for this chat (L64).
       const ownEffort = !run.effort && this.store.get('specialist', run.roomAgent || run.specialistId || '')?.effort, ran = ownEffort && effortsFor(run.provider || 'claude').includes(ownEffort) ? { ...run, effort: ownEffort } : run;
-      // The project folder whose work folder holds this agent's temp files and host files (never C:'s temp folder).
-      const workProject = run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path;
       const options = { run: ran.permissionMode ? ran : { ...ran, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd,
         ...(remoteOn ? { remote: this.remoteName(runId) } : {}),
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
@@ -976,7 +994,7 @@ export class Desk {
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         // MCP servers switched off for this agent on the Market page are blocked in its session too.
         mcpOff: [...toolsOff(this.store, runAgentId(run))].filter(key => key.startsWith('mcp:')).map(key => key.slice(4)),
-        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), // withId: the runner (Codex, an agent's own process) acknowledges or gives back this hand-over with its handover; others
         // get just the text.
@@ -1011,7 +1029,7 @@ export class Desk {
           if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
           // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
           if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
-          if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId, sessionAccount: this.store.get('run', runId)?.turnAccount || '' });
+          if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId, ...(codexHome !== undefined ? { sessionAccount: codexHome } : {}) });
           // Steps kept getting cancelled: the runner stopped its own processes; the end of the turn starts a fresh chat.
           if (kind === 'steps-stuck') { this.patchRun(runId, { stepsStuck: true, ...(data.helpers?.length ? { helpers: data.helpers } : {}) }); this.store.event(runId, kind, data); return; }
           // The helpers (sub-agents, background jobs) of this turn still running: a fresh start waits for them or lists them (L117).
@@ -1144,7 +1162,7 @@ ${message}` : message;
       else {
       turnFailed = !controller.signal.aborted;
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
-      this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
+      this.store.event(runId, 'error', { message: friendlyDiskError(error.message), ...(error.why ? { why: error.why } : {}) }, true);
       }
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
@@ -1187,7 +1205,7 @@ ${message}` : message;
       // Messages that came in while the agent was busy go in now, as the next turn. A team session also takes its waiting reports
       // after a failed or stopped turn, or they would sit there until the next report came.
       const waiting = this.store.get('run', runId);
-      if (waiting?.queued?.length && (['needs_evidence', 'finished'].includes(waiting.state) || (waiting.teamOf && ['failed', 'stopped'].includes(waiting.state))) && !this.closed) this.resumeQueued(runId, waiting);
+      if (waiting?.queued?.length && (['needs_evidence', 'finished'].includes(waiting.state) || (waiting.teamOf && ['failed', 'stopped'].includes(waiting.state) && !waiting.threadUnchecked)) && !this.closed) this.resumeQueued(runId, waiting);
     }
   }
   // The database's list of checkouts on this computer. Scanned at server start and on demand; a scan is cheap (local git only).
@@ -1629,33 +1647,37 @@ ${asked}` : STUCK_PROMPT;
     if (asks.length) parts.push(`Open in Needs you:\n${asks.join('\n')}`);
     return parts.length ? `## Facts from Rex Desk (read from git and the task list when this was written)\n${parts.join('\n\n')}` : '';
   }
-  // Why a chat's session cannot be reopened, as the fresh start to make instead, or null when it can. A Claude conversation
-  // started on another computer is not here. A Codex thread lives in one account's CODEX_HOME only: after the person (or the
-  // usage-limit switch) moves the agent to another Codex account, or back, that account has no rollout for it and Codex
-  // answers "no rollout found for thread id". The chat then goes on in a fresh thread that reads a handoff of this chat, so the
-  // message is kept and the agent still knows what was said. Claude accounts copy the conversation over instead (carrySession).
+  // Why a Claude chat's session cannot be reopened, as the fresh start to make instead, or null when it can: a Claude conversation
+  // started on another computer is not here. Claude accounts copy the conversation over themselves (carrySession). Codex is checked
+  // at launch instead (codexThread), against the exact account the turn runs on.
   sessionAway(run, provider) {
-    if (run.provider !== provider || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || ''))) return null;
-    if (provider === 'claude') return !this.runnerFactory && !conversationHere(run.sessionId)
+    if (provider !== 'claude' || run.provider !== provider || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || ''))) return null;
+    return !this.runnerFactory && !conversationHere(run.sessionId)
       ? { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' } : null;
-    if (provider !== 'codex') return null;
-    const here = this.threadHere || (this.runnerFactory ? null : codexThreadHere); if (!here) return null;
-    const account = this.usesLocalModel(run) ? '' : this.agents.use('codex', this.accountFor(run)) || '';
-    if (here(run.sessionId, account)) return null;
+  }
+  // Whether a Codex chat's thread can be reopened on the account (CODEX_HOME, '' for ~/.codex) this turn launches with. A Codex
+  // thread lives in one account only: after the person (or the usage-limit switch) moves the agent to another Codex account, or
+  // back, that account has no rollout for it and Codex answers "no rollout found for thread id". 'here' reopens it; 'moved' and
+  // 'missing' go on in a fresh thread that reads a handoff; 'unsure' (the folder could not be read) changes nothing and waits.
+  codexThread(run, account) {
+    if (run.provider !== 'codex' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || ''))) return 'here';
+    const here = this.threadHere || (this.runnerFactory ? null : codexThreadHere); if (!here) return 'here';
+    const found = here(run.sessionId, account);
+    if (found === true) return 'here';
+    if (found !== false) return 'unsure';
     // Chats from before sessionAccount was kept: moved when another Codex account on this computer holds the thread.
     const others = () => { try { return ['', ...this.agents.profiles('codex').map(item => item.profile)].filter(item => canonicalProfile(item || '') !== canonicalProfile(account)); } catch { return []; } };
-    const moved = run.sessionAccount !== undefined ? canonicalProfile(run.sessionAccount || '') !== canonicalProfile(account) : others().some(item => here(run.sessionId, item));
-    return moved
-      ? { why: 'codex-account', reason: 'because the chat moved to another Codex account, which keeps its own history', notice: 'This chat moved to another Codex account, which keeps its own history. It carries on in a fresh session that first reads a handoff of this chat.' }
-      : { why: 'codex-missing', reason: 'because Codex could not find its earlier conversation on this account', notice: 'Codex could not find the earlier conversation on this account. It carries on in a fresh session that first reads a handoff of this chat.' };
+    return (run.sessionAccount !== undefined ? canonicalProfile(run.sessionAccount || '') !== canonicalProfile(account) : others().some(item => here(run.sessionId, item) === true)) ? 'moved' : 'missing';
   }
-  async freshStart(runId, { note = '', reason = '', notice = '', why = '' } = {}) {
+  async freshStart(runId, { note = '', reason = '', notice = '', why = '', inTurn = false } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('This conversation lives in another app.');
     // Helpers (sub-agents, background jobs) still running are named in the handoff with where their output goes, so the fresh
     // chat knows they existed and does not start them again unseen (L117).
     const helpers = this.live.get(runId)?.runner?.helpersRunning?.() || run.helpers || [];
-    if (this.live.has(runId)) await this.stop(runId);
+    // inTurn: called by the turn that is starting now (a Codex thread not on its account): it is not stopped, keeps its message,
+    // and says so in a status line, so the waiting message stays in view instead of behind a 'Chat cleared' cut.
+    if (!inTurn && this.live.has(runId)) await this.stop(runId);
     const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     const name = agentId === 'main' ? 'Rex Agent' : agentId ? this.specialists.get(agentId)?.name || 'the agent' : run.title || 'the agent';
     const lines = this.store.events(runId, { visible: true, limit: 600 }).filter(event => ['human-message', 'message', 'agent-text'].includes(event.kind) && (event.text || event.message) && !isGreeting(event))
@@ -1672,8 +1694,8 @@ ${asked}` : STUCK_PROMPT;
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     if (agentId) this.distillHandoff(agentId, { note, task, lines, file });
-    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, helpers: undefined, stuckStopped: undefined, sessionId: undefined, sessionAccount: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
-    this.store.event(runId, 'chat-cleared', { ...(why ? { why } : {}), text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
+    this.patchRun(runId, { contextUsed: 0, ...(inTurn ? {} : { contextResetAt: now() }), handoffMidTurn: undefined, helpers: undefined, stuckStopped: undefined, sessionId: undefined, sessionAccount: undefined, mirror: undefined, ...(inTurn ? {} : { followUp: '' }), handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.store.event(runId, inTurn ? 'account-switched' : 'chat-cleared', { ...(why ? { why } : {}), text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
@@ -2115,7 +2137,7 @@ ${asked}` : STUCK_PROMPT;
     if (run.freshRetry && !starting) {
       if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex' }, true);
       prompt = [...(run.queued || []), String(prompt).trim()].filter(Boolean).join('\n'); silent = true;
-      this.patchRun(runId, { queued: [], freshRetry: undefined, freshBatch: [prompt], ...this.sentMark(runId, sendId) }); run = this.run(runId);
+      this.patchRun(runId, { queued: [], freshRetry: undefined, threadUnchecked: undefined, freshBatch: [prompt], ...this.sentMark(runId, sendId) }); run = this.run(runId);
     }
     const away = starting ? null : this.sessionAway(run, provider);
     if (starting || away) {

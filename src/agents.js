@@ -161,18 +161,21 @@ export function conversationHere(sessionId, { roots = { home, appData }, profile
   return false;
 }
 
-// Whether a Codex thread can be reopened on this account. Each Codex account (CODEX_HOME) keeps its own threads: the rollout
-// file under sessions/YYYY/MM/DD and Codex's own thread databases beside it. A chat that moved to another account, or back,
-// finds no rollout there ("no rollout found for thread id"), so it starts a fresh thread with a handoff instead. Nothing is
-// copied into any account: copying the rollout alone would leave Codex's databases without it. Only names are read.
-export function codexThreadHere(threadId, codexHome = '', { roots = { home } } = {}) {
+// Whether a Codex thread can be reopened on this account: true, false, or null when it could not be checked. Each Codex account
+// (CODEX_HOME) keeps its own threads: the rollout file under sessions/YYYY/MM/DD and Codex's own thread databases beside it. A
+// chat that moved to another account, or back, finds no rollout there ("no rollout found for thread id"), so it starts a fresh
+// thread with a handoff instead. Only a folder that is not there counts as missing; any other read error (access refused, busy)
+// is null, so a good conversation is never swapped for a summary because of a passing error. Nothing is copied into any account:
+// copying the rollout alone would leave Codex's databases without it. Only names are read.
+export function codexThreadHere(threadId, codexHome = '', { roots = { home }, readdir = readdirSync } = {}) {
   if (!threadId) return false;
   const sessions = path.join(codexHome || path.join(roots.home, '.codex'), 'sessions'), tail = `-${String(threadId).toLowerCase()}.jsonl`;
-  const names = folder => { try { return readdirSync(folder, { withFileTypes: true }); } catch { return []; } };
+  let unsure = false;
+  const names = folder => { try { return readdir(folder, { withFileTypes: true }); } catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error?.code)) unsure = true; return []; } };
   for (const year of names(sessions)) if (year.isDirectory()) for (const month of names(path.join(sessions, year.name))) if (month.isDirectory())
     for (const day of names(path.join(sessions, year.name, month.name))) if (day.isDirectory())
       if (names(path.join(sessions, year.name, month.name, day.name)).some(file => file.isFile() && file.name.toLowerCase().endsWith(tail))) return true;
-  return false;
+  return unsure ? null : false;
 }
 
 function capture(command, args, env, timeout) {

@@ -16,10 +16,11 @@ const rollouts = home => { const found = []; const walk = folder => { for (const
 
 // A pretend Codex: a new thread writes its rollout into the account's own CODEX_HOME, and reopening a thread that account does
 // not have fails the way the real one does.
-function fakeCodex(turns) {
+function fakeCodex(turns, gate = null) {
   return options => ({ async start(prompt) {
     const run = options.run, home = options.agentEnv.CODEX_HOME || '';
     turns.push({ run, prompt, home });
+    if (gate) await gate(turns.length);
     if (run.provider === 'codex') {
       if (run.sessionId) {
         if (!codexThreadHere(run.sessionId, home)) throw new Error(`no rollout found for thread id ${run.sessionId}`);
@@ -33,15 +34,16 @@ function fakeCodex(turns) {
     options.event('agent-text', { text: 'Done.' });
   }, async interrupt() {}, close() {} });
 }
-function setup() {
+function setup({ threadHere = codexThreadHere, gate = null } = {}) {
   const store = new Store(temporary('store')), turns = [];
-  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: fakeCodex(turns), threadHere: codexThreadHere });
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: fakeCodex(turns, gate), threadHere });
   const first = temporary('codex-first'), second = temporary('codex-second');
   const use = profile => { store.saveConfig({ ...store.publicConfig(), provider: 'codex', agentProfiles: { codex: profile } }); desk.agents.invalidate('codex'); };
   use(first);
   return { store, desk, turns, first, second, use };
 }
-const cleared = (store, runId) => store.events(runId, { limit: 200 }).filter(event => event.kind === 'chat-cleared');
+// The one plain line a Codex account change leaves in the chat (a status line, so the waiting message stays in view).
+const cleared = (store, runId) => store.events(runId, { limit: 200 }).filter(event => ['chat-cleared', 'account-switched'].includes(event.kind) && event.why);
 const said = (store, runId, text) => store.events(runId, { visible: true, limit: 200 }).filter(event => event.kind === 'human-message' && event.text === text).length;
 
 test('codexThreadHere finds a thread only in the account that has its rollout, and only reads names', () => {
@@ -135,4 +137,63 @@ test('a team task to a Codex agent works after the account was switched', async 
     assert.match(turn.prompt, /handoff[\s\S]*Review the second change/);
     assert.equal(cleared(store, workerRun).at(-1).why, 'codex-account');
   } finally { desk.closed = true; }
+});
+
+test('a switch made while a message waits to launch checks the thread against the account the turn really launches on', async () => {
+  const { store, desk, turns, first, second, use } = setup();
+  try {
+    const run = await desk.startMain({ prompt: 'Hello', provider: 'codex' });
+    await waitFor(() => desk.run(run.id).state === 'finished' && desk.run(run.id).sessionId, 'the first turn');
+    const firstThread = desk.run(run.id).sessionId;
+    // The message is accepted on the first account, and the person switches before the turn picks its account.
+    const startFolder = desk.startFolder.bind(desk);
+    let switchNow = true;
+    desk.startFolder = async (...args) => { if (switchNow) { switchNow = false; use(second); } return startFolder(...args); };
+    await desk.resume(run.id, { prompt: 'Sent just before the switch' });
+    await waitFor(() => turns.length === 2 && desk.run(run.id).state === 'finished', 'the waiting message');
+    assert.equal(path.resolve(turns[1].home), path.resolve(second), 'it launched on the account chosen at launch');
+    assert.ok(!turns[1].run.sessionId, 'the old thread id never reaches the new account');
+    assert.match(turns[1].prompt, /handoff[\s\S]*Sent just before the switch/, 'the waiting message goes in with the handoff');
+    assert.equal(said(store, run.id, 'Sent just before the switch'), 1);
+    assert.equal(cleared(store, run.id).at(-1).why, 'codex-account');
+    assert.equal(cleared(store, run.id).at(-1).kind, 'account-switched', 'a status line, so the waiting message is not cut from view');
+    assert.ok(!store.events(run.id, { limit: 200 }).some(event => event.kind === 'error'));
+    assert.ok(desk.run(run.id).sessionId && desk.run(run.id).sessionId !== firstThread);
+    assert.equal(path.resolve(desk.run(run.id).sessionAccount), path.resolve(second), 'the new thread is noted on the account it was made on');
+    assert.equal(rollouts(first).length, 1);
+  } finally { desk.closed = true; }
+});
+
+test('a history folder that could not be read keeps the thread and the message, says so, and a retry reopens the same thread', async () => {
+  let failing = false;
+  const refused = () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); };
+  const { store, desk, turns } = setup({ threadHere: (id, home) => codexThreadHere(id, home, failing ? { readdir: refused } : {}) });
+  try {
+    const run = await desk.startMain({ prompt: 'Hello', provider: 'codex' });
+    await waitFor(() => desk.run(run.id).state === 'finished' && desk.run(run.id).sessionId, 'the first turn');
+    const thread = desk.run(run.id).sessionId;
+    failing = true;
+    await desk.resume(run.id, { prompt: 'Keep this one' });
+    await waitFor(() => desk.run(run.id).state === 'failed' && !desk.live.has(run.id), 'the check to fail');
+    assert.equal(turns.length, 1, 'nothing was sent to Codex');
+    assert.equal(desk.run(run.id).sessionId, thread, 'the thread id is kept');
+    assert.deepEqual(desk.run(run.id).queued, ['Keep this one'], 'the message is kept for the retry');
+    assert.equal(cleared(store, run.id).length, 0, 'no handoff, no fresh start');
+    const error = store.events(run.id, { limit: 200 }).filter(event => event.kind === 'error').at(-1);
+    assert.equal(error.why, 'codex-unchecked'); assert.match(error.message, /could not read this Codex account's history folder[\s\S]*Your message is kept/);
+
+    failing = false;
+    await desk.resume(run.id, { prompt: '' });
+    await waitFor(() => turns.length === 2 && desk.run(run.id).state === 'finished', 'the retry');
+    assert.equal(turns[1].run.sessionId, thread, 'the retry reopens the same thread');
+    assert.match(turns[1].prompt, /Keep this one/);
+    assert.doesNotMatch(turns[1].prompt, /handoff/);
+    assert.equal(said(store, run.id, 'Keep this one'), 1, 'the message shows once');
+  } finally { desk.closed = true; }
+});
+
+test('codexThreadHere says "could not check" for a read error and "missing" only for a folder that is not there', () => {
+  const home = temporary('codex-home2'), thread = randomUUID();
+  assert.equal(codexThreadHere(thread, path.join(home, 'no-such-account')), false);
+  for (const code of ['EACCES', 'EPERM', 'EBUSY', 'EMFILE']) assert.equal(codexThreadHere(thread, home, { readdir: () => { throw Object.assign(new Error(code), { code }); } }), null, code);
 });
