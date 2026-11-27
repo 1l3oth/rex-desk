@@ -473,7 +473,9 @@ export class Desk {
     if (busy) throw new Error('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.');
     const result = this.store.transaction(() => {
       const config = this.store.publicConfig(), switched = same(config.agentProfiles?.[provider]) || same(this.agents.selected(provider));
-      if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: null } });
+      // '' is the main account chosen outright: null would fall back to the account Rex Desk was launched with, which can be
+      // the very one being removed.
+      if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: '' } });
       let moved = 0;
       for (const agent of this.store.list('specialist')) if (same(agent.profile)) { this.store.put('specialist', agent.id, { ...agent, profile: '' }); moved += 1; }
       for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: '' });

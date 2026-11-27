@@ -1741,7 +1741,7 @@ async function accountsDialog() {
       if (!await askConfirm(question)) return;
       try {
         const done = await api('/agents/remove', { method: 'POST', data: { provider: name, profile } });
-        say(t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}.`);
+        say(t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}. To sign out now, add this account again, then choose Sign out.`);
       } catch (error) { say(/working on this account right now/.test(error.message) ? t('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.') : error.message, true); }
       await loadAccounts(true); await refresh(); draw(); return;
     }
@@ -1753,7 +1753,7 @@ async function accountsDialog() {
       event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
         let started;
-        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; if (started?.restored) { say(t`This account was removed from Rex Desk before. Its earlier folder and sign-in were found at ${started.profile}, so it is back.`); await loadAccounts(true); draw(); return; } }
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; if (started?.restored) { say(t`This account was removed from Rex Desk before. Its earlier folder was found at ${started.profile}, so it is back.`); await loadAccounts(true); draw(); return; } }
         else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
         if (started?.installing) toast(t('A sign-in window opened. It installs the tool first, then opens the browser.'));
         ui.acctWaiting = true; await loadAccounts(true); draw();

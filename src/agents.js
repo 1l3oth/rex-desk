@@ -383,6 +383,8 @@ export class AgentProfiles {
     if (existsSync(folder) && this.hidden(provider, folder)) { this.unhideProfile(provider, folder); return { profile: folder, label: profileLabel(provider, folder), restored: true }; }
     if (existsSync(folder)) throw new Error(`There is already a profile called ${slug}.`);
     mkdirSync(folder, { recursive: true });
+    // A removed account whose folder the person deleted since: the new one must not stay hidden.
+    if (this.hidden(provider, folder)) this.unhideProfile(provider, folder);
     const shared = path.join(roots.home, '.config', 'claude-code-shared-history');
     if (provider === 'claude' && existsSync(shared)) { try { symlinkSync(shared, path.join(folder, 'projects'), 'junction'); } catch {} }
     return { profile: folder, label: profileLabel(provider, folder) };

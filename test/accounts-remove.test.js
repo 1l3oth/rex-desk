@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentProfiles } from '../src/agents.js';
@@ -66,7 +66,7 @@ test('Remove touches no file: the folder, its junction, commands, skills and sig
     assert.deepEqual(result, { removed: true, switched: true, moved: 1, folder: path.resolve(work) });
     assert.equal(desk.removeAccount('codex', codex).switched, false, 'a real false');
     assert.deepEqual(snapshot(home), before, 'not one file, folder or link changed');
-    assert.equal(store.config().agentProfiles.claude, null, 'everyone is back on the main account');
+    assert.equal(store.config().agentProfiles.claude, '', 'everyone is back on the main account, chosen outright');
     assert.equal(store.get('specialist', agent.id).profile, '');
     assert.equal(store.get('usage', `claude:${work}`), undefined);
     assert.deepEqual(store.get('accounts', 'limited').until, {});
@@ -116,6 +116,31 @@ test('adding a removed account\'s name again brings it back and says so, instead
     assert.equal(listed(desk.agents, 'claude', work), true);
     assert.equal(readFileSync(path.join(work, '.credentials.json'), 'utf8'), '{"signed":"in"}', 'its sign-in is the earlier one');
     assert.throws(() => desk.agents.addProfile('claude', 'work'), /already a profile called work/, 'a listed one still says it exists');
+  });
+});
+
+test('removing the account Rex Desk was launched with does not fall back to it (L123)', async () => {
+  const before = process.env.CLAUDE_CONFIG_DIR;
+  try {
+    await withDesk('acct-launch', async ({ desk, store, work }) => {
+      process.env.CLAUDE_CONFIG_DIR = work; // started with this account, nothing saved
+      assert.equal(path.resolve(desk.agents.selected('claude')), path.resolve(work));
+      assert.equal(desk.removeAccount('claude', work).switched, true);
+      assert.equal(store.config().agentProfiles.claude, '');
+      assert.equal(desk.agents.selected('claude'), '', 'the main account, not the launch one');
+      assert.equal(desk.agents.use('claude', ''), '');
+    });
+  } finally { if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = before; }
+});
+
+test('a removed account whose folder the person deleted can be added again as a new, listed account (L123)', async () => {
+  await withDesk('acct-gone', async ({ desk, work }) => {
+    desk.removeAccount('claude', work);
+    rmSync(work, { recursive: true, force: true });
+    const made = desk.agents.addProfile('claude', 'work');
+    assert.equal(made.restored, undefined, 'a new account, not a restored one');
+    assert.equal(desk.agents.hidden('claude', work), false);
+    assert.equal(listed(desk.agents, 'claude', work), true);
   });
 });
 
@@ -177,6 +202,8 @@ test('Gemini shows a plain note instead of adding a second account, and the rows
   assert.match(chat, /item\.removable \? `<button type="button" class="or-link bad" data-acct-remove="\$\{esc\(item\.profile\)\}">/);
   assert.match(chat, /Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at \$\{profile\}\./);
   assert.match(chat, /signed \? t`To sign it out, press Sign out first\.`/);
-  assert.match(chat, /Removed from Rex Desk only\. Nothing was deleted/);
+  assert.match(chat, /Removed from Rex Desk only\. Nothing was deleted: its folder, with its chats and sign-in, stays at \$\{done\.folder \|\| profile\}\. To sign out now, add this account again, then choose Sign out\./);
+  assert.match(chat, /Its earlier folder was found at \$\{started\.profile\}, so it is back\./);
+  assert.doesNotMatch(chat, /sign-in were found/, 'no claim about a sign-in nobody checked');
   assert.match(chat, /started\?\.restored/);
 });
