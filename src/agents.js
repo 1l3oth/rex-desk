@@ -217,6 +217,8 @@ export class AgentProfiles {
   environment(provider, env = process.env) { return this.withKey(provider, profileEnvironment(provider, this.use(provider), env)); }
   // An agent can be pinned to one Claude account; otherwise it uses the one chosen for everyone.
   environmentFor(provider, profile, env = process.env) { return this.withKey(provider, profileEnvironment(provider, this.use(provider, profile), env)); }
+  // The environment for one account already picked (see use), without picking again: a turn picks its account once.
+  environmentOn(provider, account, env = process.env) { return this.withKey(provider, profileEnvironment(provider, account || '', env)); }
   // Another signed-in account to move to when this one hits its usage limit. Accounts that hit theirs recently are skipped.
   async alternative(provider, current) {
     if (provider === 'openrouter') return null;

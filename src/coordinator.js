@@ -478,7 +478,7 @@ export class Desk {
       if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: '' } });
       let moved = 0;
       for (const agent of this.store.list('specialist')) if (same(agent.profile)) { this.store.put('specialist', agent.id, { ...agent, profile: '' }); moved += 1; }
-      for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: '' });
+      for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: undefined });
       for (const usage of this.store.list('usage')) if (usage.provider === provider && same(usage.profile)) this.store.delete('usage', usage.id);
       this.agents.clearLimited(profile);
       this.agents.hideProfile(provider, profile);
@@ -527,7 +527,8 @@ export class Desk {
     if (!hit) return false;
     // The account the limited turn ran on. Using "the account chosen now" blamed the account an earlier switch had just moved
     // everyone to: a second agent hitting the limit marked the fresh account full, and the next limit found none left (L40).
-    const pinned = this.accountFor(run), current = run.turnAccount || pinned || this.agents.selected(provider);
+    // '' is the main account recorded outright; only a turn with no account recorded falls back to the one chosen now.
+    const pinned = this.accountFor(run), current = typeof run.turnAccount === 'string' ? run.turnAccount : pinned || this.agents.selected(provider);
     // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
     // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
     const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
@@ -853,7 +854,7 @@ export class Desk {
     // heldResult: the final reply of a Telegram turn, sent once the turn really ended (see finally), never before the
     // usage-limit check: Claude can report its result and then fail on the limit, and the retry answers instead.
     // turnFailed: Telegram is then told only that there is no answer, never the error or a failed reply's own words.
-    let run = this.run(runId), token, handedOn = false, heldResult = null, turnFailed = false, codexHome;
+    let run = this.run(runId), token, handedOn = false, heldResult = null, turnFailed = false, codexHome, turnAccount;
     // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
@@ -967,7 +968,10 @@ export class Desk {
       const workProject = run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path;
       // The account is picked once, here: the turn launches on exactly this one, and a Codex thread is checked against it, so a
       // switch made while a message waited can never send the old thread id to the new account.
-      const agentEnv = { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) };
+      // turnAccount is what the turn runs on and records ('' is the main account), never read again in this turn: a selection
+      // changed during a handoff must not make a later usage limit mark an account this turn did not use.
+      turnAccount = this.agents.use(run.provider || 'claude', this.accountFor(run)) || '';
+      const agentEnv = { ...this.agents.environmentOn(run.provider, turnAccount), ...this.javaEnv(run), ...this.workTemp(workProject) };
       codexHome = run.provider === 'codex' ? agentEnv.CODEX_HOME || '' : undefined;
       if (!attach && run.provider === 'codex') {
         const thread = this.codexThread(run, codexHome);
@@ -1039,7 +1043,7 @@ export class Desk {
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
           if (kind === 'context') { if (String(this.store.get('run', runId)?.contextResetAt || '') > turnAt) return; const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); this.handoffMidTurn(runId); return; }
-          if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
+          if (kind === 'rate-limit') { this.recordUsage(run.provider, turnAccount, data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
           // The open session is connected to the Claude app (or could not be): keep its link on the run for the chat to show.
           if (kind === 'remote-control') {
             const current = this.store.get('run', runId)?.inApp;
@@ -1089,7 +1093,7 @@ export class Desk {
       } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       // The account this turn really runs on, so a usage limit is put on that account, not on whatever is chosen by the time it hits.
-      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '', stuckStopped: undefined, turnAccount: this.usesLocalModel(run) ? '' : this.agents.use(run.provider || 'claude', this.accountFor(run)) || '' });
+      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '', stuckStopped: undefined, turnAccount: this.usesLocalModel(run) ? undefined : turnAccount });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;

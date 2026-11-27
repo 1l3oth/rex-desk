@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { codexThreadHere } from '../src/agents.js';
+import { canonical, codexThreadHere } from '../src/agents.js';
 
 // Every folder here is a throwaway on D: (next to the project), never a real Codex account.
 const base = path.join(path.resolve(import.meta.dirname, '..', '..', '..'), 'tmp', 'codex-account-tests');
@@ -16,7 +16,7 @@ const rollouts = home => { const found = []; const walk = folder => { for (const
 
 // A pretend Codex: a new thread writes its rollout into the account's own CODEX_HOME, and reopening a thread that account does
 // not have fails the way the real one does.
-function fakeCodex(turns, gate = null) {
+function fakeCodex(turns, gate = null, reply = () => 'Done.') {
   return options => ({ async start(prompt) {
     const run = options.run, home = options.agentEnv.CODEX_HOME || '';
     turns.push({ run, prompt, home });
@@ -27,16 +27,18 @@ function fakeCodex(turns, gate = null) {
         options.event('session', { sessionId: run.sessionId });
       } else {
         const thread = randomUUID(), day = path.join(home, 'sessions', '2026', '11', '27');
-        mkdirSync(day, { recursive: true }); writeFileSync(path.join(day, `rollout-2026-11-27T10-00-00-${thread}.jsonl`), `{"thread":"${thread}"}\n`);
+        // The main account (no CODEX_HOME) is ~/.codex: the pretend Codex never writes there.
+        if (home) mkdirSync(day, { recursive: true });
+        if (home) writeFileSync(path.join(day, `rollout-2026-11-27T10-00-00-${thread}.jsonl`), `{"thread":"${thread}"}\n`);
         options.event('session', { sessionId: thread });
       }
     }
-    options.event('agent-text', { text: 'Done.' });
+    options.event('agent-text', { text: reply(turns.length) });
   }, async interrupt() {}, close() {} });
 }
-function setup({ threadHere = codexThreadHere, gate = null } = {}) {
+function setup({ threadHere = codexThreadHere, gate = null, reply } = {}) {
   const store = new Store(temporary('store')), turns = [];
-  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: fakeCodex(turns, gate), threadHere });
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: fakeCodex(turns, gate, reply), threadHere });
   const first = temporary('codex-first'), second = temporary('codex-second');
   const use = profile => { store.saveConfig({ ...store.publicConfig(), provider: 'codex', agentProfiles: { codex: profile } }); desk.agents.invalidate('codex'); };
   use(first);
@@ -196,4 +198,46 @@ test('codexThreadHere says "could not check" for a read error and "missing" only
   const home = temporary('codex-home2'), thread = randomUUID();
   assert.equal(codexThreadHere(thread, path.join(home, 'no-such-account')), false);
   for (const code of ['EACCES', 'EPERM', 'EBUSY', 'EMFILE']) assert.equal(codexThreadHere(thread, home, { readdir: () => { throw Object.assign(new Error(code), { code }); } }), null, code);
+});
+
+// The account a turn runs on is picked once. A selection changed while the handoff is written, or after the turn started,
+// never makes its usage limit land on an account it did not use.
+const LIMIT_TEXT = "You've hit your usage limit. Try again later.";
+const limitedKeys = store => Object.keys(store.get('accounts', 'limited')?.until || {});
+
+test('a selection changed during the handoff leaves the turn on the checked account, and its usage limit marks that account', async () => {
+  const { store, desk, turns, second, use } = setup({ reply: turn => turn === 2 ? LIMIT_TEXT : 'Done.' });
+  try {
+    const third = temporary('codex-third'), seen = [];
+    desk.agents.alternative = async (provider, current) => { seen.push(current); return null; };
+    const run = await desk.startMain({ prompt: 'Hello', provider: 'codex' });
+    await waitFor(() => desk.run(run.id).state === 'finished' && desk.run(run.id).sessionId, 'the first turn');
+    use(second);
+    const freshStart = desk.freshStart.bind(desk);
+    let switchNow = true;
+    desk.freshStart = async (...args) => { if (switchNow) { switchNow = false; use(third); } return freshStart(...args); };
+    await desk.resume(run.id, { prompt: 'Carry on' });
+    await waitFor(() => turns.length === 2 && seen.length && !desk.live.has(run.id), 'the limited turn');
+    assert.equal(path.resolve(turns[1].home), path.resolve(second), 'it ran on the account it was checked against');
+    assert.equal(desk.run(run.id).turnAccount, second, 'and recorded that one, not the selection made during the handoff');
+    assert.equal(canonical(seen[0]), canonical(second), 'the limit is put on the account the turn used');
+    assert.ok(limitedKeys(store).includes(canonical(second)));
+    assert.ok(!limitedKeys(store).includes(canonical(third)), 'the account selected later is not marked used up');
+  } finally { desk.closed = true; }
+});
+
+test("a turn on the main account ('') keeps it as its account when the selection changes mid-turn", async () => {
+  let switchTo = null;
+  const { store, desk, second, use } = setup({ reply: () => { if (switchTo) switchTo(); return LIMIT_TEXT; } });
+  try {
+    const seen = [];
+    desk.agents.alternative = async (provider, current) => { seen.push(current); return null; };
+    use('');
+    switchTo = () => use(second);
+    const run = await desk.startMain({ prompt: 'Hello', provider: 'codex' });
+    await waitFor(() => seen.length && !desk.live.has(run.id), 'the limited turn');
+    assert.equal(desk.run(run.id).turnAccount, '', 'the main account is recorded outright');
+    assert.equal(seen[0], '', 'the limit is put on the main account, not the one selected mid-turn');
+    assert.ok(!limitedKeys(store).includes(canonical(second)), 'the account selected later is not marked used up');
+  } finally { desk.closed = true; }
 });
