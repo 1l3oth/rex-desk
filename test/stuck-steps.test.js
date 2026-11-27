@@ -327,3 +327,14 @@ test('a guard stop reads Stopped in the profile, the sidebar and the phone chat 
   // Every action the header hides for room is still in the More menu, with its words.
   for (const action of ['app-on', 'chat-to-room', 'chat-info', 'handoff']) assert.match(chat, new RegExp(`hidden\\('${action}'\\)`), action);
 });
+
+test('a More sheet closes before its item opens, a guard stop wins over the sleep moon, and only personal chats fold buttons when narrow (L117 review 2)', () => {
+  const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8'), css = readFileSync(new URL('../public/glass.css', import.meta.url), 'utf8');
+  assert.match(chat, /const back = event\.target\.closest\?\.\('\.dialog-back\.m-more-sheet'\); if \(!back\) return;[\s\S]{0,200}back\.remove\(\);\n\}, true\);/, 'the sheet closes from a capture listener of its own');
+  assert.doesNotMatch(chat, /back\.addEventListener\('click', inner =>/, 'no sheet listener the item handlers would starve');
+  assert.match(chat, /const mood = stopped \? 'is-stopped' :/, 'stopped wins over idle in the list');
+  assert.match(chat, /sub: guardStopped\(main\) \? t\('Stopped'\) : mainLive\(\)\.state === 'idle' \? t\('Asleep'\)/, 'Rex Agent row');
+  assert.match(chat, /stopped: agentStopped\(agent\) \}\)\)/, 'agent rows');
+  assert.match(css, /@container \(max-width:880px\)\{\.head-actions:has\(\.head-more\[data-personal\]\) \.head-handoff/, 'narrow fold only for personal chats');
+  assert.match(chat, /head-more"\$\{personal \? ' data-personal' : ''\}/);
+});

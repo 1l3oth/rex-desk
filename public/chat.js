@@ -155,10 +155,11 @@ const mainLive = () => {
   const last = run?.lastTokens, span = last?.cacheTtl >= 3600 ? last.cacheTtl - 600 : Math.max(0, (last?.cacheTtl || 0) - 60), until = last?.at && span ? new Date(last.at).getTime() + span * 1000 : 0;
   return { state: 'idle', warmUntil: until > Date.now() ? new Date(until).toISOString() : '', warmTtl: span };
 };
-function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '', live = '' }) {
+function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '', live = '', stopped = false }) {
   const active = (ui.view.type === type && (ui.view.id || '') === (id || '')) || (type === 'specialist' && ui.view.type === 'run' && (ui.snap?.specialists || []).some(agent => agent.id === id && agent.runId === ui.view.id));
   // live: { state, warmUntil } of an agent: working shows a turning halo, asleep a dimmed face, warm a countdown.
-  const mood = live ? (['busy', 'replying'].includes(live.state) ? 'is-working' : live.state === 'waiting' ? 'is-waiting' : live.state === 'idle' || !live.state ? 'is-asleep' : '') : '';
+  // A guard stop (L117) wins over idle: an amber dot and Stopped, never the sleep moon.
+  const mood = stopped ? 'is-stopped' : live ? (['busy', 'replying'].includes(live.state) ? 'is-working' : live.state === 'waiting' ? 'is-waiting' : live.state === 'idle' || !live.state ? 'is-asleep' : '') : '';
   const warm = mood === 'is-asleep' && live.warmUntil ? ` data-warm="${esc(live.warmUntil)}" data-ttl="${Number(live.warmTtl) || 300}"` : '';
   return `<button class="item ${active ? 'active' : ''} ${mood}" data-open="${type}" data-id="${esc(id || '')}"${warm}${title ? ` title="${esc(title)}"` : ''}>${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
 }
@@ -205,7 +206,7 @@ function renderRail() {
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
   return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>${t`Rex Desk`}</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
-      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: t('Rex Agent'), sub: mainLive().state === 'idle' ? t('Asleep') : main ? stateLabel(main) : t('Not started'), badge: unreadFor(ui, 'main:'), live: mainLive() })}
+      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: t('Rex Agent'), sub: guardStopped(main) ? t('Stopped') : mainLive().state === 'idle' ? t('Asleep') : main ? stateLabel(main) : t('Not started'), badge: unreadFor(ui, 'main:'), live: mainLive(), stopped: guardStopped(main) })}
       <nav class="places" aria-label="${t`Places`}">${[
         place('notices', 'bell', t('Notifications'), snap.notices?.unread || 0, true),
         place('inbox', 'inbox', t('Needs you'), asks + tgUnread, true),
@@ -216,7 +217,7 @@ function renderRail() {
     </div>
     ${newComputerCard(snap)}
     ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<button type="button" class="rail-cta" data-action="new-room">${t`New meeting room`}</button>`)}
-    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
+    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state, agent)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0, stopped: agentStopped(agent) })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
   </div>${phoneTabs(asks + tgUnread)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="exp" data-id="" title="${t`Experimental`}" aria-label="${t`Experimental`}"><span class="av sm icon">${EXP_ICON}</span></button></div><div class="rail-foot">${profileFoot()}</div></div>`;
 }
 
@@ -434,7 +435,7 @@ function stageModel() {
   // Handoff (L117): a fresh chat on purpose, that first reads a handoff of this one. Not for a chat that lives in another app.
   const handoff = run.external || run.inApp ? '' : `<button type="button" class="btn small head-handoff" data-action="handoff" title="${t`The agent starts fresh and reads a summary of this chat.`}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14h6M12.5 11.5 15 14l-2.5 2.5"/></svg>${t('Hand off')}</button> `;
   // More holds what the header hides for lack of room; a chat with nothing to hide never needs it.
-  const more = handoff || personal ? `<button type="button" class="icon-btn head-add head-more" data-action="head-more" aria-label="${t`More`}" title="${t`More`}"><svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button> ` : '';
+  const more = handoff || personal ? `<button type="button" class="icon-btn head-add head-more"${personal ? ' data-personal' : ''} data-action="head-more" aria-label="${t`More`}" title="${t`More`}"><svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button> ` : '';
   const actions = take + appControl(run, live) + handoff + more + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a meeting with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
   return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? `<span class="chip working">${t`In Claude app`}</span>` : personal ? (guardStopped(run) ? `<span class="chip warn">${t('Stopped')}</span>` : '') : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
@@ -1960,6 +1961,12 @@ function filterChats() {
   const none = list.querySelector('.m-none'); if (none) none.hidden = shown > 0;
 }
 document.addEventListener('input', event => { if (event.target.id !== 'm-search') return; ui.chatFilter = event.target.value; filterChats(); });
+// A More sheet closes first when one of its items is tapped (L117): the item's own handlers run in capture and stop the click,
+// so a listener on the sheet would never hear it and Info would open behind the sheet.
+document.addEventListener('click', event => {
+  const back = event.target.closest?.('.dialog-back.m-more-sheet'); if (!back) return;
+  if (event.target === back || event.target.closest('.m-sheet-close') || event.target.closest('.m-sheet-item')) back.remove();
+}, true);
 // A chat's More on a phone (L117): the header keeps room for the name, so Handoff and Continue in Claude app sit here, with words.
 document.addEventListener('click', event => {
   if (!event.target.closest?.('[data-action="head-more"]')) return;
@@ -1978,7 +1985,6 @@ document.addEventListener('click', event => {
   // On a computer it opens as a small menu under the button, not a sheet across the window.
   if (back.classList.contains('head-menu-pop')) { const at = event.target.closest('[data-action="head-more"]').getBoundingClientRect(), menu = back.firstElementChild; menu.style.top = `${Math.round(at.bottom + 6)}px`; menu.style.right = `${Math.max(8, Math.round(innerWidth - at.right))}px`; }
   document.body.append(back);
-  back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
 }, true);
 // More: what the round buttons used to hold, in a sheet from the bottom.
 document.addEventListener('click', event => {
@@ -1997,7 +2003,6 @@ document.addEventListener('click', event => {
     ${item('data-action="sync"', iconAv('tasks'), t('Sync tasks now'))}
     <button type="button" class="btn m-sheet-close">${t`Close`}</button></div>`;
   document.body.append(back);
-  back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
 }, true);
 // Opens the app last, once every top-level value above is set: anything openApp() reaches (like PF_CHEV in the profile menu) must not be read before its line runs.
 try { await openApp(); } catch (error) {

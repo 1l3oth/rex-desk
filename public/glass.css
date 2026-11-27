@@ -348,6 +348,8 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
   background:var(--solid) url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z%22 fill=%22%239aa3b1%22/%3E%3C/svg%3E") center/10px no-repeat;
   box-shadow:0 0 0 1.5px var(--line)}
 .item.is-asleep:hover .avwrap>.av{filter:none;opacity:1}
+/* Stopped by the loop guard (L117): no moon, the amber dot stays and the line reads Stopped in amber. */
+.item.is-stopped .sub{color:var(--warn)}
 /* Warm: asleep, but its cache is still fresh. The moon turns into a small ring that empties as time runs out. */
 .item.is-asleep[data-warm] .avwrap::after{background:conic-gradient(#f59e0b calc(var(--warm,1)*360deg),color-mix(in srgb,var(--ink) 12%,transparent) 0);
   -webkit-mask:radial-gradient(closest-side,transparent 55%,#000 58%);mask:radial-gradient(closest-side,transparent 55%,#000 58%);box-shadow:none}
@@ -653,7 +655,8 @@ html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}
 /* L117: the chat header gives the agent's name room first. On a phone, and in a narrow chat pane on a computer (side panel open),
    Hand off, Continue in Claude app, Add agents and Info move into the More menu with their words. */
 #head{container-type:inline-size}
-@container (max-width:880px){.head-actions .head-handoff,.head-actions [data-action="app-on"]{display:none!important}.head-actions .head-more{display:grid}}
+/* Only agents' personal chats: a narrow task run chat keeps its buttons. */
+@container (max-width:880px){.head-actions:has(.head-more[data-personal]) .head-handoff,.head-actions:has(.head-more[data-personal]) [data-action="app-on"]{display:none!important}.head-actions .head-more[data-personal]{display:grid}}
 @media (max-width:760px){.head-actions [data-action="chat-to-room"],.head-actions [data-action="chat-info"]{display:none!important}}
 .head-title h1{flex:0 1 auto}
 .head-menu-pop{background:transparent!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;display:block!important;padding:0!important}
