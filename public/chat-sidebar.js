@@ -43,11 +43,12 @@ export function agentListHtml(ctx, agents, inner, stateOf = () => '') {
   const search = agent => `${agent.name} ${agent.projectSlug || ''}`;
   const rows = (list, isPinned) => list.map(agent => rowHtml(ctx, 'agents', agent, inner(agent), isPinned, search(agent), stateOf(agent))).join('');
   const local = rest.filter(here), away = rest.filter(agent => !here(agent));
-  const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>${stateChipsHtml(ctx, agents.map(stateOf))}` : '';
+  // An active filter always shows, at any list size, so it can be seen and cleared (L122).
+  const filter = agents.length > 6 || ui.agentFilter || ui.agentState ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>${stateChipsHtml(ctx, agents.map(stateOf))}` : '';
   return filter
     + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
     + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${ctx.isCollapsed?.(key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
-    + (filter ? `<p class="rail-empty rail-none" hidden>${t`No agents match.`}</p>` : '')
+    + (filter ? `<p class="rail-empty rail-none" hidden>${t`No agents match.`} <button type="button" class="rail-clear" data-rail-clear>${t`Clear`}</button></p>` : '')
     + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
 }
 
@@ -151,6 +152,12 @@ export function initSidebarDrag(ctx) {
   document.addEventListener('click', event => {
     const chip = event.target.closest?.('[data-rail-state]'); if (!chip) return;
     const state = chip.dataset.railState; ctx.ui.agentState = ctx.ui.agentState === state ? '' : state;
+    ctx.renderAll();
+  });
+  // Clear under an empty result: every agent shows again, the name filter and the status chip both off.
+  document.addEventListener('click', event => {
+    if (!event.target.closest?.('[data-rail-clear]')) return;
+    ctx.ui.agentFilter = ''; ctx.ui.agentState = ''; ctx.ui.chatFilter = '';
     ctx.renderAll();
   });
 }

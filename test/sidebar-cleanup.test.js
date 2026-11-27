@@ -32,3 +32,35 @@ test('one add per section, Notifications apart from Needs you, and the computer 
   assert.match(devices, /export function nameComputer\(ctx\)/);
   assert.match(devices, /ctx\.ui\.snap\?\.devices\?\.self\?\.named !== false/);
 });
+
+test('an active agent filter shows and can be cleared at every list size, desktop and phone (L122)', async () => {
+  const { agentListHtml } = await import('../public/chat-sidebar.js');
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
+  const agents = Array.from({ length: 6 }, (_, index) => ({ id: `a${index}`, name: `Agent ${index}`, projectSlug: 'demo', status: { state: 'idle' } }));
+  const html = ui => agentListHtml({ ui: { snap: {}, ...ui }, esc, isCollapsed: () => false }, agents, agent => `<span>${agent.name}</span>`, () => '');
+  assert.doesNotMatch(html({}), /rail-states/, 'six agents and no filter: no filter controls');
+  for (const ui of [{ agentState: 'stopped' }, { agentFilter: 'zzz' }]) {
+    const out = html(ui);
+    assert.match(out, /class="rail-states"/, `${JSON.stringify(ui)}: the chips still show`);
+    assert.match(out, /data-rail-filter="agents"/, `${JSON.stringify(ui)}: the filter box still shows`);
+    assert.match(out, /No agents match\. <button type="button" class="rail-clear" data-rail-clear>Clear<\/button>/, 'an empty result offers Clear');
+  }
+  assert.match(html({ agentState: 'stopped' }), /class="state-chip on" data-rail-state="stopped" aria-pressed="true">/, 'the Stopped chip that is on stays enabled to turn off');
+  const sidebar = read('chat-sidebar.js'), chat = read('chat.js');
+  assert.match(sidebar, /ctx\.ui\.agentFilter = ''; ctx\.ui\.agentState = ''; ctx\.ui\.chatFilter = '';/);
+  assert.match(chat, /\.length > 3 \|\| ui\.agentState \? stateChipsHtml\(/, 'the phone keeps its chips while a state is on');
+  assert.match(chat, /<p class="m-none" hidden>\$\{t`No chat matches\.`\} <button type="button" class="rail-clear" data-rail-clear>/);
+});
+
+test('a sidebar redraw keeps focus on the button that had it, like the profile button after Escape (L122)', () => {
+  const chat = read('chat.js');
+  assert.match(chat, /const refocus = !keepFoot && rail\.contains\(document\.activeElement\) \? focusKey\(document\.activeElement\) : '';/);
+  assert.match(chat, /if \(refocus && !rail\.contains\(document\.activeElement\)\) rail\.querySelector\(refocus\)\?\.focus\(\{ preventScroll: true \}\);/);
+  assert.match(chat, /\['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-sec', 'data-kind'\]/);
+  assert.match(chat, /closeProfileMenu\(\); document\.querySelector\('\[data-action="profile-toggle"\]'\)\?\.focus\(\);/, 'Escape puts focus on the profile button first');
+});
+
+test('the desktop app shows one Notifications bell (L122)', () => {
+  assert.match(read('glass.css'), /html\.has-win-bar \.rail-bell\{display:none\}/);
+  assert.match(read('chat-notices.js'), /\.find\(item => item\.getClientRects\(\)\.length\)/, 'the pane opens under the bell that shows');
+});

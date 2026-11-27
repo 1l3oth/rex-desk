@@ -69,7 +69,8 @@ let pane = null, paneHtml = '';
 const onPhone = () => Boolean(window.matchMedia?.('(max-width:760px)').matches);
 function placePane() {
   if (!pane) return;
-  const bell = document.querySelector('.tile[data-action="nt-panel"]'), box = bell?.getBoundingClientRect(), narrow = window.innerWidth < 640;
+  // The bell that shows: the window bar's on the desktop app, where the sidebar's is hidden.
+  const bell = [...document.querySelectorAll('.tile[data-action="nt-panel"]')].find(item => item.getClientRects().length), box = bell?.getBoundingClientRect(), narrow = window.innerWidth < 640;
   // Under the window bar's bell, right-aligned; otherwise beside the list, level with the bell row, never past the bottom.
   if (bell?.closest('.win-bar') && !narrow) { pane.style.left = `${Math.round(Math.max(8, box.right - pane.offsetWidth))}px`; pane.style.top = `${Math.round(box.bottom + 8)}px`; return; }
   pane.style.left = narrow || !box ? '8px' : `${Math.round(box.right + 14)}px`;

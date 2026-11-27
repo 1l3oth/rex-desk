@@ -619,6 +619,12 @@ function composerHint(run, working) {
   return next !== run.provider ? t`Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : t`Message ${name(next)}. It picks up where it left off…`;
 }
 
+// A selector that finds the same button again after the sidebar is drawn anew.
+function focusKey(element) {
+  const target = element.closest?.('button,a,[tabindex]'); if (!target) return '';
+  const parts = ['data-action', 'data-open', 'data-id', 'data-rail-state', 'data-sec', 'data-kind'].filter(name => target.hasAttribute(name)).map(name => `[${name}="${CSS.escape(target.getAttribute(name))}"]`);
+  return parts.length ? parts.join('') : '';
+}
 function renderAll(full = false) {
   queueMicrotask(drawReplyBar);
   queueMicrotask(() => readNewReplies(draftKey()));
@@ -631,9 +637,12 @@ function renderAll(full = false) {
   const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml;
     // An open menu in the footer (the profile menu) stays as it is while the rest of the list is redrawn under it (L122).
     const menu = document.getElementById('pf-menu'), keepFoot = menu && !menu.hidden ? rail.querySelector('.rail-foot') : null, focused = keepFoot?.contains(document.activeElement) ? document.activeElement : null;
+    // A focused button in the list (the profile button after Escape, a chip, a row) keeps its focus through the redraw.
+    const refocus = !keepFoot && rail.contains(document.activeElement) ? focusKey(document.activeElement) : '';
     if (document.activeElement?.id === 'm-search' && rail.querySelector('.rail-scroll')) { const fresh = document.createElement('div'); fresh.innerHTML = railHtml; rail.querySelector('.rail-scroll').replaceWith(fresh.querySelector('.rail-scroll')); }
     else rail.innerHTML = railHtml;
     if (keepFoot) { rail.querySelector('.rail-foot')?.replaceWith(keepFoot); ui.railHtml = ''; focused?.focus(); }
+    if (refocus && !rail.contains(document.activeElement)) rail.querySelector(refocus)?.focus({ preventScroll: true });
     const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; filterChats();
     // The agent filter keeps hiding what does not match, and keeps the cursor if the person was typing in it.
     applyFilter(rail, ui.agentFilter, ui.agentState);
@@ -1931,7 +1940,7 @@ function phoneHead() {
   return `<div class="m-head"><div class="m-bar"><button type="button" class="m-me" data-open="person" data-id="" aria-label="${t`About you`}">${me}</button><h2>${t`Chats`}</h2>
     <button type="button" class="m-round" data-action="nt-panel" aria-label="${t`Notifications`}">${phIcon('bell')}${unread ? `<span class="tb-badge">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
     <button type="button" class="m-round" data-action="m-more" aria-label="${t`More`}">${phIcon('more')}</button></div>
-    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="${t`Search`}" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label>${(ui.snap?.specialists || []).length > 3 ? stateChipsHtml(ctx, (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').map(agentState)) : ''}</div>`;
+    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="${t`Search`}" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label>${(ui.snap?.specialists || []).length > 3 || ui.agentState ? stateChipsHtml(ctx, (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').map(agentState)) : ''}</div>`;
 }
 function phoneChats() {
   const snap = ui.snap, rows = [], last = new Map();
@@ -1950,7 +1959,7 @@ function phoneChats() {
   rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
   const main = mainRun();
   const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', t('Rex Agent'), main ? stateLabel(main) : t('Your helper for everything'), main?.updatedAt || '', unreadFor(ui, 'main:'));
-  return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>${t`No chat matches.`}</p></div>`;
+  return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>${t`No chat matches.`} <button type="button" class="rail-clear" data-rail-clear>${t`Clear`}</button></p></div>`;
 }
 function phoneRow(type, id, avatar, dot, name, sub, at, badge, state = '') {
   return `<button type="button" class="m-row${badge ? ' unread' : ''}" data-open="${type}" data-id="${esc(id || '')}" data-name="${esc(String(name).toLowerCase())}" data-state="${state}">${withDot(avatar, dot)}<span class="m-text"><span class="m-top"><b>${esc(name)}</b>${at ? `<time>${esc(ago(at))}</time>` : ''}</span><span class="m-sub"><span>${esc(sub)}</span>${badge ? `<span class="m-badge">${badge}</span>` : ''}</span></span></button>`;
