@@ -357,6 +357,15 @@ export class Store extends EventEmitter {
     return this.db.prepare(`SELECT * FROM events WHERE run_id=? AND sequence>? ${visible ? 'AND visible=1' : ''} ORDER BY sequence DESC LIMIT ?`)
       .all(runId, after, limit).reverse().map(row => ({ sequence: row.sequence, uid: row.uid, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at }));
   }
+  // The newest event of one kind that passes a check, however far back it is (no window of recent events): read newest first, one
+  // row at a time, so a busy chat still finds the person's last real message.
+  lastEvent(runId, kind, accept = () => true) {
+    for (const row of this.db.prepare('SELECT * FROM events WHERE run_id=? AND kind=? ORDER BY sequence DESC').iterate(runId, kind)) {
+      const event = { sequence: row.sequence, uid: row.uid, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at };
+      if (accept(event)) return event;
+    }
+    return null;
+  }
   // Messages from another computer's copy of a shared chat, each once (by its id); a removed one goes here too.
   // This computer shared its id with another one (src/turso.js presence). It takes a new id; its own messages take new ids
   // and go up again, and what the other computer wrote, skipped until now as this computer's own, is read from the start.

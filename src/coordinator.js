@@ -1468,17 +1468,20 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const run = this.store.get('run', runId);
     this.patchRun(runId, { stepsStuck: undefined });
     if (!run || run.external || run.state === 'stopped') return false;
-    const last = Date.parse(run.stuckFreshAt || 0) || 0;
-    const spoke = last && this.store.events(runId, { visible: true, limit: 200 }).some(event => event.kind === 'human-message' && (Date.parse(event.createdAt) || 0) > last);
+    // The person's newest real message (never the automatic greeting), read directly however busy the chat is: its time is the
+    // restart guard's "the person wrote since", and its text goes into the fresh chat's prompt.
+    const request = this.store.lastEvent(runId, 'human-message', event => event.visible && !isGreeting(event));
+    const last = run.stuckFreshAt ? Date.parse(run.stuckFreshAt) || 0 : 0;
+    const spoke = Boolean(last && request && (Date.parse(request.createdAt) || 0) > last);
     if (last && at - last < STUCK_AGAIN_MS && !spoke) {
       this.patchRun(runId, { stuckStopped: new Date(at).toISOString(), helpers: undefined });
       this.store.event(runId, 'stuck-stopped', { text: 'This agent got stuck, so I stopped it. Your chat is kept.' }, true);
       return false;
     }
     // The person wrote since the last fresh start: this is a new problem, so the carried-on count starts again.
-    if (run.stuckFreshAt && spoke && run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
+    if (spoke && run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
     // The person's last message goes into the fresh chat's prompt, so it is answered even when the handoff cut it short.
-    const asked = [...this.store.events(runId, { visible: true, limit: 200 })].reverse().find(event => event.kind === 'human-message')?.text || '';
+    const asked = request?.text || '';
     await this.freshStart(runId, { reason: 'automatically, because several steps in a row were cancelled by Claude Code (a job left running in the background)', notice: 'Steps kept getting cancelled, so I started a fresh chat.' });
     this.patchRun(runId, { stuckFreshAt: new Date(at).toISOString() });
     const waiting = this.store.get('run', runId);

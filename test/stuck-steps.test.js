@@ -388,3 +388,40 @@ test('a message sent to an idle chat resets the carried-on count, so later stuck
     await waitFor(() => store.get('run', run.id).state === 'finished' && prompts.length === 2, 'the second turn');
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a stuck restart finds the person\'s request even 250 messages back, never the greeting, and starts one turn (0.0.135 review)', async () => {
+  const store = new Store(temporary('stuck-old')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-old-root'), runnerFactory: options => ({ async start(prompt) { prompts.push(prompt); options.event('agent-text', { text: 'ok' }); }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('Please rename the Settings tab to Preferences');
+    await waitFor(() => store.get('run', run.id).state === 'finished' && !desk.live.has(run.id), 'the first turn'); await new Promise(resolve => setTimeout(resolve, 100));
+    for (let i = 0; i < 250; i++) store.event(run.id, 'agent-text', { text: `step ${i}` }, true);
+    store.event(run.id, 'human-message', { text: 'Hi! Introduce yourself.', greeting: true }, true);
+    assert.equal(await desk.recoverStuck(run.id), true);
+    await waitFor(() => prompts.length === 2, 'the fresh turn');
+    assert.match(prompts[1], /Please rename the Settings tab to Preferences/);
+    assert.doesNotMatch(prompts[1], /Introduce yourself/);
+    await waitFor(() => store.get('run', run.id).state === 'finished' && !desk.live.has(run.id), 'the fresh turn to end'); await new Promise(resolve => setTimeout(resolve, 100));
+    // Stuck again soon after with no new word from the person: the guard stops it, no second restart and no extra turn.
+    assert.equal(await desk.recoverStuck(run.id), false);
+    assert.ok(store.events(run.id, { visible: true }).some(event => event.kind === 'stuck-stopped'));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(prompts.length, 2);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a greeting newer than the person\'s request does not count as the person writing again (0.0.135 review)', async () => {
+  const store = new Store(temporary('stuck-greet'));
+  const desk = new Desk(store, { root: temporary('stuck-greet-root'), runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('look');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the turn');
+    // The fresh start came after the request; only the greeting is newer than it.
+    await new Promise(resolve => setTimeout(resolve, 30));
+    store.put('run', run.id, { ...store.get('run', run.id), stuckFreshAt: new Date().toISOString() });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    store.event(run.id, 'human-message', { text: 'Hi! Introduce yourself.', greeting: true }, true);
+    assert.equal(await desk.recoverStuck(run.id, Date.now() + 1000), false);
+    assert.ok(store.events(run.id, { visible: true }).some(event => event.kind === 'stuck-stopped'), 'the guard stops it');
+  } finally { await desk.shutdown(); store.close(); }
+});
