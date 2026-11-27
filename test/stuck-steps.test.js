@@ -299,3 +299,18 @@ test('Stop while the turn waits for a helper ends it at once and clears the 30-m
   assert.deepEqual(cleared, timers, 'the timer is cleared even though the stream failed');
   assert.equal(runner.helpersQuiet, null, 'Stop is not reported as helpers going quiet');
 });
+
+test('a new message clears the guard stop, so the chat no longer shows Stopped (L117 review)', async () => {
+  const store = new Store(temporary('stuck-clear')), prompts = [];
+  const desk = new Desk(store, { root: temporary('stuck-clear-root'), runnerFactory: () => ({ async start(prompt) { prompts.push(prompt); }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('look');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the turn');
+    store.put('run', run.id, { ...store.get('run', run.id), stuckStopped: new Date().toISOString() });
+    await desk.say(run.id, 'try again');
+    await waitFor(() => prompts.length === 2 && store.get('run', run.id).state === 'finished', 'the next turn');
+    assert.equal(store.get('run', run.id).stuckStopped, undefined);
+    const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
+    assert.match(chat, /const stateLabel = run => run\.stuckStopped && FINISHED\.includes\(run\.state\) \? t\('Stopped'\)/, 'the chip reads Stopped only while the guard stop is on');
+  } finally { await desk.shutdown(); store.close(); }
+});

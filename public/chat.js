@@ -117,8 +117,9 @@ function appControl(run, live) {
   if ((run.provider || 'claude') !== 'claude' || run.remote || run.cloudCopy || live || run.state === 'waiting') return '';
   return `<button class="btn small app-link" data-action="app-on" title="${t`Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone`}">${APP_ICON}${t('Continue in Claude app')}</button> `;
 }
-const stateTone = run => ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
-const stateLabel = run => ({ starting: t('Preparing'), queued: t('Queued'), running: t('Working'), waiting: t('Needs you'), verifying: t('Checking'), ready_for_review: t('Ready for review'), needs_evidence: t('Needs proof'), published: t('PR created'), failed: t('Failed'), interrupted: t('Cut off'), stopped: t('Stopped'), finished: t('Finished') }[run.state] || String(run.state || '').replaceAll('_', ' '));
+const stateTone = run => run.stuckStopped && FINISHED.includes(run.state) ? 'warn' : ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
+// Stopped by the stuck guard (L117): never read as done; back to normal after Continue working or a new message (src/coordinator.js clears stuckStopped).
+const stateLabel = run => run.stuckStopped && FINISHED.includes(run.state) ? t('Stopped') : ({ starting: t('Preparing'), queued: t('Queued'), running: t('Working'), waiting: t('Needs you'), verifying: t('Checking'), ready_for_review: t('Ready for review'), needs_evidence: t('Needs proof'), published: t('PR created'), failed: t('Failed'), interrupted: t('Cut off'), stopped: t('Stopped'), finished: t('Finished') }[run.state] || String(run.state || '').replaceAll('_', ' '));
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 // The main agent's personal chat. Its room session (role coordinator, roomAgent main) is a separate conversation and never opens here.
