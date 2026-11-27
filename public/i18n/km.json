@@ -2897,14 +2897,12 @@
  "Sign out of this account? Agents on it move to another signed-in account, or wait until you sign in again.": "ចាកចេញពីគណនីនេះ? ភ្នាក់ងារដែលប្រើវានឹងប្ដូរទៅគណនីផ្សេងដែលបានចូល ឬរង់ចាំរហូតដល់អ្នកចូលម្ដងទៀត។",
  "Type /logout in the window that opened, then press Check again.": "វាយ /logout នៅក្នុងបង្អួចដែលបានបើក រួចចុច ពិនិត្យម្ដងទៀត។",
  "Signed out.": "បានចាកចេញ។",
- "Remove this account? It is in use, so agents switch to the main account first. Its sign-in and settings on this computer are deleted; your conversations stay.": "ដកគណនីនេះចេញ? វាកំពុងប្រើ ដូច្នេះភ្នាក់ងារនឹងប្ដូរទៅគណនីមេជាមុនសិន។ ការចូល និងការកំណត់របស់វានៅលើកុំព្យូទ័រនេះនឹងត្រូវលុប ប៉ុន្តែការសន្ទនារបស់អ្នកនៅដដែល។",
- "Remove this account? Its sign-in and settings on this computer are deleted; your conversations stay.": "ដកគណនីនេះចេញ? ការចូល និងការកំណត់របស់វានៅលើកុំព្យូទ័រនេះនឹងត្រូវលុប ប៉ុន្តែការសន្ទនារបស់អ្នកនៅដដែល។",
- "Account removed. Agents now use the main account.": "បានដកគណនីចេញ។ ឥឡូវនេះភ្នាក់ងារប្រើគណនីមេ។",
- "Account removed.": "បានដកគណនីចេញ។",
  "Rex Desk could not confirm the sign-out. Press Check again to see if this account is still signed in.": "Rex Desk មិនអាចបញ្ជាក់ថាបានចាកចេញហើយទេ។ សូមចុច ពិនិត្យម្តងទៀត ដើម្បីមើលថាគណនីនេះនៅតែចូលឬអត់។",
- "Take this account off Rex Desk's list? Rex Desk has no record of making its folder, so the folder and its sign-in stay on this computer.": "ដកគណនីនេះចេញពីបញ្ជីរបស់ Rex Desk? Rex Desk គ្មានកំណត់ត្រាថាបានបង្កើតថតរបស់វាទេ ដូច្នេះថត និងការចូលរបស់វានៅលើកុំព្យូទ័រនេះដដែល។",
- "Account taken off the list. Its folder stays on this computer.": "បានដកគណនីចេញពីបញ្ជី។ ថតរបស់វានៅលើកុំព្យូទ័រនេះដដែល។",
- "Account removed, but some of its files could not be deleted. They are in {0}.": "បានដកគណនីចេញ ប៉ុន្តែឯកសារខ្លះរបស់វាមិនអាចលុបបានទេ។ ពួកវានៅក្នុង {0}។",
- "Account removed. Its conversations were kept in {0}.": "បានដកគណនីចេញ។ ការសន្ទនារបស់វាត្រូវបានរក្សាទុកក្នុង {0}។",
- "An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.": "មានភ្នាក់ងារកំពុងធ្វើការលើគណនីនេះឥឡូវនេះ។ សូមរង់ចាំរហូតដល់វាបញ្ចប់ ឬបញ្ឈប់វា បន្ទាប់មកដកគណនីចេញ។"
+ "An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.": "មានភ្នាក់ងារកំពុងធ្វើការលើគណនីនេះឥឡូវនេះ។ សូមរង់ចាំរហូតដល់វាបញ្ចប់ ឬបញ្ឈប់វា បន្ទាប់មកដកគណនីចេញ។",
+ "Remove this account from Rex Desk?": "ដកគណនីនេះចេញពី Rex Desk?",
+ "It is in use, so agents switch to the main account.": "វាកំពុងប្រើ ដូច្នេះភ្នាក់ងារនឹងប្ដូរទៅគណនីមេ។",
+ "Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at {0}.": "គ្មានអ្វីនៅលើកុំព្យូទ័រនេះត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។",
+ "To sign it out, press Sign out first.": "ដើម្បីចាកចេញពីវា សូមចុច ចាកចេញ ជាមុនសិន។",
+ "Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at {0}.": "បានដកចេញពី Rex Desk តែប៉ុណ្ណោះ។ គ្មានអ្វីត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។",
+ "This account was removed from Rex Desk before. Its earlier folder and sign-in were found at {0}, so it is back.": "គណនីនេះធ្លាប់ត្រូវបានដកចេញពី Rex Desk ពីមុន។ បានរកឃើញថត និងការចូលពីមុនរបស់វានៅ {0} ដូច្នេះវាត្រឡប់មកវិញហើយ។"
 }

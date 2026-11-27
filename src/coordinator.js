@@ -461,28 +461,30 @@ export class Desk {
     return agent?.model ? '' : 'sonnet';
   }
   // The Claude account (profile folder) a run uses: the agent's own if it was pinned to one, otherwise the one for everyone.
-  // Removes an account Rex Desk added (L123). Nothing happens while an agent is working on it. A folder Rex Desk can prove it made
-  // is moved aside first (its own conversation history copied out and checked); only once that worked do the account in use
-  // for everyone and pinned agents go back to the default, and what was saved for it (usage bars, a limit mark, a turn's
-  // account) is cleared; then the moved folder is deleted. A folder without that proof (an account added before Rex Desk kept
-  // the record) only leaves Rex Desk's list and stays on disk. The default folder and the shared history are never touched.
+  // Removes an account from Rex Desk (L123). It never deletes, moves or changes a file: the folder with its chats, commands,
+  // skills and sign-in stays where it is, and Rex Desk stops listing and using it. Refused while an agent or queued turn uses
+  // it. The hidden mark, the switch back to the main account, agents' pins, turns' saved account and its usage and limit marks
+  // are saved in one database transaction, so a failure leaves the desk as it was.
   removeAccount(provider, profile) {
-    const mode = this.agents.removeMode(provider, profile);
-    if (!mode) throw new Error('Only an account added in Rex Desk can be removed here. The main account stays.');
+    if (!this.agents.removable(provider, profile)) throw new Error('Only an account added in Rex Desk can be removed here. The main account stays.');
     const same = value => typeof value === 'string' && value !== '' && canonicalProfile(value) === canonicalProfile(profile);
-    const busy = this.store.list('run').find(run => (this.live.has(run.id) || ['starting', 'running', 'queued', 'verifying'].includes(run.state)) && (run.provider || 'claude') === provider
+    const busy = this.store.list('run').some(run => (this.live.has(run.id) || ['starting', 'running', 'queued', 'verifying'].includes(run.state)) && (run.provider || 'claude') === provider
       && (same(run.turnAccount) || same(this.agents.use(provider, this.accountFor(run)))));
     if (busy) throw new Error('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.');
-    const detached = mode === 'delete' ? this.agents.detachProfile(provider, profile) : null;
-    const config = this.store.publicConfig(), switched = same(config.agentProfiles?.[provider]) || same(this.agents.selected(provider));
-    if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: null } });
-    let moved = 0;
-    for (const agent of this.store.list('specialist')) if (same(agent.profile)) { this.store.put('specialist', agent.id, { ...agent, profile: '' }); moved += 1; }
-    for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: '' });
-    for (const usage of this.store.list('usage')) if (usage.provider === provider && same(usage.profile)) this.store.delete('usage', usage.id);
-    this.agents.clearLimited(profile);
-    if (!detached) { this.agents.hideProfile(provider, profile); return { removed: true, switched, moved, hidden: true, kept: '', leftover: '' }; }
-    return { removed: true, switched, moved, hidden: false, kept: detached.kept, leftover: this.agents.purgeProfile(detached.trash) };
+    const result = this.store.transaction(() => {
+      const config = this.store.publicConfig(), switched = same(config.agentProfiles?.[provider]) || same(this.agents.selected(provider));
+      if (switched) this.store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [provider]: null } });
+      let moved = 0;
+      for (const agent of this.store.list('specialist')) if (same(agent.profile)) { this.store.put('specialist', agent.id, { ...agent, profile: '' }); moved += 1; }
+      for (const run of this.store.list('run')) if (same(run.turnAccount)) this.store.put('run', run.id, { ...run, turnAccount: '' });
+      for (const usage of this.store.list('usage')) if (usage.provider === provider && same(usage.profile)) this.store.delete('usage', usage.id);
+      this.agents.clearLimited(profile);
+      this.agents.hideProfile(provider, profile);
+      return { removed: true, switched, moved, folder: path.resolve(profile) };
+    });
+    for (const [key, value] of this.agents.standIn) if (same(value) || key === `${provider}:${canonicalProfile(profile)}`) this.agents.standIn.delete(key);
+    this.agents.invalidate(provider);
+    return result;
   }
   accountFor(run) {
     const id = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');

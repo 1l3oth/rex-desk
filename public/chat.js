@@ -1669,7 +1669,7 @@ async function accountsDialog() {
       return `<span class="acct-usage">${windows.map(([key, label]) => { const limit = saved.windows[key], used = limit.used ?? 0, passed = limit.resetsAt && limit.resetsAt < Date.now(); return `<span class="acct-limit ${used >= 90 && !passed ? 'hot' : ''}"><span class="acct-lname">${label}</span><meter min="0" max="100" low="70" high="90" optimum="0" value="${passed ? 0 : used}"></meter><span class="acct-lval">${passed ? 'reset' : `${used}%`}</span><span class="acct-lreset">${passed ? '' : esc(resets(limit.resetsAt))}</span></span>`; }).join('')}</span>`;
     };
     // Sign out (each CLI's own sign-out) and Remove (only accounts added here; the main one stays), as quiet links at the row's end.
-    const acts = (item, signed) => { const buttons = [signed ? `<button type="button" class="or-link" data-acct-signout="${esc(item.profile)}">${t`Sign out`}</button>` : '', item.removable ? `<button type="button" class="or-link bad" data-acct-remove="${esc(item.profile)}" data-acct-mode="${esc(item.removeMode || '')}">${t`Remove`}</button>` : ''].filter(Boolean); return buttons.length ? `<span class="acct-acts">${buttons.join('')}</span>` : ''; };
+    const acts = (item, signed) => { const buttons = [signed ? `<button type="button" class="or-link" data-acct-signout="${esc(item.profile)}">${t`Sign out`}</button>` : '', item.removable ? `<button type="button" class="or-link bad" data-acct-remove="${esc(item.profile)}">${t`Remove`}</button>` : ''].filter(Boolean); return buttons.length ? `<span class="acct-acts">${buttons.join('')}</span>` : ''; };
     const row = item => { const who = item.account || item.label; return `<label class="acct-row${item.profile === list.selected ? ' on' : ''}" title="${esc(item.label)}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''}><span class="acct-main"><span class="acct-name"><b>${esc(who)}</b>${plan(item)}${item.profile === list.selected ? `<span class="acct-badge"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`In use`}</span>` : `<span class="acct-use">${t`Use`}</span>`}${acts(item, true)}</span><small>${esc([item.account ? where(item) : '', item.method, savedUsage(name, item.profile)?.at ? t`as of ${new Date(savedUsage(name, item.profile).at).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}` : ''].filter(Boolean).join(' · '))}</small>${usageHtml(name, item.profile)}</span></label>`; };
     const out = item => `<li><span class="acct-main"><b>${esc(item.account || item.label)}</b><small>${esc(item.label !== (item.account || item.label) ? item.label : t('Not signed in'))}</small></span>${acts(item, false)}<button type="button" class="btn small" data-acct-login="${esc(item.profile)}">${t`Sign in`}</button></li>`;
     // OpenRouter has no accounts to sign in to: one API key (typed here, checked, kept encrypted, never shown again) and the model agents use.
@@ -1734,13 +1734,14 @@ async function accountsDialog() {
     }
     const remove = event.target.closest('[data-acct-remove]');
     if (remove) {
-      event.preventDefault(); const name = tab(), profile = remove.dataset.acctRemove, inUse = profile === ui.accounts?.[name]?.selected, hide = remove.dataset.acctMode === 'hide';
-      // An account whose folder Rex Desk cannot prove it made only leaves the list; its folder stays on this computer (L123).
-      const question = hide ? t`Take this account off Rex Desk's list? Rex Desk has no record of making its folder, so the folder and its sign-in stay on this computer.` : inUse ? t`Remove this account? It is in use, so agents switch to the main account first. Its sign-in and settings on this computer are deleted; your conversations stay.` : t`Remove this account? Its sign-in and settings on this computer are deleted; your conversations stay.`;
+      event.preventDefault(); const name = tab(), profile = remove.dataset.acctRemove, inUse = profile === ui.accounts?.[name]?.selected;
+      // Remove only takes the account off Rex Desk: nothing on the computer is deleted (L123).
+      const signed = (ui.accounts?.[name]?.profiles || []).some(item => item.profile === profile && item.loggedIn);
+      const question = [t`Remove this account from Rex Desk?`, [inUse ? t`It is in use, so agents switch to the main account.` : '', t`Nothing on this computer is deleted: its folder, with its chats and sign-in, stays at ${profile}.`, signed ? t`To sign it out, press Sign out first.` : ''].filter(Boolean).join(' ')].join('\n\n');
       if (!await askConfirm(question)) return;
       try {
         const done = await api('/agents/remove', { method: 'POST', data: { provider: name, profile } });
-        say(done.hidden ? t('Account taken off the list. Its folder stays on this computer.') : done.leftover ? t`Account removed, but some of its files could not be deleted. They are in ${done.leftover}.` : done.kept ? t`Account removed. Its conversations were kept in ${done.kept}.` : done.switched ? t('Account removed. Agents now use the main account.') : t('Account removed.'));
+        say(t`Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at ${done.folder || profile}.`);
       } catch (error) { say(/working on this account right now/.test(error.message) ? t('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.') : error.message, true); }
       await loadAccounts(true); await refresh(); draw(); return;
     }
@@ -1752,7 +1753,7 @@ async function accountsDialog() {
       event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
         let started;
-        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; if (started?.restored) { say(t`This account was removed from Rex Desk before. Its earlier folder and sign-in were found at ${started.profile}, so it is back.`); await loadAccounts(true); draw(); return; } }
         else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
         if (started?.installing) toast(t('A sign-in window opened. It installs the tool first, then opens the browser.'));
         ui.acctWaiting = true; await loadAccounts(true); draw();
