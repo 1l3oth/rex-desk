@@ -153,7 +153,8 @@ export const addressOf = config => {
 const idOf = url => createHash('sha256').update(url).digest('hex').slice(0, 24);
 const local = url => ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 // A private or loopback destination: a loopback or .local/localhost name, a mapped IPv6 form, the IPv6 ranges ::1, fc00::/7
-// and fe80::/10, or the IPv4 ranges 127/8, 10/8, 192.168/16, 172.16-31 and 169.254/16. A tool server must never be able to
+// and fe80::/10, or the IPv4 ranges 0/8, 127/8, 10/8, 100.64/10 (shared address space, which Tailscale uses), 192.168/16, 172.16-31, 169.254/16,
+// 192.0.0/24, 198.18/15 and 224 upwards (multicast and reserved). A tool server must never be able to
 // name one for Rex Desk to reach, so it cannot point the sign-in at this computer or the private network around it.
 export function privateHost(host) {
   let name = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
@@ -161,11 +162,11 @@ export function privateHost(host) {
   const hex = name.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
   if (hex) { const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16); name = `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`; }
   else name = name.replace(/^::ffff:/, '');
-  if (!name || name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.local') || name === '::1' || name === '0.0.0.0') return true;
+  if (!name || name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.local') || name === '::1' || name === '::' || name === '0.0.0.0') return true;
   if (/^(fc|fd)[0-9a-f]{2}:/.test(name) || name.startsWith('fe80:')) return true;
   const parts = name.split('.').map(Number);
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part))) return false;
-  return parts[0] === 127 || parts[0] === 10 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
+  return parts[0] === 0 || parts[0] === 127 || parts[0] === 10 || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) || (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) || (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) || parts[0] >= 224 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
 }
 const originOf = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
 // Only https; plain http only to this computer, and only when the owner allowed it (tests and local servers under test).

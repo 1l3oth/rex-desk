@@ -86,3 +86,22 @@ test('review 4941d45c (3): the signed bridge opens a connection when the key is 
   const answer = await box.signed('srv', { type: 'http', url: 'http://x', headers: { Authorization: 'Bearer abcdefgh' } }, async () => 'done');
   assert.equal(answer, 'done'); assert.equal(connects, 1);
 });
+
+// PR 29 review: the shared address range 100.64.0.0/10 (Tailscale) is not public, so off-origin discovery must refuse it,
+// as a literal address and as a public name that resolves to it, while the configured server's own origin stays allowed.
+test('discovery refuses Tailscale and other non-public addresses off-origin, and keeps the server\'s own origin', async () => {
+  const { discoveryFetch, privateHost } = await import('../src/mcp-signin.js');
+  for (const host of ['100.64.0.1', '100.100.100.100', '100.127.255.254', '0.0.0.1', '198.18.0.1', '224.0.0.1', '255.255.255.255', 'fd7a:115c:a1e0::1', '::']) assert.equal(privateHost(host), true, host);
+  for (const host of ['100.63.255.255', '100.128.0.1', '8.8.8.8', '198.20.0.1', '223.255.255.255']) assert.equal(privateHost(host), false, host);
+  const reached = [];
+  const fetcher = async (target) => { reached.push(String(target)); return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }); };
+  const resolver = async host => [{ address: host === 'tailnet.example.com' ? '100.101.102.103' : '93.184.216.34', family: 4 }];
+  const guarded = discoveryFetch({ fetcher, resolver, home: 'https://tailnet.example.com' });
+  await assert.rejects(() => guarded('https://100.100.100.100/.well-known/oauth-authorization-server'), /inside this computer or network/);
+  await assert.rejects(() => guarded('https://other.example.com/x').then(() => guarded('https://100.64.0.9/x')), /inside this computer or network/);
+  const rebinding = discoveryFetch({ fetcher, resolver: async () => [{ address: '100.101.102.103', family: 4 }] });
+  await assert.rejects(() => rebinding('https://public-name.example.com/x'), /inside this computer or network/);
+  assert.equal(reached.some(url => url.includes('100.')), false, 'nothing on the tailnet is reached');
+  await guarded('https://tailnet.example.com/.well-known/oauth-authorization-server'); // the configured server itself stays allowed
+  assert.equal(reached.length >= 1, true);
+});
