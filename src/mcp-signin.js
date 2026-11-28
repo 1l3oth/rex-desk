@@ -11,10 +11,94 @@ import { createHash, randomBytes } from 'node:crypto';
 import { discoverOAuthServerInfo, extractWWWAuthenticateParams, registerClient, startAuthorization, exchangeAuthorization, refreshAuthorization, selectResourceURL } from '@modelcontextprotocol/sdk/client/auth.js';
 
 const KIND = 'mcpauth';
-const EARLY_MS = 10 * 60000, TICK_MS = 60000, WAIT_MS = 5 * 60000, ASK_MS = 30000;
+const EARLY_MS = 10 * 60000, TICK_MS = 60000, WAIT_MS = 5 * 60000, ASK_MS = 30000, REVOKE_MS = 3000;
 // The server said this sign-in is over (not a network blip): only a new sign-in helps.
 const OVER = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client']);
 export const SIGN_IN_HELP = 'Needs sign-in. Ask the person to press Sign in for it in Rex Desk, Settings, Connectors. Rex Desk does the whole sign-in: never tell them to use a terminal, /mcp or a config file.';
+
+// Pre-registered OAuth providers that do not support RFC 7591 dynamic client registration.
+// Credentials stay in env/runtime config (never in public/connectors/catalog.json) and are only
+// used for explicitly supported resource URLs whose discovered issuer and endpoints match this
+// hard-coded trusted configuration.
+function exactHttpsUrl(value) {
+  let url;
+  try { url = new URL(String(value)); } catch { return ''; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return '';
+  return url.href;
+}
+function normalizedBaseUrl(value) {
+  const href = exactHttpsUrl(value);
+  return href ? href.replace(/\/$/, '') : '';
+}
+const OAUTH_PROVIDERS = {
+  google: {
+    clientIdEnv: 'REX_GOOGLE_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'REX_GOOGLE_OAUTH_CLIENT_SECRET',
+    scopesEnv: 'REX_GOOGLE_OAUTH_SCOPES',
+    resourceUrls: new Set(['https://drivemcp.googleapis.com/mcp/v1']),
+    issuers: new Set(['https://accounts.google.com']),
+    endpoints: {
+      authorization: new Set(['https://accounts.google.com/o/oauth2/v2/auth']),
+      token: new Set(['https://oauth2.googleapis.com/token']),
+      revocation: new Set(['https://oauth2.googleapis.com/revoke']),
+      userinfo: new Set([
+        'https://openidconnect.googleapis.com/v1/userinfo',
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+      ]),
+    },
+    includeResource: false,
+    authParams: { access_type: 'offline', prompt: 'select_account consent' },
+    defaultScopes: ['https://www.googleapis.com/auth/drive.readonly', 'openid', 'email'],
+    revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+    managePermissionsUrl: 'https://myaccount.google.com/permissions',
+    unsupportedUrlMessage: 'This server address is not a supported Google MCP server, so Rex Desk will not use Google sign-in credentials there.',
+    missingMessage: (name = 'Google') => `${name} sign-in needs Google OAuth client credentials (REX_GOOGLE_OAUTH_CLIENT_ID and REX_GOOGLE_OAUTH_CLIENT_SECRET) configured on this computer.`,
+  },
+};
+const normalizeScopes = value => {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[\s,]+/) : [];
+  return list.map(item => String(item || '').trim()).filter(Boolean).join(' ');
+};
+// Only explicitly supported resource URLs match a pre-registered provider; a connector name or
+// server-claimed issuer is never enough on its own.
+export function oauthProviderFor({ provider, url } = {}) {
+  const normalizedUrl = normalizedBaseUrl(url);
+  if (!normalizedUrl) return null;
+  for (const [id, spec] of Object.entries(OAUTH_PROVIDERS)) {
+    if (provider && provider !== id) continue;
+    if (spec.resourceUrls.has(normalizedUrl)) return { id, ...spec };
+  }
+  return null;
+}
+export function trustedProviderEndpoint(spec, kind, value) {
+  const allowed = spec?.endpoints?.[kind];
+  if (!allowed) return false;
+  return allowed.has(exactHttpsUrl(value));
+}
+export function preRegisteredOAuthClient({ provider, url, env = process.env, oauthClients = {} } = {}) {
+  const spec = oauthProviderFor({ provider, url });
+  if (!spec) return null;
+  const configured = oauthClients?.[spec.id] || {};
+  const clientId = String(configured.clientId ?? configured.client_id ?? env?.[spec.clientIdEnv] ?? '').trim();
+  const clientSecret = String(configured.clientSecret ?? configured.client_secret ?? env?.[spec.clientSecretEnv] ?? '').trim();
+  const scopes = normalizeScopes(configured.scopes ?? (spec.scopesEnv ? env?.[spec.scopesEnv] : ''));
+  const client = clientId && clientSecret ? { client_id: clientId, client_secret: clientSecret, token_endpoint_auth_method: 'client_secret_post' } : null;
+  return { provider: spec, client, scopes };
+}
+const sanitizeEmail = value => {
+  const email = String(value || '').replace(/[\r\n\t\0]/g, '').trim();
+  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+};
+// Non-secret account email from an OIDC id_token payload (received directly over TLS from the pinned token endpoint).
+export function emailFromIdToken(idToken) {
+  if (typeof idToken !== 'string') return '';
+  const parts = idToken.split('.');
+  if (parts.length !== 3 || !parts[1]) return '';
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return sanitizeEmail(payload?.email);
+  } catch { return ''; }
+}
 
 // What the person reads when a sign-in fails: always Rex Desk's own words. What the server wrote can hold sensitive values
 // (tokens, codes, addresses with keys), so only its OAuth error code picks the message (RFC 6749, RFC 7591).
@@ -36,6 +120,27 @@ const BY_CODE = {
 };
 // A message Rex Desk wrote itself, so it may be shown as it is.
 class Plain extends Error {}
+export function validatePreRegisteredOAuth(spec, { authorizationServerUrl = '', issuer = '', authorizationEndpoint = '', tokenEndpoint = '', revocationEndpoint = '', userinfoEndpoint = '' } = {}) {
+  if (!spec) return;
+  if (authorizationServerUrl && !spec.issuers.has(normalizedBaseUrl(authorizationServerUrl))) {
+    throw new Plain('This server named an untrusted sign-in issuer, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!spec.issuers.has(normalizedBaseUrl(issuer))) {
+    throw new Plain('This server named an untrusted sign-in issuer, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!trustedProviderEndpoint(spec, 'authorization', authorizationEndpoint)) {
+    throw new Plain('The sign-in page does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (!trustedProviderEndpoint(spec, 'token', tokenEndpoint)) {
+    throw new Plain('The token address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (revocationEndpoint && !trustedProviderEndpoint(spec, 'revocation', revocationEndpoint)) {
+    throw new Plain('The revocation address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+  if (userinfoEndpoint && !trustedProviderEndpoint(spec, 'userinfo', userinfoEndpoint)) {
+    throw new Plain('The account info address does not match the trusted sign-in addresses, so Rex Desk stopped to keep your sign-in safe.');
+  }
+}
 export const signInError = error => {
   if (error instanceof Plain) return error.message;
   const code = String(error?.errorCode || error?.constructor?.errorCode || '');
@@ -48,7 +153,8 @@ export const addressOf = config => {
 const idOf = url => createHash('sha256').update(url).digest('hex').slice(0, 24);
 const local = url => ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 // A private or loopback destination: a loopback or .local/localhost name, a mapped IPv6 form, the IPv6 ranges ::1, fc00::/7
-// and fe80::/10, or the IPv4 ranges 127/8, 10/8, 192.168/16, 172.16-31 and 169.254/16. A tool server must never be able to
+// and fe80::/10, or the IPv4 ranges 0/8, 127/8, 10/8, 100.64/10 (shared address space, which Tailscale uses), 192.168/16, 172.16-31, 169.254/16,
+// 192.0.0/24, 198.18/15 and 224 upwards (multicast and reserved). A tool server must never be able to
 // name one for Rex Desk to reach, so it cannot point the sign-in at this computer or the private network around it.
 export function privateHost(host) {
   let name = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
@@ -56,11 +162,11 @@ export function privateHost(host) {
   const hex = name.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
   if (hex) { const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16); name = `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`; }
   else name = name.replace(/^::ffff:/, '');
-  if (!name || name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.local') || name === '::1' || name === '0.0.0.0') return true;
+  if (!name || name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.local') || name === '::1' || name === '::' || name === '0.0.0.0') return true;
   if (/^(fc|fd)[0-9a-f]{2}:/.test(name) || name.startsWith('fe80:')) return true;
   const parts = name.split('.').map(Number);
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part))) return false;
-  return parts[0] === 127 || parts[0] === 10 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
+  return parts[0] === 0 || parts[0] === 127 || parts[0] === 10 || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) || (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) || (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) || parts[0] >= 224 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
 }
 const originOf = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
 // Only https; plain http only to this computer, and only when the owner allowed it (tests and local servers under test).
@@ -165,17 +271,44 @@ export function nodeFetch(target, init = {}) {
 // the person's own loopback server (no pin) uses the platform fetch unchanged.
 const pinnedTransport = (target, init = {}) => init.pin ? nodeFetch(target, init) : fetch(target, init);
 
+// Resolve a host once and refuse it if it is private: a literal private address, or a name the injected resolver maps to
+// one (so a public name pointed at a private IP is caught too). Returns the resolved address to pin the connection to, so
+// the address checked is the address reached. Fails closed: a name that does not resolve (lookup error or empty answer)
+// is refused, never left to an unpinned fetch that could reach an unchecked address.
+async function resolvePublicAddress(host, what, resolver) {
+  const inside = () => new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+  if (privateHost(host)) throw inside();
+  let addresses; try { addresses = await resolver(host); } catch { addresses = null; }
+  if (!addresses?.length) throw new Plain(`The ${what} this server named could not be checked, so Rex Desk did not sign in there.`);
+  if (addresses.some(entry => privateHost(entry.address))) throw inside();
+  return { address: addresses[0].address, family: addresses[0].family };
+}
+
+// Guarded, DNS-pinned discovery fetch shared by mcp-signin and connector-catalog: every request and every redirect hop is
+// checked (secure, no credential in the URL, resolved to a public IP when off-origin) and pinned before it is sent.
+export function discoveryFetch({ fetcher = pinnedTransport, loopback = false, ms = ASK_MS, resolver = host => dns.lookup(host, { all: true }), home = '' } = {}) {
+  const check = async address => {
+    const url = safeAddress(address, 'sign-in information address', loopback);
+    if (carriesCredential(url)) throw new Plain('The sign-in information address this server named has a key or password in it, so Rex Desk does not sign in there.');
+    if (loopback) return null;
+    if (home && url.origin === home) return null;
+    return resolvePublicAddress(url.hostname, 'sign-in information address', resolver);
+  };
+  return checkedFetch(fetcher, check, ms);
+}
+
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
-  constructor(store, { fetcher = pinnedTransport, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }) } = {}) {
-    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
+  constructor(store, { fetcher = pinnedTransport, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }), env = process.env, oauthClients = {}, oauthFor = null } = {}) {
+    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.env = env; this.oauthClients = oauthClients; this.oauthFor = oauthFor;
+    this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
   }
   record(url) { return url ? this.store.get(KIND, idOf(url)) || null : null; }
   secret(record) { try { return JSON.parse(this.store.decrypt(record.sealed)); } catch { return null; } }
-  save(url, name, secret, status = 'connected') {
-    const id = idOf(url);
-    this.store.put(KIND, id, { id, url, name, status, expiresAt: secret.expiresAt || 0, sealed: this.store.encrypt(JSON.stringify(secret)), at: new Date().toISOString() });
+  save(url, name, secret, status = 'connected', accountEmail = '') {
+    const id = idOf(url), email = sanitizeEmail(accountEmail);
+    this.store.put(KIND, id, { id, url, name, status, ...(email ? { accountEmail: email } : {}), expiresAt: secret.expiresAt || 0, sealed: this.store.encrypt(JSON.stringify(secret)), at: new Date().toISOString() });
   }
   expire(record) {
     const now = this.store.get(KIND, record.id); if (!now || now.status === 'expired') return;
@@ -183,15 +316,24 @@ export class McpSignIn {
   }
   // Every secret held for a server's address, so it can be taken out of whatever that server sends back.
   secrets(config) { const record = this.record(addressOf(config)), held = record && this.secret(record); return held ? [held.accessToken, held.refreshToken, held.client?.client_secret, held.client?.registration_access_token].filter(Boolean) : []; }
-  // What the pages show: no token and no address, ever.
+  // What the pages show: no token and no address, ever. Non-secret accountEmail is included when known.
   state(url) {
     const record = this.record(url);
-    return { state: record?.status || '', waiting: this.waiting.has(url), link: this.waiting.get(url)?.link || '', error: this.waiting.get(url)?.error || '' };
+    return {
+      state: record?.status || '',
+      waiting: this.waiting.has(url),
+      link: this.waiting.get(url)?.link || '',
+      error: this.waiting.get(url)?.error || '',
+      ...(record?.accountEmail ? { accountEmail: record.accountEmail } : {}),
+    };
   }
   expired() { return this.store.list(KIND).filter(record => record.status === 'expired').map(({ id, name, at }) => ({ id, name, at })); }
 
   // ---- signing in ----
-  async discover(url) {
+  async discover(url, oauth = {}, name = '') {
+    if (oauth?.provider && Object.hasOwn(OAUTH_PROVIDERS, oauth.provider) && !oauthProviderFor({ provider: oauth.provider, url })) {
+      throw new Plain(OAUTH_PROVIDERS[oauth.provider].unsupportedUrlMessage);
+    }
     // The person's own server, and its own same-origin sign-in endpoints, may be private; every other destination must be public.
     const home = originOf(url);
     // The server's 401 may name where its metadata is; without that the well-known addresses are tried (the SDK does both).
@@ -201,30 +343,80 @@ export class McpSignIn {
       const response = await this.fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }), signal: AbortSignal.timeout(15000), redirect: 'manual' });
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
-    const check = async address => { this.endpoint(address, 'sign-in information address'); return this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
-    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, check, this.ms) });
+    let discoveredRevocation = '';
+    const guardedDiscovery = discoveryFetch({ fetcher: this.fetcher, loopback: this.loopback, ms: this.ms, resolver: this.resolver, home });
+    const captureMeta = async (target, init) => {
+      const response = await guardedDiscovery(target, init);
+      if (response.ok && /\/\.well-known\/(?:openid-configuration|oauth-authorization-server)/i.test(String(target))) {
+        try { const data = await response.clone().json(); if (data?.authorization_endpoint) discoveredRevocation = typeof data.revocation_endpoint === 'string' ? data.revocation_endpoint : ''; } catch { /* ignore */ }
+      }
+      return response;
+    };
+    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: captureMeta });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
+    const discoveredRevocationEndpoint = metadata.revocation_endpoint || discoveredRevocation || '';
+    const userinfoEndpoint = metadata.userinfo_endpoint || '';
+    const pre = preRegisteredOAuthClient({ provider: oauth?.provider, url, env: this.env, oauthClients: this.oauthClients });
+    if (pre?.provider) {
+      validatePreRegisteredOAuth(pre.provider, {
+        authorizationServerUrl: info.authorizationServerUrl,
+        issuer: metadata.issuer,
+        authorizationEndpoint: metadata.authorization_endpoint,
+        tokenEndpoint: metadata.token_endpoint,
+        revocationEndpoint: discoveredRevocationEndpoint,
+        userinfoEndpoint,
+      });
+    }
     // Every address the server named is checked like the one the person added: secure, with no key or password in it, and
     // never a private or loopback destination off the server's own origin.
     await this.named(info.authorizationServerUrl, 'sign-in server', home);
     for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) await this.named(metadata[key], what, home);
+    if (discoveredRevocationEndpoint) await this.named(discoveredRevocationEndpoint, 'revocation address', home);
+    if (userinfoEndpoint) await this.named(userinfoEndpoint, 'account info address', home);
     if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
-    if (!metadata.registration_endpoint) throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
-    await this.named(metadata.registration_endpoint, 'registration address', home);
-    const resource = await selectResourceURL(url, {}, info.resourceMetadata);
-    if (resource) await this.named(info.resourceMetadata.resource, 'server address', home);
-    return { server: info.authorizationServerUrl, metadata, resource: resource ? String(info.resourceMetadata.resource) : url, scope: challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined };
+    let client = null;
+    if (pre?.provider) {
+      if (!pre.client) throw new Plain(pre.provider.missingMessage(name || 'This server'));
+      client = pre.client;
+    } else if (metadata.registration_endpoint) {
+      await this.named(metadata.registration_endpoint, 'registration address', home);
+    } else {
+      throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
+    }
+    const includeResource = oauth?.includeResource ?? pre?.provider?.includeResource ?? true;
+    let resourceValue;
+    if (includeResource) {
+      const resource = await selectResourceURL(url, {}, info.resourceMetadata);
+      if (resource) await this.named(info.resourceMetadata.resource, 'server address', home);
+      resourceValue = resource ? String(info.resourceMetadata.resource) : url;
+    }
+    const explicitScope = pre?.scopes || normalizeScopes(oauth?.scopes) || normalizeScopes(pre?.provider?.defaultScopes);
+    const scope = explicitScope || challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined;
+    const authParams = { ...(pre?.provider?.authParams || {}), ...(oauth?.authParams || {}) };
+    const revocationEndpoint = discoveredRevocationEndpoint || pre?.provider?.revocationEndpoint || '';
+    return { server: info.authorizationServerUrl, metadata, resource: resourceValue, scope, client, authParams, revocationEndpoint, userinfoEndpoint };
+  }
+  async fetchAccountEmail(userinfoEndpoint, accessToken, home) {
+    if (!userinfoEndpoint || !accessToken) return '';
+    try {
+      const pinned = this.pinned(userinfoEndpoint, 'account info address', home);
+      const response = await pinned(userinfoEndpoint, { method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } });
+      if (!response.ok) return '';
+      const data = await response.json();
+      return sanitizeEmail(data?.email);
+    } catch { return ''; }
   }
   // Starts a sign-in and gives back the page to open. done resolves when the browser came back and the tokens are saved.
-  async start(name, address) {
+  async start(name, address, oauth = null) {
     const url = addressOf({ url: address }); if (!url) throw new Plain('This server has no web address to sign in to.');
     const home = originOf(url);
     const couldNot = error => new Error(error instanceof Plain ? error.message : `Rex Desk could not start the sign-in. ${signInError(error)}`);
+    const options = oauth || this.oauthFor?.(name, url) || {};
     let found;
     try {
       if (carriesCredential(safeAddress(url, 'server address', this.loopback))) throw new Plain('This address has a key or password in it, so Rex Desk does not sign in there.');
-      this.cancel(url); found = await this.discover(url);
+      this.cancel(url); found = await this.discover(url, options, name);
     } catch (error) { throw couldNot(error); }
     const state = randomBytes(24).toString('base64url');
     let answer, fail; const code = new Promise((resolve, reject) => { answer = resolve; fail = reject; });
@@ -252,19 +444,23 @@ export class McpSignIn {
     const redirectUri = `http://127.0.0.1:${listener.address().port}/callback`;
     let timer = null; const close = () => { clearTimeout(timer); listener.close(); };
     try {
-      // Registration is bounded by its own fetch (pinnedTo); the wait for the browser starts once the answer is waited on.
-      const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address', home),
+      // Registration is bounded by its own fetch (pinnedTo); pre-registered clients skip DCR.
+      const client = found.client || await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address', home),
         clientMetadata: { client_name: 'Rex Desk', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
-      const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, resource: found.resource });
+      const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, ...(found.resource ? { resource: found.resource } : {}) });
+      for (const [key, value] of Object.entries(found.authParams || {})) {
+        if (value !== undefined && value !== null && value !== '') authorizationUrl.searchParams.set(key, String(value));
+      }
       // The page handed to the screen is the checked sign-in page with Rex Desk's own sign-in values added, nothing else.
       const opened = new URL(authorizationUrl), signInPage = this.endpoint(found.metadata.authorization_endpoint, 'sign-in page');
       if (opened.origin !== signInPage.origin || opened.pathname !== signInPage.pathname) throw new Plain('The sign-in page this server named does not match, so Rex Desk stopped.');
       const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Plain('The sign-in was cancelled.')) };
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
-        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
+        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, ...(found.resource ? { resource: found.resource } : {}), fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
+        const accountEmail = emailFromIdToken(tokens.id_token) || await this.fetchAccountEmail(found.userinfoEndpoint, tokens.access_token, home);
         // Saved first, then the tab is told it worked: "Signed in" shows only after the sign-in is really saved.
-        if (this.waiting.get(url) === attempt) { this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, resource: found.resource, client }, tokens)); this.waiting.delete(url); this.changed(url); }
+        if (this.waiting.get(url) === attempt) { this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, ...(found.resource ? { resource: found.resource } : {}), client, ...(found.revocationEndpoint ? { revocationEndpoint: found.revocationEndpoint } : {}) }, tokens), 'connected', accountEmail); this.waiting.delete(url); this.changed(url); }
         finish(200, 'Signed in. You can close this tab and go back to Rex Desk.');
       }).catch(error => {
         // The sign-in did not complete: the tab gets a plain failure page, never a false "Signed in".
@@ -284,14 +480,7 @@ export class McpSignIn {
   // the address checked is the address reached. Fails closed: a name that does not resolve (lookup error or empty answer)
   // is refused, never left to an unpinned fetch that could reach an unchecked address. Only home / loopback destinations
   // skip this (ensurePublic returns before calling here), so a private server the person set up themselves still signs in.
-  async publicAddress(host, what) {
-    const inside = () => new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
-    if (privateHost(host)) throw inside();
-    let addresses; try { addresses = await this.resolver(host); } catch { addresses = null; }
-    if (!addresses?.length) throw new Plain(`The ${what} this server named could not be checked, so Rex Desk did not sign in there.`);
-    if (addresses.some(entry => privateHost(entry.address))) throw inside();
-    return { address: addresses[0].address, family: addresses[0].family };
-  }
+  async publicAddress(host, what) { return resolvePublicAddress(host, what, this.resolver); }
   // Check a request that would reach an address the server named, and give back the resolved address to pin the connection
   // to so the one resolution that passed the check is the one the socket uses. The server the person configured (home) and
   // its own same-origin endpoints may be private, so a private server they set up still signs in (no pin, reached as named);
@@ -309,9 +498,32 @@ export class McpSignIn {
     await this.ensurePublic(url, what, home);
     return url;
   }
-  pinned(address, what, home) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms: this.ms, guard: to => this.ensurePublic(to, what, home) }); }
+  pinned(address, what, home, ms = this.ms) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms, guard: to => this.ensurePublic(to, what, home) }); }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
-  signOut(url) { this.cancel(url); const record = this.record(url); if (record) { this.store.delete(KIND, record.id); this.changed(url); } }
+  async signOut(url) {
+    this.cancel(url);
+    const record = this.record(url), secret = record && this.secret(record);
+    if (record) { this.store.delete(KIND, record.id); this.changed(url); }
+    const provider = oauthProviderFor({ url });
+    const manageUrl = provider?.managePermissionsUrl || '';
+    const endpoint = secret?.revocationEndpoint || secret?.metadata?.revocation_endpoint || (secret && provider?.revocationEndpoint) || '';
+    const token = secret?.refreshToken || secret?.accessToken || '';
+    if (!endpoint || !token) return { localCleared: Boolean(record), revocation: 'none', revoked: false, ...(manageUrl ? { manageUrl } : {}) };
+    const revoked = await this.revoke(url, endpoint, token, secret?.client, provider);
+    return { localCleared: Boolean(record), revocation: revoked ? 'revoked' : 'failed', revoked, ...(manageUrl ? { manageUrl } : {}) };
+  }
+  async revoke(url, endpoint, token, client, provider = oauthProviderFor({ url })) {
+    try {
+      if (provider && !trustedProviderEndpoint(provider, 'revocation', endpoint)) return false;
+      const form = new URLSearchParams({ token });
+      if (client?.client_id) form.set('client_id', client.client_id);
+      if (client?.client_secret) form.set('client_secret', client.client_secret);
+      const pinned = this.pinned(endpoint, 'revocation address', originOf(url), Math.min(this.ms, REVOKE_MS));
+      const response = await pinned(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+      await response.body?.cancel?.().catch(() => {});
+      return Boolean(response.ok);
+    } catch { return false; }
+  }
   kept(base, tokens, before = {}) {
     return { ...base, accessToken: tokens.access_token, refreshToken: tokens.refresh_token || before.refreshToken || '', expiresAt: tokens.expires_in ? Date.now() + Number(tokens.expires_in) * 1000 : 0 };
   }
@@ -327,11 +539,14 @@ export class McpSignIn {
     const record = this.record(url), secret = record && this.secret(record);
     if (!secret || record.status === 'expired') return false;
     if (!secret.refreshToken) { if (secret.expiresAt && secret.expiresAt <= Date.now()) this.expire(record); return false; }
+    const provider = oauthProviderFor({ url });
+    if (provider && !trustedProviderEndpoint(provider, 'token', secret.metadata?.token_endpoint)) return false;
     try {
-      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, resource: secret.resource, fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
+      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, ...(secret.resource ? { resource: secret.resource } : {}), fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
       // Signed out or signed in again while this ran: the old answer is dropped.
       if (this.store.get(KIND, record.id)?.sealed !== record.sealed) return false;
-      this.save(url, record.name, this.kept(secret, tokens, secret));
+      const accountEmail = emailFromIdToken(tokens.id_token) || record.accountEmail || '';
+      this.save(url, record.name, this.kept(secret, tokens, secret), 'connected', accountEmail);
       return true;
     } catch (error) {
       if (OVER.has(error?.errorCode || error?.constructor?.errorCode) && this.store.get(KIND, record.id)?.sealed === record.sealed) this.expire(record);
