@@ -208,6 +208,7 @@ const CODE_AGAIN = 'That was only part of the code. Copy the whole code the brow
 const CODE_NOT_IT = 'That is not the sign-in code. Copy the whole code the last browser page shows and paste it here.';
 // A sent code with no answer for this long: the field comes back, in case the paste never reached the sign-in.
 const CODE_QUIET_MS = 20000;
+const LOCAL_ADDRESS = /^(https?:\/\/)?(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)([:/?#]|$)/i;
 const CODE_QUIET = 'Nothing came back yet. If the browser page still shows a code, paste the whole code again.';
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
@@ -450,6 +451,9 @@ export class AgentProfiles {
     const job = this.jobs?.get(provider), text = String(code ?? '').replace(/[\t\r\n]+/g, '').trim();
     if (!job || job.done || job.stdinClosed || !job.child?.stdin?.writable) throw new Error('This sign-in has stopped. Start it again to get a new code.');
     if (!text || text.length > 2000 || /[\u0000-\u001f\u007f]/.test(text)) throw new Error('That does not look like a sign-in code. Copy the code the browser page shows and paste it here.');
+    // A local address (the browser's last page on this computer) is never the code, and the real Claude Code can stay quiet
+    // about it: it is not sent, and the field comes back at once with the plain line, like the other refused pastes.
+    if (LOCAL_ADDRESS.test(text)) { clearTimeout(job.quiet); job.codeSent = false; job.codeError = false; job.codeProblem = CODE_NOT_IT; return this.loginJob(provider); }
     job.codeMark = (job.output.split('REXDESK-SIGNIN-STARTS')[1] || '').length; job.codeSent = true; job.codeError = false; job.codeProblem = '';
     job.child.stdin.write(`${text}\n`);
     clearTimeout(job.quiet);

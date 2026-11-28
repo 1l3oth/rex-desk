@@ -163,3 +163,34 @@ test('the first-run screen sends the code, cancels on the server, and looks at t
   assert.match(server, /\/api\/agents\/login\/code/); assert.match(server, /\/api\/agents\/login\/cancel/);
   for (const text of ['Paste the code here', 'If the browser page shows a code, copy it and paste it here.', 'The code may be wrong or too old. Start again to get a new code.', 'That code did not work', 'Checking the code…', 'Start again', 'Checking this computer…', 'Paste the code again', 'That was only part of the code. Copy the whole code the browser page shows, including the # in the middle, and paste it again.', 'That is not the sign-in code. Copy the whole code the last browser page shows and paste it here.', 'Nothing came back yet. If the browser page still shows a code, paste the whole code again.']) assert.ok(km[text], text);
 });
+
+test('a pasted local address is never sent: the field comes back at once for the same running sign-in', { timeout: 60000 }, async () => {
+  const store = new Store(mkdtempSync(path.join(folder, 'data-'))), agents = new AgentProfiles(store);
+  try {
+    start(agents, 'code');
+    assert.ok(await until(() => agents.loginJob('claude').codeAsked));
+    for (const local of ['http://localhost:5432/callback?code=x', 'https://127.0.0.1:54545/', 'localhost:8080']) {
+      const job = agents.sendLoginCode('claude', local);
+      assert.equal(job.codeSent, false, local);
+      assert.equal(job.codeProblem, 'That is not the sign-in code. Copy the whole code the last browser page shows and paste it here.', local);
+    }
+    // The stand-in ends on any wrong line: still waiting means the address never reached it.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(agents.loginJob('claude').state, 'signing-in');
+    assert.equal(agents.sendLoginCode('claude', 'GOOD-CODE').codeProblem, '');
+    assert.ok(await until(() => agents.loginJob('claude').state === 'finished'), 'the real code still signs in');
+  } finally { store.close(); }
+});
+
+test('after a reload the first-run screen finds the running sign-in and goes back to its waiting screen, never starting one', () => {
+  const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  const screen = read('public/chat-firstrun.js'), tour = read('public/chat-tour.js'), km = JSON.parse(read('public/i18n/km.json'));
+  const resume = screen.slice(screen.indexOf('export async function firstRunResume'), screen.indexOf('function cancel('));
+  assert.match(resume, /ctx\.api\(`\/agents\/login\?provider=\$\{item\.id\}`\)/, 'asks the server with GET');
+  assert.match(resume, /\['installing', 'signing-in'\]\.includes\(job\.state\)/, 'only a sign-in still waiting');
+  assert.match(resume, /step: 'signin'/); assert.match(resume, /hidden: true/);
+  assert.doesNotMatch(resume, /method: 'POST'/, 'never starts or sends anything');
+  assert.match(tour, /if \(firstRun\) void firstRunResume\(/); assert.match(tour, /state\.step = STEPS\.indexOf\('connect'\)/);
+  assert.match(screen, /If the page says Too soon, wait a few seconds and press Authorize again\./);
+  assert.ok(km['If the page says Too soon, wait a few seconds and press Authorize again.']);
+});

@@ -2428,6 +2428,7 @@
  "Getting {0} ready on this computer. This can take a minute…": "កំពុងរៀបចំ {0} លើកុំព្យូទ័រនេះ។ វាអាចចំណាយពេលមួយនាទី…",
  "Waiting for you to sign in in your browser…": "កំពុងរង់ចាំអ្នកចូលក្នុងកម្មវិធីរុករករបស់អ្នក…",
  "Browser did not open?": "កម្មវិធីរុករកមិនបើកទេ?",
+ "If the page says Too soon, wait a few seconds and press Authorize again.": "បើទំព័រនោះសរសេរថា Too soon សូមរង់ចាំប៉ុន្មានវិនាទី រួចចុច Authorize ម្តងទៀត។",
  "Open the sign-in page": "បើកទំព័រចូល",
  "Sign in with a window instead": "ចូលដោយប្រើបង្អួចជំនួសវិញ",
  "Sign in with {0}": "ចូលដោយប្រើ {0}",

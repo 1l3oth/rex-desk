@@ -93,7 +93,7 @@ export function firstRunHtml({ ui, esc }, state) {
     const status = !job ? `<p class="muted">${t`Rex Desk sets it up for you. Your browser opens the ${ai.service} sign-in; sign in with the account that has your plan, then come back here.`}</p>`
       : job.state === 'failed' ? `<div class="fr-error" role="alert"><b>${job.codeSent ? t('That code did not work') : t('That did not work')}</b><span>${esc(job.codeSent ? t(CODE_FAILED) : job.error || t('The sign-in stopped.'))}</span></div>`
       : `<p class="fr-wait" role="status"><span class="dot working"></span>${job.state === 'installing' ? t`Getting ${ai.service} ready on this computer. This can take a minute…` : job.checking ? t('Checking this computer…') : job.state === 'starting' ? t('Starting…') : job.codeSent && !job.codeError ? t('Checking the code…') : t`Waiting for you to sign in in your browser…`}</p>
-        ${job.url ? `<p class="fr-hint">${t`Browser did not open?`} <a href="${esc(job.url)}" target="_blank" rel="noopener">${t`Open the sign-in page`}</a></p>` : ''}${codeBox(job)}`;
+        ${job.url ? `<p class="fr-hint">${t`Browser did not open?`} <a href="${esc(job.url)}" target="_blank" rel="noopener">${t`Open the sign-in page`}</a></p>` : ''}${ai.id === 'claude' && job.state === 'signing-in' ? `<p class="fr-hint">${t`If the page says Too soon, wait a few seconds and press Authorize again.`}</p>` : ''}${codeBox(job)}`;
     const action = job?.state === 'failed' ? `<button type="button" class="btn primary" data-fr-login>${job.codeSent ? t('Start again') : t('Try again')}</button><button type="button" class="btn quiet" data-fr-window>${t`Sign in with a window instead`}</button>`
       : busy ? `${job.codeError ? `<button type="button" class="btn primary" data-fr-login>${t`Start again`}</button>` : ''}<button type="button" class="btn quiet" data-fr-cancel>${t`Cancel`}</button>` : `<button type="button" class="btn primary" data-fr-login>${t`Sign in with ${ai.service}`}</button>`;
     body = `<p class="fr-lead">${t`Sign in to ${ai.service}`}</p>${status}<div class="fr-actions">${action}</div>
@@ -176,6 +176,20 @@ export async function firstRunClick(ctx, state, target, draw, { load, finish, al
   draw();
   if (fr.job.state !== 'failed') await follow(ctx, state, draw, { load, finish, alive, hidden: true });
   return true;
+}
+// A reload (or the app closed and opened again) forgets the screen, but the hidden sign-in on the server keeps waiting: ask the
+// server for one still running and go straight back to its waiting screen, with the paste field. Never starts a sign-in.
+export async function firstRunResume(ctx, state, draw, { load, finish, alive, show }) {
+  for (const item of AIS.filter(ai => !ai.key && !ai.local)) {
+    const job = await ctx.api(`/agents/login?provider=${item.id}`).catch(() => null);
+    if (!job || !['installing', 'signing-in'].includes(job.state) || !alive() || state.fr?.job) continue;
+    state.fr = { ...(state.fr || {}), step: 'signin', ai: item.id, plans: false, job: { ...job, sendError: '' } };
+    show(); draw();
+    void load().catch(() => {});
+    await follow(ctx, state, draw, { load, finish, alive, hidden: true });
+    return true;
+  }
+  return false;
 }
 // Stops following, and stops the hidden sign-in on the server with everything it started (no program is left waiting).
 function cancel(fr, api) {
