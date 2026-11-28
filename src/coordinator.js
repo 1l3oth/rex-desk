@@ -532,7 +532,7 @@ export class Desk {
     // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
     // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
     const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
-    this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
+    this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)), provider);
     if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, or ${this.resumeAfterLimit(runId, [current])}.` }, true); return false; }
     // This turn already switched (the limit is noticed twice for one turn): it is handled. A new turn that hits a limit again
     // switches again, however soon; it used to stop silently for 2 minutes after a switch.

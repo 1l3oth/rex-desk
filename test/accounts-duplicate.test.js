@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { AgentProfiles, canonical } from '../src/agents.js';
+import { signInDone } from '../public/chat-card.js';
 
 // Test data on D: next to the project (never C:), one folder per test.
 const base = path.resolve(process.env.REX_TEST_TMP || path.join(import.meta.dirname, '..', '..', '..', 'tmp', 'accounts-test'));
@@ -18,14 +20,16 @@ function setup(accounts, { orca = {}, selected } = {}) {
   for (const [name, email] of Object.entries(accounts)) if (name !== 'main') { const folder = path.join(home, '.config', `claude-${name}`); mkdirSync(folder, { recursive: true }); who.set(canonical(folder), email); }
   for (const [id, email] of Object.entries(orca)) { const folder = path.join(appData, 'orca', 'claude-profiles', id, 'home'); mkdirSync(folder, { recursive: true }); who.set(canonical(folder), email); }
   const broken = new Set();
+  const calls = [];
   const run = async (command, args, env) => {
+    calls.push(args.join(' '));
     const folder = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), email = who.get(canonical(folder)) || '';
     if (broken.has(canonical(folder))) return { code: 1, stdout: '', stderr: 'status failed' };
     return { code: 0, stdout: JSON.stringify(email ? { loggedIn: true, authMethod: 'claude.ai', email, orgName: `${email}'s Organization`, subscriptionType: 'max' } : { loggedIn: false }), stderr: '' };
   };
   const records = new Map(), store = { get: (k, id) => records.get(`${k}/${id}`), put: (k, id, v) => records.set(`${k}/${id}`, v), config: () => (selected === undefined ? {} : { agentProfiles: { claude: selected(home, appData) } }) };
   const agents = new AgentProfiles(store, { run, roots: { home, appData } });
-  return { agents, home, appData, broken, folder: name => path.join(home, '.config', `claude-${name}`) };
+  return { agents, home, appData, broken, who, calls, folder: name => path.join(home, '.config', `claude-${name}`) };
 }
 const rows = async agents => (await agents.overview({ refresh: true })).claude.profiles;
 const find = (list, folder) => list.find(item => item.profile && canonical(item.profile) === canonical(folder));
@@ -125,4 +129,62 @@ test('the automatic switch remembers which account a folder was on when its stat
   await rows(agents);
   agents.invalidate?.('claude'); agents.cache.clear(); broken.add(canonical(path.join(home, '.claude')));
   assert.equal(await agents.alternative('claude', ''), null, 'the copy is the same account the main one was last seen on');
+});
+
+test('Sign in again on a duplicate row only starts a hidden sign-in: nothing signs the folder out, and the page never calls sign-out', async () => {
+  const spawned = [];
+  const { agents, folder, calls } = setup({ main: 'me@example.com', copy: 'me@example.com' });
+  agents.spawnHidden = (command, args) => { spawned.push([command, ...args].join(' ')); return { on() {}, stdout: { on() {} }, stderr: { on() {} }, kill() {} }; };
+  await rows(agents);
+  const started = agents.login('claude', folder('copy'), { background: true });
+  assert.equal(started.background, true);
+  const script = spawned.map(line => { const coded = line.split(' ').pop(); try { return Buffer.from(coded, 'base64').toString('utf16le'); } catch { return line; } }).join(' ') + spawned.join(' ');
+  assert.ok(!/logout/i.test(script), 'the sign-in never runs logout');
+  assert.ok(!calls.some(line => /logout/.test(line)), 'no logout through the status runner either');
+  assert.deepEqual(agents.cancelLogin('claude'), { stopped: true });
+  const page = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
+  const flow = page.slice(page.indexOf("const login = event.target.closest('[data-acct-login]')"), page.indexOf("back.addEventListener('keydown'"));
+  assert.ok(flow.length > 500 && !flow.includes('/agents/signout'), 'the Sign in again flow never calls sign-out');
+});
+
+test('a sign-in is done only when it really finished: hidden job finished, newly signed in, or another account', () => {
+  assert.equal(signInDone({ hidden: true, job: { state: 'signing-in' }, now: { loggedIn: true, account: 'me@example.com' }, wasIn: true, was: 'me@example.com' }), false, 'never same account before the person finished');
+  assert.equal(signInDone({ hidden: true, job: { state: 'finished' }, now: { loggedIn: true, account: 'me@example.com' }, wasIn: true, was: 'me@example.com' }), true);
+  assert.equal(signInDone({ hidden: true, job: { state: 'failed' } }), false, 'a cancelled sign-in is no success');
+  assert.equal(signInDone({ now: { loggedIn: true, account: '' }, wasIn: false, was: '' }), true, 'Codex and Antigravity: signed out to signed in is enough');
+  assert.equal(signInDone({ now: { loggedIn: true, account: '' }, wasIn: true, was: '' }), false);
+  assert.equal(signInDone({ now: { loggedIn: true, account: 'b@example.com' }, wasIn: true, was: 'a@example.com' }), true);
+  assert.equal(signInDone({ now: { loggedIn: false }, wasIn: false }), false);
+});
+
+test('a signed-out account never blocks a copy that works: only a status that cannot be read uses the remembered account', async () => {
+  const { agents, who, home, folder } = setup({ main: 'me@example.com', copy: 'me@example.com' });
+  await rows(agents);
+  who.set(canonical(path.join(home, '.claude')), ''); agents.cache.clear();
+  const next = await agents.alternative('claude', '');
+  assert.equal(canonical(next.profile), canonical(folder('copy')), 'the main one says signed out, so its working copy is a replacement');
+});
+
+test('a limit keeps out the account it was hit on, even after that folder moves to another account', async () => {
+  const { agents, who, folder } = setup({ main: 'm@example.com', x: 'a@example.com', copya: 'a@example.com' });
+  await rows(agents);
+  agents.markLimited(folder('x')); agents.markLimited('');
+  who.set(canonical(folder('x')), 'b@example.com'); agents.cache.clear();
+  assert.equal(await agents.alternative('claude', ''), null, 'the copy of A is still kept out');
+});
+
+test('a limit hit on another account does not keep out the account the folder moved to', async () => {
+  const { agents, who, folder } = setup({ main: 'm@example.com', x: 'c@example.com', other: 'b@example.com' });
+  await rows(agents);
+  agents.markLimited(folder('x'));
+  who.set(canonical(folder('x')), 'b@example.com'); agents.cache.clear();
+  const next = await agents.alternative('claude', '');
+  assert.equal(canonical(next.profile), canonical(folder('other')));
+});
+
+test('an old saved limit without its account does not break the switch', async () => {
+  const { agents, folder } = setup({ main: 'm@example.com', x: 'a@example.com', work: 'b@example.com' });
+  agents.store.put('accounts', 'limited', { id: 'limited', until: { [canonical(folder('x'))]: Date.now() + 3600000 } });
+  const next = await agents.alternative('claude', '');
+  assert.ok(next && canonical(next.profile) !== canonical(folder('x')));
 });

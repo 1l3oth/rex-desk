@@ -1006,6 +1006,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/market' && request.method === 'GET') return json(response, 200, marketList(desk));
       if (url.pathname === '/api/market/switch' && request.method === 'POST') { const input = await body(request); setToolOff(store, String(input.agent || ''), String(input.key || ''), input.on === false); return json(response, 200, marketList(desk)); }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''), { background: input.background === true })); }
+      if (url.pathname === '/api/agents/login' && request.method === 'DELETE') return json(response, 200, desk.agents.cancelLogin(aiProvider(url.searchParams.get('provider') || 'claude')));
       if (url.pathname === '/api/agents/login' && request.method === 'GET') return json(response, 200, desk.agents.loginJob(aiProvider(url.searchParams.get('provider') || 'claude')));
       // OpenRouter key for agents (and Jev): checked with OpenRouter first, saved encrypted only when it works. Never echoed back.
       if (url.pathname === '/api/agents/openrouter-key' && request.method === 'POST') {

@@ -27,7 +27,7 @@ import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
 import { maybeStartTour, startTour } from '/chat-tour.js';
 import { maybeInstallGuide } from '/install-guide.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
-import { wireAgentCards } from '/chat-card.js';
+import { wireAgentCards, signInDone } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
 import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, speechPlaying, stopLive, outputLevel, welcome } from '/chat-speak.js';
 import { mountOrb } from '/voice-orb.js';
@@ -1714,7 +1714,7 @@ async function accountsDialog() {
       ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">${t`No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : t('Claude Code')} if this computer does not have it yet, and opens the sign-in in your browser.`}</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>${t`Not signed in`} <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
       ${name === 'gemini' ? `<p class="acct-one muted">${t`Antigravity keeps one Google account signed in on a computer. To use another one, sign out, then sign in with the other account.`}</p>` : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="${t`Name for the new account, like work or personal`}" aria-label="${t`Name for the new account`}"><button type="button" class="btn small primary" data-acct-create>${t`Create and sign in`}</button><button type="button" class="btn small" data-acct-cancel>${t`Cancel`}</button>` : `<button type="button" class="btn small" data-acct-new>${t`+ Add a ${short} account`}</button>`}</div>`}
-      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> ${t`Finish signing in to ${service} in the window that opened. This list updates by itself.`}</p>` : ''}
+      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> ${ui.acctHidden ? t`Finish signing in to ${service} in your browser. This list updates when you are done.` : t`Finish signing in to ${service} in the window that opened. This list updates by itself.`}${ui.acctJobUrl ? ` ${t`Browser did not open?`} <a href="${esc(ui.acctJobUrl)}" target="_blank" rel="noopener">${t`Open the sign-in page`}</a>` : ''} ${ui.acctHidden ? `<button type="button" class="or-link" data-acct-stop>${t`Stop waiting`}</button>` : ''}</p>` : ''}
       <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>${t`When an account hits its usage limit, switch to another signed-in one and continue`}</span></label>`}</div></div>
       <div class="acct-foot"><button type="button" class="btn quiet" data-acct-refresh>${t`Check again`}</button><button type="button" class="btn primary" data-close>${t`Done`}</button></div></form>`;
   };
@@ -1760,37 +1760,41 @@ async function accountsDialog() {
       } catch (error) { say(/working on this account right now/.test(error.message) ? t('An agent is working on this account right now. Wait until it finishes, or stop it, then remove the account.') : error.message, true); }
       await loadAccounts(true); await refresh(); draw(); return;
     }
+    // Stop waiting: a hidden sign-in is stopped too, and the earlier sign-in stays as it was.
+    if (event.target.closest('[data-acct-stop]')) { ui.acctWaiting = false; ui.acctJobUrl = ''; ui.acctHidden = false; await api(`/agents/login?provider=${tab()}`, { method: 'DELETE' }).catch(() => null); say(t('Stopped waiting. Your earlier sign-in is unchanged.')); draw(); return; }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = t('Checking…'); await loadAccounts(true); draw(); }
     if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
     const login = event.target.closest('[data-acct-login]'), create = event.target.closest('[data-acct-create]');
     if (login || create) {
       event.preventDefault(); const name = tab(), folder = value => String(value || '').replace(/\\/g, '/').toLowerCase(), rowOf = profile => (ui.accounts?.[name]?.profiles || []).find(item => folder(item.profile) === folder(profile));
-      // Sign in again on a row that is the same account as another one: that folder is signed out first, so the list can tell when
-      // the new sign-in is done and which account it went to (another email, or the same one again).
-      const again = login ? rowOf(login.dataset.acctLogin) : null;
-      if (again?.sameAs && name !== 'gemini') { try { await api('/agents/signout', { method: 'POST', data: { provider: name, profile: again.profile } }); await loadAccounts(true); } catch {} }
-      const was = again && rowOf(again.profile)?.loggedIn ? again.account || '' : '';
+      // Sign in again on a row that is the same account as another one: the folder keeps its sign-in (it may be the main account,
+      // shared with the CLI or Orca). The sign-in runs hidden, so its own end tells when the person finished: then the list shows
+      // which account it went to. Cancelled, failed or stopped, the earlier sign-in is left as it was.
+      const again = login ? rowOf(login.dataset.acctLogin) : null, hidden = Boolean(again?.sameAs);
+      const wasIn = Boolean(again?.loggedIn), was = again?.account || '';
       try {
         let started;
         if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; if (started?.restored) { say(t`This account was removed from Rex Desk before. Its earlier folder was found at ${started.profile}, so it is back.`); await loadAccounts(true); draw(); return; } }
-        else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
+        else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name, ...(hidden ? { background: true } : {}) } });
         if (started?.installing) toast(t('A sign-in window opened. It installs the tool first, then opens the browser.'));
-        ui.acctWaiting = true; await loadAccounts(true); draw();
+        ui.acctWaiting = true; ui.acctHidden = hidden; await loadAccounts(true); draw();
         // Sign-in happens in the browser; look again every few seconds for up to three minutes, or ten while the tool installs.
-        for (let tries = 0; tries < (started?.installing ? 200 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
+        // A hidden sign-in gives up by itself after fifteen minutes, so its wait is as long.
+        for (let tries = 0; tries < (started?.installing || hidden ? 300 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
+          const job = hidden ? await api(`/agents/login?provider=${name}`).catch(() => null) : null; ui.acctJobUrl = job?.url || '';
           await loadAccounts(true);
-          // Done when this folder is signed in to an account it was not on before (or at all, when it was signed out).
           const now = rowOf(login ? login.dataset.acctLogin : started?.profile);
-          if (now?.loggedIn && (now.account || '') !== was) {
+          if (job?.state === 'failed') { ui.acctWaiting = false; say(t`${job.error} Your earlier sign-in is unchanged.`, true); }
+          else if (signInDone({ hidden, job, now, wasIn, was })) {
             ui.acctWaiting = false;
-            if (now.sameAs) say(t`It signed in to ${now.account || now.sameAs.account || ''} again, the same account as another row. Sign out of it in your browser (or pick the other email when it asks), then press Sign in again.`, true);
+            if (now?.sameAs) say(t`It signed in to ${now.account || now.sameAs.account || ''} again, the same account as another row. Sign out of it in your browser (or pick the other email when it asks), then press Sign in again.`, true);
             else toast(t('Signed in. You can pick this account now.'));
           }
           if (document.body.contains(back)) draw();
         }
-        ui.acctWaiting = false; if (document.body.contains(back)) draw();
+        ui.acctWaiting = false; ui.acctJobUrl = ''; ui.acctHidden = false; if (document.body.contains(back)) draw();
       } catch (error) { ui.acctWaiting = false; toast(error.message, true); draw(); }
     }
   });

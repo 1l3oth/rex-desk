@@ -225,13 +225,13 @@ export class AgentProfiles {
   // Another signed-in account to move to when this one hits its usage limit. Accounts that hit theirs recently are skipped.
   async alternative(provider, current) {
     if (provider === 'openrouter') return null;
-    const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
+    const record = this.store.get('accounts', 'limited') || {}, limited = record.until || {}, key = value => canonical(value || '');
     // Another folder signed in to the same account (email and organisation) shares its limit. So the accounts kept out are the one
-    // that is out and every one still marked limited, each by the account it is signed in to, or the one it was last seen signed in
-    // to when its status cannot be read now.
-    const accountOf = async profile => accountKey(await this.status(provider, profile).catch(() => null)) || this.lastAccount(provider, profile);
-    const blocked = new Set([await accountOf(current)]);
-    for (const item of this.profiles(provider, { configured: current })) if ((limited[key(item.profile)] || 0) > Date.now()) blocked.add(await accountOf(item.profile));
+    // that is out (the one it was last seen on only when its status cannot be read, never when it says signed out) and the account
+    // each limit was hit on, saved with the limit (an older limit saved without one keeps out only its own folder).
+    const now = await this.status(provider, current).catch(() => null);
+    const blocked = new Set([accountKey(now) || (!now || (!now.loggedIn && now.error) ? this.lastAccount(provider, current) : '')]);
+    for (const [folder, until] of Object.entries(limited)) if (until > Date.now()) blocked.add(record.accounts?.[`${provider}:${folder}`] || '');
     blocked.delete('');
     for (const item of this.profiles(provider, { configured: current })) {
       if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
@@ -249,9 +249,11 @@ export class AgentProfiles {
     this.store.put('accounts', 'known', { ...record, of: { ...record.of, [`${provider}:${canonical(profile || '')}`]: account } });
   }
   // until: when the account's limit resets (from Claude's own usage report); 5 hours when that is not known.
-  markLimited(profile, until = 0) {
-    const record = this.store.get('accounts', 'limited') || { id: 'limited', until: {} };
-    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: until > Date.now() ? until : Date.now() + 5 * 3600000 } });
+  // The account the folder was on when the limit was hit is saved with it: the folder may sign in to another account later.
+  markLimited(profile, until = 0, provider = 'claude') {
+    const record = this.store.get('accounts', 'limited') || { id: 'limited', until: {} }, key = canonical(profile || ''), account = this.lastAccount(provider, profile);
+    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [key]: until > Date.now() ? until : Date.now() + 5 * 3600000 },
+      accounts: { ...record.accounts, [`${provider}:${key}`]: account } });
   }
   // The person chose this account: an earlier "limited" mark no longer keeps it out of the automatic switch.
   clearLimited(profile) {
@@ -413,6 +415,8 @@ export class AgentProfiles {
     this.invalidate(provider);
     return { started: true, installing: !found, background: true, profile, label: profileLabel(provider, profile) };
   }
+  // Stops a hidden sign-in still waiting. The CLI is ended before it saves a new sign-in, so the folder keeps the one it had.
+  cancelLogin(provider) { const job = this.jobs?.get(provider); if (!job || job.done) return { stopped: false }; job.done = true; job.state = 'failed'; job.error = 'Stopped.'; clearTimeout(job.timer); try { job.child?.kill(); } catch {} return { stopped: true }; }
   // How far the hidden sign-in of one AI got, without its output (it can hold an account name or a code).
   loginJob(provider) {
     const job = this.jobs?.get(provider);
