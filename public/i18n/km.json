@@ -2919,9 +2919,6 @@
  "To add a different account here, first sign out of {0} in your browser (or pick the other email when it asks), then press Sign in again.": "ដើម្បីបន្ថែមគណនីផ្សេងនៅទីនេះ សូមចាកចេញពី {0} ក្នុងកម្មវិធីរុករកជាមុនសិន (ឬជ្រើសអ៊ីមែលផ្សេងនៅពេលវាសួរ) រួចចុច «ចូលម្ដងទៀត»។",
  "That name is kept for the shared conversation history. Pick another name.": "ឈ្មោះនោះត្រូវបានរក្សាទុកសម្រាប់ប្រវត្តិសន្ទនារួម។ សូមជ្រើសឈ្មោះផ្សេង។",
  "Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at {0}.": "បានដកចេញពី Rex Desk តែប៉ុណ្ណោះ។ គ្មានអ្វីត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។",
- "It signed in to {0} again, the same account as another row. Sign out of it in your browser (or pick the other email when it asks), then press Sign in again.": "វាបានចូលទៅ {0} ម្ដងទៀត ដែលជាគណនីដូចគ្នានឹងជួរមួយទៀត។ សូមចាកចេញពីគណនីនោះក្នុងកម្មវិធីរុករក (ឬជ្រើសអ៊ីមែលផ្សេងនៅពេលវាសួរ) រួចចុច «ចូលម្ដងទៀត»។",
- "{0} Your earlier sign-in is unchanged.": "{0} ការចូលពីមុនរបស់អ្នកនៅដដែល។",
- "Stopped waiting. Your earlier sign-in is unchanged.": "បានឈប់រង់ចាំ។ ការចូលពីមុនរបស់អ្នកនៅដដែល។",
- "Stop waiting": "ឈប់រង់ចាំ",
- "Finish signing in to {0} in your browser. This list updates when you are done.": "សូមបញ្ចប់ការចូល {0} ក្នុងកម្មវិធីរុករករបស់អ្នក។ បញ្ជីនេះនឹងធ្វើបច្ចុប្បន្នភាពនៅពេលអ្នករួចរាល់។"
+ "This folder shows the same account as another row ({0}). To add a different account, sign out of it in your browser (or pick the other email when it asks), then press Sign in again.": "ថតនេះបង្ហាញគណនីដូចគ្នានឹងជួរមួយទៀត ({0})។ ដើម្បីបន្ថែមគណនីផ្សេង សូមចាកចេញពីគណនីនោះក្នុងកម្មវិធីរុករក (ឬជ្រើសអ៊ីមែលផ្សេងនៅពេលវាសួរ) រួចចុច «ចូលម្ដងទៀត»។",
+ "Signing in with another email replaces this folder's sign-in, also for other tools that use this folder.": "ការចូលដោយអ៊ីមែលផ្សេង នឹងជំនួសការចូលរបស់ថតនេះ រួមទាំងសម្រាប់ឧបករណ៍ផ្សេងទៀតដែលប្រើថតនេះផងដែរ។"
 }

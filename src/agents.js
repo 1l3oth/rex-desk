@@ -415,8 +415,6 @@ export class AgentProfiles {
     this.invalidate(provider);
     return { started: true, installing: !found, background: true, profile, label: profileLabel(provider, profile) };
   }
-  // Stops a hidden sign-in still waiting. The CLI is ended before it saves a new sign-in, so the folder keeps the one it had.
-  cancelLogin(provider) { const job = this.jobs?.get(provider); if (!job || job.done) return { stopped: false }; job.done = true; job.state = 'failed'; job.error = 'Stopped.'; clearTimeout(job.timer); try { job.child?.kill(); } catch {} return { stopped: true }; }
   // How far the hidden sign-in of one AI got, without its output (it can hold an account name or a code).
   loginJob(provider) {
     const job = this.jobs?.get(provider);

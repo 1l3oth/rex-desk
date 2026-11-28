@@ -131,26 +131,17 @@ test('the automatic switch remembers which account a folder was on when its stat
   assert.equal(await agents.alternative('claude', ''), null, 'the copy is the same account the main one was last seen on');
 });
 
-test('Sign in again on a duplicate row only starts a hidden sign-in: nothing signs the folder out, and the page never calls sign-out', async () => {
-  const spawned = [];
-  const { agents, folder, calls } = setup({ main: 'me@example.com', copy: 'me@example.com' });
-  agents.spawnHidden = (command, args) => { spawned.push([command, ...args].join(' ')); return { on() {}, stdout: { on() {} }, stderr: { on() {} }, kill() {} }; };
-  await rows(agents);
-  const started = agents.login('claude', folder('copy'), { background: true });
-  assert.equal(started.background, true);
-  const script = spawned.map(line => { const coded = line.split(' ').pop(); try { return Buffer.from(coded, 'base64').toString('utf16le'); } catch { return line; } }).join(' ') + spawned.join(' ');
-  assert.ok(!/logout/i.test(script), 'the sign-in never runs logout');
-  assert.ok(!calls.some(line => /logout/.test(line)), 'no logout through the status runner either');
-  assert.deepEqual(agents.cancelLogin('claude'), { stopped: true });
+test('Sign in again starts the same visible sign-in as on master: never a sign-out, never a hidden sign-in', () => {
   const page = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
   const flow = page.slice(page.indexOf("const login = event.target.closest('[data-acct-login]')"), page.indexOf("back.addEventListener('keydown'"));
-  assert.ok(flow.length > 500 && !flow.includes('/agents/signout'), 'the Sign in again flow never calls sign-out');
+  assert.ok(flow.length > 500);
+  assert.ok(!flow.includes('/agents/signout'), 'nothing is signed out');
+  assert.ok(!/background/.test(flow), 'no hidden sign-in');
+  assert.ok(flow.includes("api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } })"), 'the master call');
 });
 
-test('a sign-in is done only when it really finished: hidden job finished, newly signed in, or another account', () => {
-  assert.equal(signInDone({ hidden: true, job: { state: 'signing-in' }, now: { loggedIn: true, account: 'me@example.com' }, wasIn: true, was: 'me@example.com' }), false, 'never same account before the person finished');
-  assert.equal(signInDone({ hidden: true, job: { state: 'finished' }, now: { loggedIn: true, account: 'me@example.com' }, wasIn: true, was: 'me@example.com' }), true);
-  assert.equal(signInDone({ hidden: true, job: { state: 'failed' } }), false, 'a cancelled sign-in is no success');
+test('a sign-in counts as done only when the list shows a change: newly signed in, or another account', () => {
+  assert.equal(signInDone({ now: { loggedIn: true, account: 'me@example.com' }, wasIn: true, was: 'me@example.com' }), false, 'the same account is no success and no end');
   assert.equal(signInDone({ now: { loggedIn: true, account: '' }, wasIn: false, was: '' }), true, 'Codex and Antigravity: signed out to signed in is enough');
   assert.equal(signInDone({ now: { loggedIn: true, account: '' }, wasIn: true, was: '' }), false);
   assert.equal(signInDone({ now: { loggedIn: true, account: 'b@example.com' }, wasIn: true, was: 'a@example.com' }), true);

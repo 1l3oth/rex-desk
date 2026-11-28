@@ -42,11 +42,10 @@ function redraw(ctx) {
   if (!card) return; const agent = (ctx.ui.snap.specialists || []).find(item => item.id === current); if (!agent) return close();
   card.innerHTML = html(ctx, agent);
 }
-// Whether a sign-in from the AI accounts dialog is done. A hidden sign-in (Sign in again on a row that is the same account as
-// another) is done when its own job finished. Otherwise: the folder is signed in now and was not before, or is on another
-// account (Codex and Antigravity name no account, so for them signing in is enough).
-export const signInDone = ({ hidden = false, job = null, now = null, wasIn = false, was = '' }) =>
-  hidden ? job?.state === 'finished' : Boolean(now?.loggedIn && (!wasIn || (now.account || '') !== was));
+// Whether a sign-in from the AI accounts dialog is done, from what the list shows: the folder is signed in now and was not
+// before, or is on another account (Codex and Antigravity name no account, so for them signing in is enough).
+export const signInDone = ({ now = null, wasIn = false, was = '' }) => Boolean(now?.loggedIn && (!wasIn || (now.account || '') !== was));
+
 export function openAgentCard(ctx, agentId, anchor) {
   const agent = (ctx.ui.snap.specialists || []).find(item => item.id === agentId);
   if (!agent) return false;
