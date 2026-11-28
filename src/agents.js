@@ -201,6 +201,14 @@ export function parseClaudeStatus(output) {
 const CODE_ASKED = /paste (the |your )?(authori[sz]ation |sign-?in )?code|enter (the |your )?(authori[sz]ation |verification |sign-?in )?code|code here/i;
 const CODE_REFUSED = /invalid|expired|incorrect|not valid|wrong code|failed|error/i;
 const CODE_FAILED = 'The code may be wrong or too old. Start again to get a new code.';
+// Claude Code 2.1.330 turns a bad paste down with its own line and keeps waiting for another (its manual code entry): part of
+// the code, a web address, a short verification code, a local address, or a code from another sign-in. The field comes back.
+const CODE_PARTIAL = /doesn't look like the full code|not from this sign-in/i, CODE_WRONG_KIND = /that's a web address, not the code|looks like a verification code|that address only works in a browser on this machine/i;
+const CODE_AGAIN = 'That was only part of the code. Copy the whole code the browser page shows, including the # in the middle, and paste it again.';
+const CODE_NOT_IT = 'That is not the sign-in code. Copy the whole code the last browser page shows and paste it here.';
+// A sent code with no answer for this long: the field comes back, in case the paste never reached the sign-in.
+const CODE_QUIET_MS = 20000;
+const CODE_QUIET = 'Nothing came back yet. If the browser page still shows a code, paste the whole code again.';
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 // Which account a signed-in folder is: its email and organisation, or '' when not signed in or not known.
@@ -410,10 +418,13 @@ export class AgentProfiles {
       if (after !== undefined) {
         const since = job.codeSent ? after.slice(job.codeMark) : after;
         if (CODE_ASKED.test(since)) job.codeAsked = true;
-        if (job.codeSent && CODE_REFUSED.test(since)) job.codeError = true;
+        if (job.codeSent && (CODE_PARTIAL.test(since) || CODE_WRONG_KIND.test(since))) { job.codeSent = false; job.codeProblem = CODE_PARTIAL.test(since) ? CODE_AGAIN : CODE_NOT_IT; clearTimeout(job.quiet); }
+        else if (job.codeSent && CODE_REFUSED.test(since)) job.codeError = true;
       }
     };
     child.stdout?.on('data', read); child.stderr?.on('data', read);
+    // A sign-in that ended while a code was on its way: the write fails here instead of taking the server down; exit says why.
+    child.stdin?.on?.('error', () => { job.stdinClosed = true; });
     child.on('error', error => fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`));
     child.on('exit', code => {
       if (job.done) return;
@@ -431,15 +442,19 @@ export class AgentProfiles {
   // How far the hidden sign-in of one AI got, without its output (it can hold an account name or a code).
   loginJob(provider) {
     const job = this.jobs?.get(provider);
-    return job ? { provider, state: job.state, url: job.url, error: job.error || (job.codeError && !job.done ? CODE_FAILED : ''), at: job.at, codeAsked: Boolean(job.codeAsked), codeSent: Boolean(job.codeSent), codeError: Boolean(job.codeError) } : { provider, state: 'none' };
+    return job ? { provider, state: job.state, url: job.url, error: job.error || (job.codeError && !job.done ? CODE_FAILED : ''), at: job.at, codeAsked: Boolean(job.codeAsked), codeSent: Boolean(job.codeSent), codeError: Boolean(job.codeError), codeProblem: job.codeProblem || '' } : { provider, state: 'none' };
   }
   // The code the sign-in page shows, typed into the first-run screen, goes to the waiting sign-in. It is never kept or logged.
   sendLoginCode(provider, code) {
-    const job = this.jobs?.get(provider), text = String(code ?? '').trim();
-    if (!job || job.done || !job.child?.stdin?.writable) throw new Error('This sign-in has stopped. Start it again to get a new code.');
+    // A paste can pick up a tab or a line break (a code that wrapped where it was copied): a code has none, so they go.
+    const job = this.jobs?.get(provider), text = String(code ?? '').replace(/[\t\r\n]+/g, '').trim();
+    if (!job || job.done || job.stdinClosed || !job.child?.stdin?.writable) throw new Error('This sign-in has stopped. Start it again to get a new code.');
     if (!text || text.length > 2000 || /[\u0000-\u001f\u007f]/.test(text)) throw new Error('That does not look like a sign-in code. Copy the code the browser page shows and paste it here.');
-    job.codeMark = (job.output.split('REXDESK-SIGNIN-STARTS')[1] || '').length; job.codeSent = true; job.codeError = false;
+    job.codeMark = (job.output.split('REXDESK-SIGNIN-STARTS')[1] || '').length; job.codeSent = true; job.codeError = false; job.codeProblem = '';
     job.child.stdin.write(`${text}\n`);
+    clearTimeout(job.quiet);
+    job.quiet = setTimeout(() => { if (!job.done && job.codeSent && !job.codeError) { job.codeSent = false; job.codeProblem = CODE_QUIET; } }, CODE_QUIET_MS);
+    job.quiet.unref?.();
     return this.loginJob(provider);
   }
   // Cancel, back or another AI picked: the hidden sign-in stops, with every program it started.

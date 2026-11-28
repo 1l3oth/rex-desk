@@ -2927,5 +2927,11 @@
  "That code did not work": "លេខកូដនោះមិនដំណើរការទេ",
  "Checking the code…": "កំពុងពិនិត្យលេខកូដ…",
  "Start again": "ចាប់ផ្ដើមម្ដងទៀត",
- "Checking this computer…": "កំពុងពិនិត្យកុំព្យូទ័រនេះ…"
+ "Checking this computer…": "កំពុងពិនិត្យកុំព្យូទ័រនេះ…",
+ "Paste the code again": "បិទភ្ជាប់លេខកូដម្ដងទៀត",
+ "That was only part of the code. Copy the whole code the browser page shows, including the # in the middle, and paste it again.": "នោះគ្រាន់តែជាផ្នែកមួយនៃលេខកូដ។ ចម្លងលេខកូដទាំងមូលដែលទំព័រកម្មវិធីរុករកបង្ហាញ រួមទាំងសញ្ញា # នៅកណ្ដាល ហើយបិទភ្ជាប់វាម្ដងទៀត។",
+ "That is not the sign-in code. Copy the whole code the last browser page shows and paste it here.": "នោះមិនមែនជាលេខកូដចូលគណនីទេ។ ចម្លងលេខកូដទាំងមូលដែលទំព័រចុងក្រោយនៃកម្មវិធីរុករកបង្ហាញ ហើយបិទភ្ជាប់វានៅទីនេះ។",
+ "Nothing came back yet. If the browser page still shows a code, paste the whole code again.": "មិនទាន់មានចម្លើយត្រឡប់មកវិញនៅឡើយទេ។ ប្រសិនបើទំព័រកម្មវិធីរុករកនៅតែបង្ហាញលេខកូដ សូមបិទភ្ជាប់លេខកូដទាំងមូលម្ដងទៀត។",
+ "This sign-in has stopped. Start it again to get a new code.": "ការចូលគណនីនេះបានឈប់ហើយ។ ចាប់ផ្ដើមវាម្ដងទៀតដើម្បីទទួលបានលេខកូដថ្មី។",
+ "That does not look like a sign-in code. Copy the code the browser page shows and paste it here.": "នោះមើលទៅមិនដូចជាលេខកូដចូលគណនីទេ។ ចម្លងលេខកូដដែលទំព័រកម្មវិធីរុករកបង្ហាញ ហើយបិទភ្ជាប់វានៅទីនេះ។"
 }

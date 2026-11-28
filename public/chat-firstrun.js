@@ -46,11 +46,13 @@ function clip(step, ai) {
 
 // Some sign-ins end with a code on the browser page instead of coming back by themselves: the hidden sign-in asks for it, and
 // this one field sends it there. It shows once the sign-in may ask for it, under the waiting line, so a sign-in that comes
-// back by itself just finishes. A code the AI turned down says so, with Start again.
+// back by itself just finishes. A code the AI turned down says so, with Start again. A paste the AI could not take (part of the
+// code, a web address) or one with no answer for a while brings the field back for the same sign-in, with a plain line.
 const CODE_FAILED = 'The code may be wrong or too old. Start again to get a new code.';
 function codeBox(job) {
   if (job.state !== 'signing-in' || !(job.codeAsked || job.url) || (job.codeSent && !job.codeError)) return '';
-  return `${job.codeError ? `<div class="fr-error" role="alert"><b>${t`That code did not work`}</b><span>${t(CODE_FAILED)}</span></div>` : ''}
+  const problem = job.sendError || job.codeProblem;
+  return `${job.codeError ? `<div class="fr-error" role="alert"><b>${t`That code did not work`}</b><span>${t(CODE_FAILED)}</span></div>` : problem ? `<div class="fr-error" role="alert"><b>${t`Paste the code again`}</b><span>${t(problem)}</span></div>` : ''}
     <form class="fr-code" data-fr-codeform><label class="fr-code-label" for="fr-code">${t`Paste the code here`}</label>
     <div class="fr-key"><input id="fr-code" name="code" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2000" required><button type="submit" class="btn primary">${t`Send`}</button></div>
     <p class="fr-hint">${t`If the browser page shows a code, copy it and paste it here.`}</p></form>`;
@@ -109,11 +111,12 @@ export async function firstRunSubmit(ctx, state, form, draw, { load, finish }) {
   const fr = state.fr; if (!fr) return false;
   if (form.matches('[data-fr-codeform]')) {
     // The code goes to the waiting sign-in; the look every few seconds (follow) then sees it finish or turn the code down.
-    const input = form.querySelector('input[name=code]'), code = input.value.trim(); input.value = '';
+    // A tab or line break picked up with the paste goes; a code has none.
+    const input = form.querySelector('input[name=code]'), code = input.value.replace(/[\t\r\n]+/g, '').trim(); input.value = '';
     if (!code || !fr.job) return true;
-    try { fr.job = { ...fr.job, ...(await ctx.api('/agents/login/code', { method: 'POST', data: { provider: fr.ai, code } })) }; }
-    catch (error) { fr.job = { ...fr.job, state: 'failed', error: error.message, codeSent: false }; }
-    draw(); return true;
+    try { fr.job = { ...fr.job, ...(await ctx.api('/agents/login/code', { method: 'POST', data: { provider: fr.ai, code } })), sendError: '' }; }
+    catch (error) { fr.job = { ...fr.job, codeSent: false, sendError: error.message }; }
+    fr.shown = ''; draw(); return true;
   }
   if (!form.matches('[data-fr-keyform]')) return false;
   const input = form.querySelector('input[name=key]'), key = input.value.trim(); input.value = '';
@@ -132,8 +135,8 @@ export async function firstRunClick(ctx, state, target, draw, { load, finish, al
   const pick = target.closest('[data-fr-pick]');
   if (pick) {
     // Picked (again): the accounts are looked at anew, never an old answer or a sign-in that failed before.
-    cancel(fr, api); fr.ai = pick.dataset.frPick; fr.job = { state: 'starting', url: '', checking: true }; fr.step = 'signin'; draw();
-    await load().catch(() => {}); if (!alive()) return true;
+    cancel(fr, api); const token = fr.token; fr.ai = pick.dataset.frPick; fr.job = { state: 'starting', url: '', checking: true }; fr.step = 'signin'; draw();
+    await load().catch(() => {}); if (!alive() || fr.token !== token) return true;
     fr.job = null; fr.step = ready(ui, state, AIS.find(item => item.id === fr.ai)) ? 'done' : 'signin'; draw();
     if (fr.step === 'done') await connected(ctx, state, draw, finish);
     return true;
@@ -176,17 +179,18 @@ export async function firstRunClick(ctx, state, target, draw, { load, finish, al
 }
 // Stops following, and stops the hidden sign-in on the server with everything it started (no program is left waiting).
 function cancel(fr, api) {
-  if (api && fr.ai && fr.job && ['starting', 'installing', 'signing-in'].includes(fr.job.state) && !fr.job.checking) void api('/agents/login/cancel', { method: 'POST', data: { provider: fr.ai } }).catch(() => {});
+  if (api && fr.ai && fr.job && !fr.job.checking) void api('/agents/login/cancel', { method: 'POST', data: { provider: fr.ai } }).catch(() => {});
   fr.job = null; fr.token = (fr.token || 0) + 1;
 }
 
 // Looks every few seconds until the AI is signed in, the hidden sign-in fails, or the person cancels.
 async function follow(ctx, state, draw, { load, finish, alive, hidden }) {
   const { api } = ctx, fr = state.fr, token = fr.token = (fr.token || 0) + 1, id = fr.ai, still = () => alive() && fr.token === token && fr.ai === id && fr.step === 'signin';
-  let finishedChecks = 0, shown = '';
+  let finishedChecks = 0; fr.shown = '';
   // Drawn only when something changed, and a code half typed in the field stays there.
   const redraw = () => {
-    const sig = JSON.stringify([fr.job, fr.step]); if (sig === shown) return; shown = sig;
+    // fr.shown is what the page shows: a Send drawn in between clears it, so the next look always draws the server's answer.
+    const sig = JSON.stringify([fr.job, fr.step]); if (sig === fr.shown) return; fr.shown = sig;
     const box = document.getElementById('fr-code'), value = box?.value || '', focused = box && document.activeElement === box;
     draw();
     const again = document.getElementById('fr-code'); if (again && value) again.value = value; if (again && focused) again.focus();
@@ -194,7 +198,7 @@ async function follow(ctx, state, draw, { load, finish, alive, hidden }) {
   for (let tries = 0; tries < 400 && still(); tries++) {
     await sleep(3000); if (!still()) return;
     const job = hidden ? await api(`/agents/login?provider=${id}`).catch(() => null) : null;
-    if (job && job.state !== 'none' && fr.job) fr.job = { ...fr.job, ...job };
+    if (job && job.state !== 'none' && fr.job) fr.job = { ...fr.job, ...job, sendError: job.codeSent || job.state !== 'signing-in' ? '' : fr.job.sendError };
     await load();
     if (!still()) return;
     if (aiReady(ctx.ui, id)) { fr.step = 'done'; draw(); await connected(ctx, state, draw, finish); return; }
