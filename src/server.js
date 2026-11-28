@@ -1007,6 +1007,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/market/switch' && request.method === 'POST') { const input = await body(request); setToolOff(store, String(input.agent || ''), String(input.key || ''), input.on === false); return json(response, 200, marketList(desk)); }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''), { background: input.background === true })); }
       if (url.pathname === '/api/agents/login' && request.method === 'GET') return json(response, 200, desk.agents.loginJob(aiProvider(url.searchParams.get('provider') || 'claude')));
+      // The code the sign-in page shows goes to the hidden first-run sign-in (never kept or logged); Cancel stops that sign-in.
+      if (url.pathname === '/api/agents/login/code' && request.method === 'POST') { const input = await body(request); try { return json(response, 200, desk.agents.sendLoginCode(aiProvider(input.provider || 'claude'), input.code)); } catch (error) { return json(response, 400, { error: error.message }); } }
+      if (url.pathname === '/api/agents/login/cancel' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.cancelLogin(aiProvider(input.provider || 'claude'))); }
       // OpenRouter key for agents (and Jev): checked with OpenRouter first, saved encrypted only when it works. Never echoed back.
       if (url.pathname === '/api/agents/openrouter-key' && request.method === 'POST') {
         const key = String((await body(request)).key || '').trim();

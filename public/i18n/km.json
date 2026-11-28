@@ -2920,5 +2920,12 @@
  "That name is kept for the shared conversation history. Pick another name.": "ឈ្មោះនោះត្រូវបានរក្សាទុកសម្រាប់ប្រវត្តិសន្ទនារួម។ សូមជ្រើសឈ្មោះផ្សេង។",
  "Removed from Rex Desk only. Nothing was deleted: its folder, with its chats and sign-in, stays at {0}.": "បានដកចេញពី Rex Desk តែប៉ុណ្ណោះ។ គ្មានអ្វីត្រូវបានលុបទេ៖ ថតរបស់វា រួមទាំងការសន្ទនា និងការចូល នៅដដែលនៅ {0}។",
  "This folder shows the same account as another row ({0}). To add a different account, sign out of it in your browser (or pick the other email when it asks), then press Sign in again.": "ថតនេះបង្ហាញគណនីដូចគ្នានឹងជួរមួយទៀត ({0})។ ដើម្បីបន្ថែមគណនីផ្សេង សូមចាកចេញពីគណនីនោះក្នុងកម្មវិធីរុករក (ឬជ្រើសអ៊ីមែលផ្សេងនៅពេលវាសួរ) រួចចុច «ចូលម្ដងទៀត»។",
- "Signing in with another email replaces this folder's sign-in, also for other tools that use this folder.": "ការចូលដោយអ៊ីមែលផ្សេង នឹងជំនួសការចូលរបស់ថតនេះ រួមទាំងសម្រាប់ឧបករណ៍ផ្សេងទៀតដែលប្រើថតនេះផងដែរ។"
+ "Signing in with another email replaces this folder's sign-in, also for other tools that use this folder.": "ការចូលដោយអ៊ីមែលផ្សេង នឹងជំនួសការចូលរបស់ថតនេះ រួមទាំងសម្រាប់ឧបករណ៍ផ្សេងទៀតដែលប្រើថតនេះផងដែរ។",
+ "Paste the code here": "បិទភ្ជាប់លេខកូដនៅទីនេះ",
+ "If the browser page shows a code, copy it and paste it here.": "បើទំព័រកម្មវិធីរុករកបង្ហាញលេខកូដ សូមចម្លងវា ហើយបិទភ្ជាប់នៅទីនេះ។",
+ "The code may be wrong or too old. Start again to get a new code.": "លេខកូដប្រហែលជាខុស ឬចាស់ពេក។ សូមចាប់ផ្ដើមម្ដងទៀតដើម្បីទទួលបានលេខកូដថ្មី។",
+ "That code did not work": "លេខកូដនោះមិនដំណើរការទេ",
+ "Checking the code…": "កំពុងពិនិត្យលេខកូដ…",
+ "Start again": "ចាប់ផ្ដើមម្ដងទៀត",
+ "Checking this computer…": "កំពុងពិនិត្យកុំព្យូទ័រនេះ…"
 }

@@ -1921,6 +1921,7 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .fr-actions{display:flex;flex-wrap:wrap;gap:8px}
 .fr-wait{display:flex;align-items:center;gap:8px;font-size:13.5px}
 .fr-hint{font-size:13px;color:var(--muted)}
+.fr-code{margin-top:12px}.fr-code .fr-key{margin:0 0 6px}.fr-code-label{display:block;font-size:13px;font-weight:600;margin:0 0 6px}
 .fr-error{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--bad,#dc2626) 45%,var(--line));border-radius:8px;background:color-mix(in srgb,var(--bad,#dc2626) 8%,transparent);font-size:13.5px}
 .fr-error b{color:var(--bad,#dc2626)}
 .tour-connect{width:min(680px,calc(100vw - 24px))}

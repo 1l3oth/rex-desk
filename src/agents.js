@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolveCommand } from './processes.js';
+import { resolveCommand, stopTree } from './processes.js';
 import { agyCommand, antigravityMcpInstalled, parseAgyModels } from './antigravity.js';
 import { checkOpenRouterKey, openrouterEnvironment, openrouterHome } from './openrouter.js';
 
@@ -197,13 +197,17 @@ export function parseClaudeStatus(output) {
 }
 
 // Where each AI program sends people to sign in.
+// A sign-in asking for the code its page shows, and a sign-in turning a sent code down.
+const CODE_ASKED = /paste (the |your )?(authori[sz]ation |sign-?in )?code|enter (the |your )?(authori[sz]ation |verification |sign-?in )?code|code here/i;
+const CODE_REFUSED = /invalid|expired|incorrect|not valid|wrong code|failed|error/i;
+const CODE_FAILED = 'The code may be wrong or too old. Start again to get a new code.';
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 // Which account a signed-in folder is: its email and organisation, or '' when not signed in or not known.
 export const accountKey = status => status?.loggedIn && status.account ? `${String(status.account).toLowerCase()}|${status.organization || ''}` : '';
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound } = {}) { this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, stopProcessTree = stopTree, checkKey = checkOpenRouterKey, openWindow = null, roots = { home }, found = cliFound } = {}) { this.openWindow = openWindow; this.roots = roots; this.found = found; this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.stopTree = child => { try { stopProcessTree(child); } catch {} }; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // The OpenRouter key: the one saved in Settings (encrypted, shared with Jev), else OPENROUTER_API_KEY from the launch environment.
   openrouterKey() { const saved = this.store.get?.('secret', 'openrouter'); try { return saved ? this.store.decrypt(saved) : process.env.OPENROUTER_API_KEY || ''; } catch { return ''; } }
   withKey(provider, env) { return provider === 'openrouter' ? openrouterEnvironment(env, this.openrouterKey(), this.store.directory ? openrouterHome(this.store.directory) : '') : env; }
@@ -362,7 +366,7 @@ export class AgentProfiles {
   }
   loginHidden({ provider, profile, executable, found, install, name, env, args }) {
     this.jobs ||= new Map();
-    const old = this.jobs.get(provider); if (old?.child && !old.done) { old.done = true; clearTimeout(old.timer); try { old.child.kill(); } catch {} }
+    const old = this.jobs.get(provider); if (old?.child && !old.done) { old.done = true; clearTimeout(old.timer); this.stopTree(old.child); }
     const MARK = 'REXDESK-SIGNIN-STARTS';
     let command, commandArgs;
     if (process.platform === 'win32') {
@@ -384,8 +388,9 @@ export class AgentProfiles {
     this.jobs.set(provider, job);
     const fail = message => { if (job.done) return; job.done = true; job.state = 'failed'; job.error = message; clearTimeout(job.timer); this.invalidate(provider); };
     let child;
-    // stdin stays open: a CLI that cannot open the browser waits for a pasted code instead of quitting at once.
-    try { child = this.spawnHidden(command, commandArgs, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (error) { fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`); return { started: false, background: true, profile, ...this.loginJob(provider) }; }
+    // stdin stays open: a CLI that cannot finish through the browser by itself asks for the code the page shows, and the
+    // first-run screen sends it there (sendLoginCode). Its own process group off Windows, so Cancel stops all of it.
+    try { child = this.spawnHidden(command, commandArgs, { env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] }); } catch (error) { fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`); return { started: false, background: true, profile, ...this.loginJob(provider) }; }
     job.child = child;
     const read = chunk => {
       job.output = (job.output + String(chunk)).slice(-6000);
@@ -400,6 +405,13 @@ export class AgentProfiles {
           if ((SIGN_IN_HOSTS[provider] || []).some(known => host === known || host.endsWith(`.${known}`))) { job.url = link; break; }
         }
       }
+      // The CLI asks for the code the sign-in page shows (Claude Code: "Paste code here if prompted", Antigravity: "Enter the
+      // authorization code"). After a code was sent, a complaint about it means it was wrong or too old.
+      if (after !== undefined) {
+        const since = job.codeSent ? after.slice(job.codeMark) : after;
+        if (CODE_ASKED.test(since)) job.codeAsked = true;
+        if (job.codeSent && CODE_REFUSED.test(since)) job.codeError = true;
+      }
     };
     child.stdout?.on('data', read); child.stderr?.on('data', read);
     child.on('error', error => fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`));
@@ -407,10 +419,11 @@ export class AgentProfiles {
       if (job.done) return;
       if (code === 0) { job.done = true; job.state = 'finished'; clearTimeout(job.timer); this.invalidate(provider); return; }
       if (job.output.includes('REXDESK-INSTALL-FAILED') || job.state === 'installing') fail(`${name} could not be installed. Check that this computer is online, then try again.`);
+      else if (job.codeSent) fail(CODE_FAILED);
       else fail(`The ${name} sign-in did not finish. Try again, and finish it in the browser page that opens.`);
     });
-    // Nobody finished it in fifteen minutes: stop waiting.
-    job.timer = setTimeout(() => { if (!job.done) { try { child.kill(); } catch {} fail(`The ${name} sign-in waited too long. Try again when you are ready.`); } }, 15 * 60000);
+    // Nobody finished it in fifteen minutes: stop waiting, and stop the sign-in with everything it started.
+    job.timer = setTimeout(() => { if (!job.done) { this.stopTree(child); fail(`The ${name} sign-in waited too long. Try again when you are ready.`); } }, 15 * 60000);
     job.timer.unref?.();
     this.invalidate(provider);
     return { started: true, installing: !found, background: true, profile, label: profileLabel(provider, profile) };
@@ -418,7 +431,22 @@ export class AgentProfiles {
   // How far the hidden sign-in of one AI got, without its output (it can hold an account name or a code).
   loginJob(provider) {
     const job = this.jobs?.get(provider);
-    return job ? { provider, state: job.state, url: job.url, error: job.error, at: job.at } : { provider, state: 'none' };
+    return job ? { provider, state: job.state, url: job.url, error: job.error || (job.codeError && !job.done ? CODE_FAILED : ''), at: job.at, codeAsked: Boolean(job.codeAsked), codeSent: Boolean(job.codeSent), codeError: Boolean(job.codeError) } : { provider, state: 'none' };
+  }
+  // The code the sign-in page shows, typed into the first-run screen, goes to the waiting sign-in. It is never kept or logged.
+  sendLoginCode(provider, code) {
+    const job = this.jobs?.get(provider), text = String(code ?? '').trim();
+    if (!job || job.done || !job.child?.stdin?.writable) throw new Error('This sign-in has stopped. Start it again to get a new code.');
+    if (!text || text.length > 2000 || /[\u0000-\u001f\u007f]/.test(text)) throw new Error('That does not look like a sign-in code. Copy the code the browser page shows and paste it here.');
+    job.codeMark = (job.output.split('REXDESK-SIGNIN-STARTS')[1] || '').length; job.codeSent = true; job.codeError = false;
+    job.child.stdin.write(`${text}\n`);
+    return this.loginJob(provider);
+  }
+  // Cancel, back or another AI picked: the hidden sign-in stops, with every program it started.
+  cancelLogin(provider) {
+    const job = this.jobs?.get(provider);
+    if (job && !job.done) { job.done = true; job.state = 'canceled'; clearTimeout(job.timer); this.stopTree(job.child); this.invalidate(provider); }
+    return this.loginJob(provider);
   }
   // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
   // one, so an agent keeps its conversation when it moves between accounts.
